@@ -10,7 +10,7 @@ import type { InstallationConfig } from "@/config/installation-schema";
 import { companyMailAttachmentParts, companyMailClientOptions, downloadCompanyMailAttachment, MAX_MAIL_ATTACHMENT_BYTES } from "./company-mail-client";
 import { parseCompanyMailCredential, validMailDate } from "./company-mail-contracts";
 import { FileCompanyMailStore, companyMailEncryptionKey } from "./company-mail-store";
-import { importCompanyMailInvoices, invoiceLedgerForMailbox, mailboxIdentity, mailInvoiceWorkbook, parseMailInvoiceReview, recordMailInvoiceReview, refreshMailInvoiceWorkbook } from "./company-mail-invoices";
+import { importCompanyMailInvoices, invoiceLedgerForMailbox, mailboxIdentity, mailInvoiceChangesForDay, mailInvoiceWorkbook, parseMailInvoiceReview, recordMailInvoiceReview, refreshMailInvoiceWorkbook } from "./company-mail-invoices";
 import { validateUploadedDocument } from "@/documents/upload-validation";
 import JSZip from "jszip";
 
@@ -133,9 +133,16 @@ describe("durable local invoice import", () => {
     expect(first.remainingMessages).toBe(0); expect(first.deferredMessages).toBe(1);
     download.mockImplementation(original);
     expect((await importCompanyMailInvoices({ client: imap, credential, store: ledger })).imported).toHaveLength(0);
-    vi.setSystemTime(new Date("2026-10-06T12:00:01Z"));
+    vi.setSystemTime(new Date("2026-10-07T12:00:01Z"));
     expect((await importCompanyMailInvoices({ client: imap, credential, store: ledger })).imported).toHaveLength(1);
     const final = await ledger.read(); expect(final.entries).toHaveLength(2); expect(final.entries.every(e => !e.errorCode)).toBe(true);
+    expect(final.entries[0].importedAt).toBe("2026-10-06T10:00:00.000Z");
+    expect(final.entries[1].importedAt).toBe("2026-10-07T12:00:01.000Z");
+    expect(final.entries[1].updatedAt).toBe("2026-10-07T12:00:01.000Z");
+    expect(mailInvoiceChangesForDay(final.entries, "2026-10-07").map(e => e.id)).toEqual([final.entries[1].id]);
+    const changedAtMidnight = { ...final.entries[0], updatedAt: "2026-10-07T22:01:00.000Z" };
+    expect(mailInvoiceChangesForDay([changedAtMidnight], "2026-10-08")).toHaveLength(1);
+    expect(mailInvoiceChangesForDay([changedAtMidnight], "2026-10-07")).toHaveLength(0);
   });
   it("does not starve new invoices behind more than 100 messages waiting for retry", async () => {
     vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-10-06T10:00:00Z"));

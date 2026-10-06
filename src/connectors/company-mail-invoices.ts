@@ -13,12 +13,16 @@ import { MAIL_HASH, MAIL_UUID, privateMailDirectory } from "./company-mail-store
 export type InvoiceReviewStatus = "pending" | "reviewed" | "needs_attention" | "ignored";
 export type MailInvoiceEntry = {
   id: string; receipt: string; messageKey: string; uid: number; fileName: string; mediaType: string;
-  sha256: string | null; size: number; receivedAt: string | null; importedAt: string;
+  sha256: string | null; size: number; receivedAt: string | null; importedAt: string; updatedAt?: string;
   subject: string; sender: string; status: InvoiceReviewStatus; note: string;
   invoiceNumber: string; supplier: string; amount: string; currency: string;
   duplicateOf: string | null; errorCode: string | null; reviewedAt: string | null; attempts: number; retryAt: string | null;
 };
 export type MailInvoiceLedger = { schemaVersion: 1; installationId: string; userId: string; projectId: string; mailboxKey: string; processedMessages: string[]; deferredMessages?: Record<string, string>; entries: MailInvoiceEntry[] };
+const madridDay = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" });
+export function mailInvoiceChangesForDay(entries: MailInvoiceEntry[], day: string) {
+  return entries.filter(e => [e.importedAt, e.reviewedAt, e.updatedAt].some(value => value && madridDay.format(new Date(value)) === day));
+}
 export function mailHash(value: string | Buffer) { return createHash("sha256").update(value).digest("hex"); }
 export function mailboxIdentity(host: string, credential: CompanyMailCredential) { return mailHash(`${host}\0${credential.email}\0${credential.folder}`); }
 const LEDGER_LIMIT = 20_000;
@@ -114,6 +118,7 @@ export async function importCompanyMailInvoices(input: { client: ImapFlow; crede
         status: "pending", note: "", invoiceNumber: "", supplier: "", amount: "", currency: "", duplicateOf: null, errorCode: null, reviewedAt: null, attempts: 0, retryAt: null,
       };
       base.attempts += 1;
+      base.updatedAt = new Date().toISOString();
       try {
         base.fileName = safeFileName(part.name);
         if (!SUPPORTED.test(part.name)) {
@@ -139,6 +144,9 @@ export async function importCompanyMailInvoices(input: { client: ImapFlow; crede
             base.status = "pending"; base.note = "Adjunto importado, comprobación de factura pendiente.";
             outputs.push(base);
           }
+          // A successful retry belongs to today's import, rather than the date
+          // of its first failed download. Existing successful receipts skip it.
+          base.importedAt = new Date().toISOString();
         }
         base.errorCode = null; base.retryAt = null;
       } catch (error) {
@@ -193,7 +201,8 @@ export async function recordMailInvoiceReview(store: FileMailInvoiceLedger, revi
   const entry = ledger.entries.find(e => e.id === review.id);
   if (!entry || !entry.sha256 || entry.errorCode || entry.duplicateOf) throw new CompanyMailError("MAIL_REVIEW_UNAVAILABLE", "Importa y lee el original antes de registrar una revisión.");
   await store.original(entry);
-  Object.assign(entry, review, { reviewedAt: new Date().toISOString() });
+  const updatedAt = new Date().toISOString();
+  Object.assign(entry, review, { reviewedAt: updatedAt, updatedAt });
   await store.write(ledger);
   return entry;
 }
