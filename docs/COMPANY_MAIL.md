@@ -52,6 +52,9 @@ la interfaz web del correo; la conexión se hace al servidor IMAP subyacente.
 5. Ejecutar preflight del host y comprobar salud de los tres servicios.
    El preflight requiere que host y clave estén presentes cuando el conector
    está activo. Probar el certificado desde la red real del gateway.
+   Su parser devuelve un `Map`: obtener allowlist y clave mediante `.get()`.
+   La integración de preflight cubre configuración habilitada válida y fallos
+   por host ausente, host privado o clave ausente, corta o no canónica.
 6. El cliente conecta en Ajustes: `factures@arnall.cat`, contraseña de buzón
    (o contraseña de aplicación admitida por su proveedor), carpeta exacta y
    fecha inicial. La prueba real usa login y EXAMINE de esa carpeta antes de
