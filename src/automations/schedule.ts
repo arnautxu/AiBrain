@@ -101,6 +101,12 @@ export function nextScheduledInstant(
   timeZone: string,
   after: Date,
 ): string | null {
+  if (schedule.kind === "interval") {
+    const anchor = Date.parse(schedule.anchorAt);
+    const duration = schedule.minutes * 60_000;
+    const occurrence = Math.max(0, Math.floor((after.getTime() - anchor) / duration) + 1);
+    return new Date(anchor + occurrence * duration).toISOString();
+  }
   if (schedule.kind === "once") {
     return new Date(schedule.runAt).getTime() > after.getTime() ? schedule.runAt : null;
   }
@@ -125,6 +131,7 @@ export function nextAfterOccurrence(
 }
 
 export function describeSchedule(schedule: AutomationSchedule, timeZone: string) {
+  if (schedule.kind === "interval") return schedule.minutes % 60 === 0 ? `Cada ${schedule.minutes / 60} horas` : `Cada ${schedule.minutes} minutos`;
   if (schedule.kind === "once") {
     return `Una vez · ${new Intl.DateTimeFormat("es-ES", { dateStyle: "medium", timeStyle: "short", timeZone }).format(new Date(schedule.runAt))}`;
   }

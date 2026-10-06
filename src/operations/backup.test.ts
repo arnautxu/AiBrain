@@ -86,6 +86,26 @@ afterEach(async () => {
 });
 
 describe("FileBackupService", () => {
+  it("backs up mailbox invoices and their journal but excludes encrypted credentials on restore", async () => {
+    const { root, dataRoot, service } = await fixture();
+    const account = "server/company-mail/synthetic-company-qa/00000000-0000-4000-8000-000000000001";
+    const invoices = `${account}/invoices/project/mailbox`;
+    await mkdir(path.join(dataRoot, account, "credentials"), { recursive: true });
+    await mkdir(path.join(dataRoot, invoices, "originals"), { recursive: true });
+    await writeFile(path.join(dataRoot, account, "credentials/opaque.json"), "encrypted-password");
+    await writeFile(path.join(dataRoot, invoices, "ledger.json"), "durable-journal");
+    await writeFile(path.join(dataRoot, invoices, "originals/hash"), "invoice-original");
+    await writeFile(path.join(dataRoot, invoices, "facturas.xlsx"), "tracking-workbook");
+    const created = await service.create();
+    expect(created.manifest.files.map(f => f.path)).toEqual(expect.arrayContaining([`${invoices}/ledger.json`, `${invoices}/originals/hash`, `${invoices}/facturas.xlsx`]));
+    expect(created.manifest.files.some(f => f.path.includes("credentials"))).toBe(false);
+    const restoredRoot = path.join(root, "restored-mail-data");
+    await service.restore(created.snapshotRoot, { dataRoot: restoredRoot, publishWriteRoot: path.join(root, "restored-mail-publish") });
+    expect(await readFile(path.join(restoredRoot, invoices, "ledger.json"), "utf8")).toBe("durable-journal");
+    expect(await readFile(path.join(restoredRoot, invoices, "originals/hash"), "utf8")).toBe("invoice-original");
+    await expect(lstat(path.join(restoredRoot, account, "credentials"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("excludes regenerated runtime links and recovery credentials but retains runtime history", async () => {
     const { dataRoot, service } = await fixture();
     for (const relative of ["app-home/.codex/tmp", "auth-recovery-test/tmp", "users/user-one/runtime/codex-home/tmp", "users/user-one/browser/xdg"]) {

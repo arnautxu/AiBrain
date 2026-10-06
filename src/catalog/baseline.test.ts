@@ -25,6 +25,7 @@ describe("installation catalog baseline", () => {
       publishWriteRoot: path.join(root, "publish-rw"),
       backupsRoot: path.join(root, "data/backups"),
     };
+    fixture.connectors = { ...(fixture.connectors as object), companyMail: { enabled: true, host: "hc65.infoselfcloud.com", emailDomain: "arnall.cat" } };
     const installation = parseInstallationConfig(fixture);
     const state = await ensureInstallationCatalog(
       new FileCatalogStore(installation.installationId, installation.paths.dataRoot),
@@ -32,10 +33,12 @@ describe("installation catalog baseline", () => {
     );
 
     expect(state.resources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "company-mail", credentialMode: "personal-credential", sharedResource: false }),
       expect.objectContaining({ id: "gmail", credentialMode: "personal-oauth", connectorId: "gmail" }),
       expect.objectContaining({ id: "outlook", credentialMode: "personal-oauth", connectorId: "outlook" }),
     ]));
     expect(state.rules).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "installation-company-mail", effect: "allow", operations: ["read"] }),
       expect.objectContaining({ id: "installation-gmail", effect: "allow", operations: ["read"] }),
       expect.objectContaining({ id: "installation-outlook", effect: "allow", operations: ["read"] }),
     ]));

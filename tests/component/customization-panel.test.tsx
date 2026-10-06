@@ -28,6 +28,29 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState(
 beforeEach(() => { Object.defineProperty(window, "matchMedia", { configurable: true, value: vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })) }); });
 
 describe("CustomizationPanel", () => {
+  it("connects company mail inside settings and clears the password before awaiting verification", async () => {
+    const snapshot = settings(false);
+    snapshot.connectors = [{ ...snapshot.connectors[0], id: "company-mail", label: "Correo de empresa", connectUrl: "/api/connectors/company-mail/connect" }];
+    let submitted: unknown = null;
+    let resolveConnect: (response: Response) => void = () => undefined;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/settings") return Response.json(snapshot);
+      submitted = JSON.parse(String(init?.body));
+      return new Promise<Response>(resolve => { resolveConnect = resolve; });
+    }));
+    render(<ThemeProvider><CustomizationPanel productName="Arnall AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Conectar Correo de empresa" }));
+    fireEvent.change(screen.getByLabelText("Correo de empresa"), { target: { value: "factures@arnall.cat" } });
+    const password = screen.getByLabelText("Contraseña del buzón");
+    fireEvent.change(password, { target: { value: "private-password" } });
+    fireEvent.change(screen.getByLabelText("Importar desde", { exact: false }), { target: { value: "2026-10-01" } });
+    fireEvent.submit(screen.getByRole("form", { name: "Conectar correo de empresa" }));
+    expect(password).toHaveValue("");
+    expect(submitted).toEqual({ email: "factures@arnall.cat", password: "private-password", folder: "INBOX", since: "2026-10-01" });
+    resolveConnect(Response.json({ status: "connected" }));
+    await waitFor(() => expect(screen.queryByRole("form", { name: "Conectar correo de empresa" })).not.toBeInTheDocument());
+  });
+
   it.each([false, true])("hides usage from employees and administrators (administrator=%s)", async (isAdmin) => {
     const fetchMock = vi.fn(async () => Response.json(settings(isAdmin)));
     vi.stubGlobal("fetch", fetchMock);

@@ -76,3 +76,20 @@ npx vitest run src/operations/backup.test.ts
 ```
 
 La prueba crea estado y documentos publicados QA reales en un filesystem temporal, congela y verifica el snapshot, modifica el estado vivo, restaura a dos roots nuevos y comprueba que reaparecen las versiones anteriores. También demuestra que sesiones, challenges, rate limits, secretos, `auth.json`, `.env*` y el perfil/cookies Chromium no llegan al snapshot ni al restore, rechaza corrupción, symlinks y hardlinks en ambos componentes, y prueba que el backup espera a una publicación en curso.
+
+## Facturas de correo de empresa — candidato 06/10/2026
+
+El subárbol `server/company-mail/<installation>/<owner>/invoices/` forma parte
+del componente `product-data`: originales, recibos/estados del registro y Excel
+se conservan juntos. `server/company-mail/<installation>/<owner>/credentials/`
+queda excluido incluso cuando sus ficheros están cifrados. Tras restore se
+requiere reconectar el buzón desde Ajustes; una referencia de binding anterior
+no concede acceso si falta su credencial. La clave de cifrado es configuración
+operativa privada, fuera del snapshot de producto.
+
+La prueba local de backup añade un snapshot/restore de los tres tipos de dato
+con exclusión de la credencial. En producción observar el restore aislado,
+readback del journal/hash y una reimportación sin duplicados tras reconectar.
+El orquestador de backup y el empaquetador de presentaciones ahora decodifican
+las file URLs con `fileURLToPath`, para que las comprobaciones también funcionen
+en checkouts cuyo nombre incluye espacios.

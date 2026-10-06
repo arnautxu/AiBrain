@@ -35,7 +35,7 @@ export function projectConnectorMention(
     ? health.status === "connected" ? "connected" :
       health.status === "reauth_required" ? "requires_login" :
         health.status === "not_configured" ? "admin_setup_required" : "unavailable"
-    : resource.credentialMode === "personal-oauth" ? "requires_login" : "connected";
+    : (resource.credentialMode === "personal-oauth" || resource.credentialMode === "personal-credential") ? "requires_login" : "connected";
   return {
     id: resource.id,
     label: resource.label,
@@ -61,6 +61,7 @@ export function connectorMentionDeveloperInstructions(selected: readonly Resolve
       readTools: resource.mcp?.readTools ?? [],
       sensitiveWriteTools: resource.mcp?.sensitiveWriteTools ?? [],
       credentialMode: resource.credentialMode,
+      ...(resource.connectorId === "company-mail" ? { toolNamespace: "aibrain_company_mail", operations: ["import_attachments", "read_invoice", "record_review", "journal"], remoteMode: "read-only", destination: "project-private-aibrain-storage" } : {}),
       ...(resource.connectorId?.startsWith("composio-") ? { toolkit: resource.connectorId.slice(9).replaceAll("-", "_"), toolNamespace: "aibrain_connected_apps" } : {}),
     }))),
     "END AIBRAIN CONNECTOR MENTIONS",

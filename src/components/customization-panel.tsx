@@ -1,5 +1,6 @@
 "use client";
 import { useUiText } from "@/i18n/provider";
+import { CompanyMailConnectionForm } from "@/components/company-mail-connection-form";
 import { ConnectorLogo } from "@/components/connector-logo";
 import { connectorPresentation } from "@/connectors/presentation";
 
@@ -102,6 +103,7 @@ export function CustomizationPanel({ productName, open, initialTab = "appearance
 function Appearance() {
   const t = useUiText(); return <section><SectionTitle>{t("Tema")}</SectionTitle><div className="flex items-center justify-between rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface)] px-4 py-3"><div><p className="text-[12px] font-semibold">{t("Claro u oscuro")}</p><p className="mt-1 text-[11px] text-[var(--text-subtle)]">{t("Se guarda en este navegador.")}</p></div><ThemeToggle /></div></section>; }
 const subscribeConnectorCallback = () => () => undefined;
+function requestedMailConnection() { return new URLSearchParams(window.location.search).get("connect") === "company-mail"; }
 function connectorCallbackStatus() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("connection") === "failed" || [params.get("gmail"), params.get("outlook")].some(status => status === "failed" || status === "denied")) return "failed";
@@ -109,6 +111,8 @@ function connectorCallbackStatus() {
 }
 function Connectors({ settings, onChanged }: { settings: SettingsSnapshot | null; onChanged: () => void }) {
   const t = useUiText();
+  const requestedMail = useSyncExternalStore(subscribeConnectorCallback, requestedMailConnection, () => false);
+  const [mailFormOpen, setMailFormOpen] = useState<boolean | null>(null);
   const callbackStatus = useSyncExternalStore(subscribeConnectorCallback, connectorCallbackStatus, () => "none");
   const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null);
   const disconnect = async (url: string) => { setBusy(true); setError(null); try { const response = await fetch(url, { method: "POST" }); const body: unknown = await response.json().catch(() => null); if (!response.ok) throw new Error(body && typeof body === "object" && "error" in body && typeof body.error === "string" ? body.error : t("No se ha podido desconectar.")); if (body && typeof body === "object" && "providerRevoked" in body && body.providerRevoked === false) setError(t("Acceso local desconectado. La revocación en el proveedor sigue pendiente; reintenta Desconectar.")); onChanged(); } catch (cause) { setError(cause instanceof Error ? cause.message : t("No se ha podido desconectar.")); } finally { setBusy(false); } };
@@ -120,15 +124,16 @@ function Connectors({ settings, onChanged }: { settings: SettingsSnapshot | null
     <ConnectorLogo id={connector.id} size={28} />
     <div className="min-w-0 flex-1"><p className="text-[13px] font-medium">{connector.label}</p><p className="mt-1 text-[11px] leading-4 text-[var(--text-subtle)]">{connectorPresentation(connector.id).description}</p>{connector.status === "admin_setup_required" ? <p className="mt-1 text-[11px] text-[var(--text-subtle)]">{connector.statusDetail}</p> : null}{connector.accountEmail ? <p className="mt-1 truncate text-[11px] text-[var(--text-subtle)]">{connector.accountEmail}</p> : null}</div>
     <div className="flex shrink-0 flex-col items-end gap-2">
-      {connector.status === "connected" ? <span className="text-[11px] font-medium text-[var(--positive)]">{t("Conectado")}</span> : connector.connectUrl ? <a aria-label={`Conectar ${connector.label}`} href={connector.connectUrl} className="rounded-full bg-[var(--brain-accent)] px-4 py-2 text-[11px] font-semibold text-[var(--brain-contrast)]">{t("Conectar")}</a> : <span className="text-[11px] text-[var(--text-subtle)]">{connector.status === "admin_setup_required" ? t("Falta configuración") : t("No disponible")}</span>}
+      {connector.status === "connected" ? <span className="text-[11px] font-medium text-[var(--positive)]">{t("Conectado")}</span> : connector.connectUrl ? connector.id === "company-mail" ? <button type="button" onClick={() => setMailFormOpen(true)} aria-label={`Conectar ${connector.label}`} className="rounded-full bg-[var(--brain-accent)] px-4 py-2 text-[11px] font-semibold text-[var(--brain-contrast)]">{t("Conectar")}</button> : <a aria-label={`Conectar ${connector.label}`} href={connector.connectUrl} className="rounded-full bg-[var(--brain-accent)] px-4 py-2 text-[11px] font-semibold text-[var(--brain-contrast)]">{t("Conectar")}</a> : <span className="text-[11px] text-[var(--text-subtle)]">{connector.status === "admin_setup_required" ? t("Falta configuración") : t("No disponible")}</span>}
       {connector.disconnectUrl ? <button type="button" disabled={busy} aria-label={`Desconectar ${connector.label}`} onClick={() => void disconnect(connector.disconnectUrl!)} className="text-[10px] text-[var(--text-subtle)] underline underline-offset-2 disabled:opacity-50">{t("Desconectar")}</button> : null}
-      {connector.status === "connected" && connector.connectUrl ? <a href={connector.connectUrl} aria-label={`Reconectar ${connector.label}`} className="text-[10px] text-[var(--text-subtle)]">{t("Reconectar")}</a> : null}
+      {connector.status === "connected" && connector.connectUrl ? connector.id === "company-mail" ? <button type="button" onClick={() => setMailFormOpen(true)} aria-label={`Reconectar ${connector.label}`} className="text-[10px] text-[var(--text-subtle)]">{t("Reconectar")}</button> : <a href={connector.connectUrl} aria-label={`Reconectar ${connector.label}`} className="text-[10px] text-[var(--text-subtle)]">{t("Reconectar")}</a> : null}
     </div>
   </article>;
   return <section><SectionTitle>{t("Conectores personales")}</SectionTitle>
     {callbackStatus === "failed" ? <p role="alert" className="mb-3 text-xs text-[var(--danger)]">{t("No se completó la conexión. Vuelve a intentarlo.")}</p> : callbackStatus === "returned" ? <p role="status" className="mb-3 text-xs text-[var(--text-subtle)]">{t("Consulta abajo el estado verificado de tus conexiones.")}</p> : null}
     <p className="mb-4 text-[12px] leading-5 text-[var(--text-muted)]">{t("Conecta tus apps para usarlas con @ en tus conversaciones. Cada cuenta pertenece solo a tu usuario.")}</p>
     <input type="search" aria-label={t("Buscar apps")} placeholder={t("Buscar apps…")} value={query} onChange={event => setQuery(event.target.value)} className="mb-5 min-h-10 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[16px] outline-none focus:border-[var(--focus)] md:text-[13px]" />
+    {(mailFormOpen ?? requestedMail) && settings?.connectors.some(c => c.id === "company-mail" && c.connectUrl) ? <CompanyMailConnectionForm onCancel={() => setMailFormOpen(false)} onConnected={() => { setMailFormOpen(false); onChanged(); }} /> : null}
     {connected.length ? <><h4 className="mb-2 text-[12px] font-semibold">{t("Conectadas")}</h4><div className="mb-5 overflow-hidden rounded-xl border border-[var(--border)]">{connected.map(row)}</div></> : null}
     {available.length ? <><h4 className="mb-2 text-[12px] font-semibold">{query ? t("Apps disponibles") : t("Sugeridas para tu empresa")}</h4><div className="overflow-hidden rounded-xl border border-[var(--border)]">{available.map(row)}</div></> : null}
     {settings && !matches.length ? <p className="text-[12px] text-[var(--text-subtle)]">{query ? t("No hay apps autorizadas que coincidan.") : t("No hay conexiones habilitadas para tu usuario.")}</p> : null}

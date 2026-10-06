@@ -27,6 +27,8 @@ type AutomationDraft = {
   prompt: string;
   projectId: string;
   kind: ScheduleKind;
+  intervalMinutes: number;
+  intervalAnchorAt: string | null;
   timeZone: string;
   time: string;
   onceAt: string;
@@ -51,7 +53,7 @@ function localInput(iso: string | null, timeZone = "Europe/Madrid") {
 }
 
 function scheduleTime(task: AutomationTask | null) {
-  if (!task || task.schedule.kind === "once") return "09:00";
+  if (!task || (task.schedule.kind === "once" || task.schedule.kind === "interval")) return "09:00";
   return `${String(task.schedule.hour).padStart(2, "0")}:${String(task.schedule.minute).padStart(2, "0")}`;
 }
 
@@ -93,6 +95,8 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [projectId, setProjectId] = useState("");
+  const [intervalMinutes, setIntervalMinutes] = useState(120);
+  const [intervalAnchorAt, setIntervalAnchorAt] = useState<string | null>(null);
   const [kind, setKind] = useState<ScheduleKind>("daily");
   const [timeZone, setTimeZone] = useState("Europe/Madrid");
   const [time, setTime] = useState("09:00");
@@ -140,13 +144,15 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
     prompt,
     projectId,
     kind,
+    intervalMinutes,
+    intervalAnchorAt,
     timeZone,
     time,
     onceAt,
     selectedWeekdays,
     audienceUserIds,
     audienceGroupIds,
-  }), [audienceGroupIds, audienceUserIds, kind, name, onceAt, projectId, prompt, selectedWeekdays, time, timeZone]);
+  }), [audienceGroupIds, audienceUserIds, intervalMinutes, intervalAnchorAt, kind, name, onceAt, projectId, prompt, selectedWeekdays, time, timeZone]);
   const formDirty = formOpen && baselineDraft !== draftSignature(currentDraft);
 
   const closeForm = useCallback(() => {
@@ -240,6 +246,8 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
       prompt: task?.prompt ?? "",
       projectId: task?.projectId ?? availableProjects[0]?.id ?? "",
       kind: task?.schedule.kind ?? "daily",
+      intervalMinutes: task?.schedule.kind === "interval" ? task.schedule.minutes : 120,
+      intervalAnchorAt: task?.schedule.kind === "interval" ? task.schedule.anchorAt : null,
       timeZone: task?.timeZone ?? "Europe/Madrid",
       time: scheduleTime(task),
       onceAt: localInput(task?.schedule.kind === "once" ? task.schedule.runAt : null, task?.timeZone ?? "Europe/Madrid"),
@@ -255,6 +263,8 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
     setPrompt(nextDraft.prompt);
     setProjectId(nextDraft.projectId);
     setKind(nextDraft.kind);
+    setIntervalMinutes(nextDraft.intervalMinutes);
+    setIntervalAnchorAt(nextDraft.intervalAnchorAt);
     setTimeZone(nextDraft.timeZone);
     setTime(nextDraft.time);
     setOnceAt(nextDraft.onceAt);
@@ -269,6 +279,7 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
 
   const schedule = (): AutomationSchedule => {
     const [hour, minute] = time.split(":").map(Number);
+    if (kind === "interval") return { kind, minutes: intervalMinutes, anchorAt: intervalAnchorAt ?? new Date(Date.now() + intervalMinutes * 60_000).toISOString() };
     if (kind === "once") {
       const [date, clock] = onceAt.split("T");
       const [year, month, day] = date.split("-").map(Number);
@@ -415,9 +426,9 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
             {audienceDirectory.groups.length ? <div><p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-subtle)]">{t("Grupos")}</p><div className="mt-2 grid gap-2">{audienceDirectory.groups.map((group) => <label key={group.id} className="flex items-center gap-2 text-[11px] font-normal text-[var(--text)]"><input type="checkbox" checked={audienceGroupIds.includes(group.id)} onChange={() => setAudienceGroupIds((current) => current.includes(group.id) ? current.filter((id) => id !== group.id) : [...current, group.id])} />{group.name}</label>)}</div></div> : null}
             <p className="text-[10px] leading-4 text-[var(--text-subtle)]">{t("La audiencia y pertenencia actuales se comprueban al abrir cualquier resultado, también los anteriores. Si alguien sale del grupo o se desactiva, pierde el acceso.")}</p>
           </div></fieldset>
-          <fieldset><legend className="text-[11px] font-semibold text-[var(--text)]">{t("Frecuencia")}</legend><div className="mt-2 flex gap-1 rounded-xl bg-[var(--surface-muted)] p-1">{(["once", "daily", "weekly"] as const).map((option) => <button key={option} type="button" aria-pressed={kind === option} onClick={() => setKind(option)} className={`touch-target min-h-9 flex-1 rounded-lg text-[11px] font-medium ${kind === option ? "bg-[var(--surface-raised)] text-[var(--text)] shadow-[var(--shadow-sm)]" : "text-[var(--text-muted)]"}`}>{option === "once" ? t("Una vez") : option === "daily" ? t("Cada día") : t("Semanal")}</button>)}</div></fieldset>
+          <fieldset><legend className="text-[11px] font-semibold text-[var(--text)]">{t("Frecuencia")}</legend><div className="mt-2 flex gap-1 rounded-xl bg-[var(--surface-muted)] p-1">{(["once", "interval", "daily", "weekly"] as const).map((option) => <button key={option} type="button" aria-pressed={kind === option} onClick={() => setKind(option)} className={`touch-target min-h-9 flex-1 rounded-lg text-[11px] font-medium ${kind === option ? "bg-[var(--surface-raised)] text-[var(--text)] shadow-[var(--shadow-sm)]" : "text-[var(--text-muted)]"}`}>{option === "once" ? t("Una vez") : option === "interval" ? t("Por intervalo") : option === "daily" ? t("Cada día") : t("Semanal")}</button>)}</div></fieldset>
           {kind === "weekly" ? <fieldset><legend className="text-[11px] font-semibold text-[var(--text)]">{t("Días")}</legend><div className="mt-2 flex gap-1.5">{weekdays.map((label, day) => <button key={day} type="button" aria-pressed={selectedWeekdays.includes(day)} onClick={() => setSelectedWeekdays((current) => current.includes(day) ? current.filter((item) => item !== day) : [...current, day])} className={`touch-target grid size-9 place-items-center rounded-full text-[10px] font-semibold ${selectedWeekdays.includes(day) ? "bg-[var(--text)] text-[var(--surface)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`}>{label}</button>)}</div></fieldset> : null}
-          {kind === "once" ? <div className="grid grid-cols-2 gap-3"><label className="block text-[11px] font-semibold text-[var(--text)]">{t("Fecha")}<input type="date" value={onceAt.split("T")[0] ?? ""} onChange={(event) => setOnceAt(`${event.target.value}T${onceAt.split("T")[1] ?? "09:00"}`)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label><label className="block text-[11px] font-semibold text-[var(--text)]">{t("Hora")}<input type="time" value={onceAt.split("T")[1] ?? "09:00"} onChange={(event) => setOnceAt(`${onceAt.split("T")[0] ?? ""}T${event.target.value}`)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label></div> : <label className="block text-[11px] font-semibold text-[var(--text)]">{t("Hora")}<input type="time" value={time} onChange={(event) => setTime(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label>}
+          {kind === "interval" ? <label className="block text-[11px] font-semibold text-[var(--text)]">{t("Intervalo en minutos")}<input type="number" min={60} max={10080} step={1} value={intervalMinutes} onChange={event => setIntervalMinutes(Number(event.target.value))} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /><span className="mt-1 block text-[11px] font-normal text-[var(--text-subtle)]">{t("120 minutos = cada 2 horas. La primera ejecución será dentro de ese intervalo.")}</span></label> : kind === "once" ? <div className="grid grid-cols-2 gap-3"><label className="block text-[11px] font-semibold text-[var(--text)]">{t("Fecha")}<input type="date" value={onceAt.split("T")[0] ?? ""} onChange={(event) => setOnceAt(`${event.target.value}T${onceAt.split("T")[1] ?? "09:00"}`)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label><label className="block text-[11px] font-semibold text-[var(--text)]">{t("Hora")}<input type="time" value={onceAt.split("T")[1] ?? "09:00"} onChange={(event) => setOnceAt(`${onceAt.split("T")[0] ?? ""}T${event.target.value}`)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label></div> : <label className="block text-[11px] font-semibold text-[var(--text)]">{t("Hora")}<input type="time" value={time} onChange={(event) => setTime(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label>}
           <label className="block text-[11px] font-semibold text-[var(--text)]">{t("Zona horaria")}<select value={timeZone} onChange={(event) => setTimeZone(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal">{AUTOMATION_TIME_ZONES.map((zone) => <option key={zone} value={zone}>{zone}</option>)}</select></label>
           <p id="automation-form-description" className="rounded-xl bg-[var(--surface-muted)] px-3 py-2.5 text-[10px] leading-4 text-[var(--text-muted)]">{t("La tarea crea una conversación en el proyecto y ejecuta este prompt. Las acciones sensibles solo se ejecutan con autorización durable previa; el worker no espera aprobaciones interactivas. No envía mensajes externos por sí sola.")}</p>
         </form>
