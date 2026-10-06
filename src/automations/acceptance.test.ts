@@ -29,6 +29,20 @@ function input(runAt = "2030-08-30T09:00:00.000Z"): AutomationTaskInput {
 }
 
 describe("automation product acceptance", () => {
+  it("persists a two-hour schedule across restart and settles an offline catch-up without a burst", async () => {
+    const usersRoot = await mkdtemp(path.join(os.tmpdir(), "aibrain-automation-two-hour-"));
+    const first = new FileAutomationStore({ installationId: "acceptance", userId: userA, usersRoot, now: () => baseTime });
+    const task = await first.create({ ...input(), schedule: { kind: "interval", minutes: 120, anchorAt: new Date(baseTime + 120 * 60_000).toISOString() } });
+    expect(task.nextRunAt).toBe(new Date(baseTime + 120 * 60_000).toISOString());
+    const restarted = new FileAutomationStore({ installationId: "acceptance", userId: userA, usersRoot, now: () => baseTime + 9 * 3_600_000 });
+    const [claim] = await restarted.claimDue("restarted-worker");
+    expect(claim.task.schedule.kind).toBe("interval");
+    expect(await restarted.claimDue("other-worker")).toEqual([]);
+    await restarted.settle(claim, { status: "succeeded" });
+    expect((await restarted.get(task.id)).nextRunAt).toBe(new Date(baseTime + 10 * 3_600_000).toISOString());
+    expect(await restarted.claimDue("restarted-worker")).toEqual([]);
+  });
+
   it("keeps an offline occurrence durable across restart and isolated from another user", async () => {
     const usersRoot = await mkdtemp(path.join(os.tmpdir(), "aibrain-automation-offline-"));
     const first = new FileAutomationStore({ installationId: "acceptance", userId: userA, usersRoot, now: () => baseTime });

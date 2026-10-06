@@ -1,5 +1,6 @@
 import { build } from "esbuild";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 const require = createRequire(import.meta.url);
@@ -7,7 +8,7 @@ const output = new URL("../dist/pptxgenjs.cjs", import.meta.url);
 await mkdir(new URL("../dist/", import.meta.url), { recursive: true });
 const result = await build({
   entryPoints: [require.resolve("pptxgenjs")],
-  outfile: output.pathname,
+  outfile: fileURLToPath(output),
   bundle: true,
   platform: "node",
   format: "cjs",

@@ -1,5 +1,6 @@
 /** Presentation never grants access: callers supply the authorized resource IDs. */
 const descriptions: Record<string, string> = {
+  "company-mail": "Recoge adjuntos de tu correo de empresa y consulta el registro de facturas.",
   gmail: "Busca y lee tus correos.", googlecalendar: "Consulta tus calendarios y eventos.",
   googledrive: "Busca archivos y consulta su información.", outlook: "Consulta tu correo y calendario de Outlook.",
   github: "Consulta repositorios públicos e incidencias.", slack: "Busca conversaciones y mensajes.",

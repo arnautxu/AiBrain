@@ -43,7 +43,15 @@ export type OutlookConnectorConfig = {
   tenantId?: string;
 };
 
+export type CompanyMailConnectorConfig = {
+  enabled: boolean;
+  /** Administrator-owned exact IMAPS hostname; never supplied by the employee or model. */
+  host: string;
+  emailDomain: string;
+};
+
 export type InstallationConnectors = {
+  companyMail?: CompanyMailConnectorConfig;
   codexManagedAppAction?: CodexManagedAppActionConfig;
   composio?: { toolkits: ComposioToolkitConfig[] };
   gmail?: GmailConnectorConfig;
@@ -108,7 +116,7 @@ const PATH_KEYS = [
   "backupsRoot",
 ] as const;
 
-const CONNECTOR_KEYS = ["codexManagedAppAction", "gmail", "outlook", "composio"] as const;
+const CONNECTOR_KEYS = ["codexManagedAppAction", "gmail", "outlook", "composio", "companyMail"] as const;
 const CODEX_MANAGED_APP_ACTION_KEYS = ["appId", "server", "tool", "arguments", "correlationField", "readback"] as const;
 const CODEX_MANAGED_APP_READBACK_KEYS = ["server", "tool", "arguments", "correlationArgument"] as const;
 const MCP_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -421,6 +429,20 @@ function parseConnectors(value: unknown, issues: InstallationConfigIssue[]): Ins
       }
     }
   }
+  let companyMail: CompanyMailConnectorConfig | undefined;
+  if (value.companyMail !== undefined) {
+    const mail = value.companyMail;
+    const dns = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$/u;
+    if (!isRecord(mail)) issues.push({ path: "$.connectors.companyMail", message: "debe ser un objeto" });
+    else {
+      addUnknownKeyIssues(mail, ["enabled", "host", "emailDomain"], "$.connectors.companyMail", issues);
+      if (typeof mail.enabled !== "boolean" || typeof mail.host !== "string" || !dns.test(mail.host) ||
+          mail.host.endsWith(".localhost") || mail.host.endsWith(".internal") || mail.host.endsWith(".local") ||
+          typeof mail.emailDomain !== "string" || !dns.test(mail.emailDomain)) {
+        issues.push({ path: "$.connectors.companyMail", message: "requiere enabled, host IMAPS DNS exacto y emailDomain normalizados" });
+      } else companyMail = { enabled: mail.enabled, host: mail.host, emailDomain: mail.emailDomain };
+    }
+  }
   let gmail: GmailConnectorConfig | undefined;
   if (value.gmail !== undefined) {
     if (!isRecord(value.gmail)) {
@@ -461,11 +483,11 @@ function parseConnectors(value: unknown, issues: InstallationConfigIssue[]): Ins
       issues.push({ path: "$.connectors.composio", message: "requiere toolkits revisados, auth config, scopes y herramientas de lectura con versión fija" });
     } else composio = { toolkits: candidate.toolkits };
   }
-  if (!codexManagedAppAction && !gmail && !outlook && !composio) {
+  if (!codexManagedAppAction && !gmail && !outlook && !composio && !companyMail) {
     issues.push({ path: "$.connectors", message: "debe configurar al menos un conector" });
     return undefined;
   }
-  return { ...(composio ? { composio } : {}), ...(codexManagedAppAction ? { codexManagedAppAction } : {}), ...(gmail ? { gmail } : {}), ...(outlook ? { outlook } : {}) };
+  return { ...(companyMail ? { companyMail } : {}), ...(composio ? { composio } : {}), ...(codexManagedAppAction ? { codexManagedAppAction } : {}), ...(gmail ? { gmail } : {}), ...(outlook ? { outlook } : {}) };
 }
 
 function parseCatalog(value: unknown, issues: InstallationConfigIssue[]): InstallationCatalog | undefined {

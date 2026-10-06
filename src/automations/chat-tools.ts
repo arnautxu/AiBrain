@@ -21,6 +21,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 
 const scheduleSchema: JsonValue = {
   oneOf: [
+    { type: "object", properties: { kind: { const: "interval" }, minutes: { type: "integer", minimum: 60, maximum: 10080 }, anchorAt: { type: "string", format: "date-time" } }, required: ["kind", "minutes", "anchorAt"], additionalProperties: false },
     { type: "object", properties: { kind: { const: "once" }, runAt: { type: "string", format: "date-time" } }, required: ["kind", "runAt"], additionalProperties: false },
     { type: "object", properties: { kind: { const: "daily" }, hour: { type: "integer", minimum: 0, maximum: 23 }, minute: { type: "integer", minimum: 0, maximum: 59 } }, required: ["kind", "hour", "minute"], additionalProperties: false },
     { type: "object", properties: { kind: { const: "weekly" }, weekdays: { type: "array", items: { type: "integer", minimum: 0, maximum: 6 }, minItems: 1, maxItems: 7, uniqueItems: true }, hour: { type: "integer", minimum: 0, maximum: 23 }, minute: { type: "integer", minimum: 0, maximum: 59 } }, required: ["kind", "weekdays", "hour", "minute"], additionalProperties: false },

@@ -62,6 +62,8 @@ export type EgressGatewayConfig = Readonly<{
   serverToken: string;
   healthToken: string;
   workerHosts: ReadonlySet<string>;
+  /** Only the server channel may CONNECT to these exact hosts on IMAPS/993. */
+  mailHosts?: ReadonlySet<string>;
   supabaseHostname: string;
   maxHeaderBytes: number;
   maxConnections: number;
@@ -512,12 +514,13 @@ export class EgressGateway {
       if (isIP(hostname) && hostname.toLowerCase() !== address) throw new EgressGatewayError("PIN_REJECTED", "Browser IP destination differs from its pin.");
       return { hostname, address, family, port, channel };
     }
-    if (port !== 443) throw new EgressGatewayError("CHANNEL_REJECTED", "Worker and server egress require HTTPS port 443.");
+    const imaps = channel === "server" && port === 993 && this.config.mailHosts?.has(hostname);
+    if (port !== 443 && !imaps) throw new EgressGatewayError("CHANNEL_REJECTED", "Worker and server egress require HTTPS port 443.");
     if (isIP(hostname)) throw new EgressGatewayError("TARGET_REJECTED", "Worker and server channels require configured DNS hostnames.");
     if (channel === "worker" && !this.config.workerHosts.has(hostname)) {
       throw new EgressGatewayError("CHANNEL_REJECTED", "Worker destination is not configured.");
     }
-    if (channel === "server" && hostname !== this.config.supabaseHostname && hostname !== "backend.composio.dev") {
+    if (channel === "server" && !imaps && hostname !== this.config.supabaseHostname && hostname !== "backend.composio.dev") {
       throw new EgressGatewayError("CHANNEL_REJECTED", "Server destination is not an approved authentication or connector API host.");
     }
     const results = validateDnsResults(await this.lookup(hostname, { all: true, verbatim: true }), this.config.maxAddresses);
@@ -699,6 +702,13 @@ export function validateConfig(config: EgressGatewayConfig): EgressGatewayConfig
     if (normalizeHostname(hostname) !== hostname || isIP(hostname)) throw new EgressGatewayError("CONFIG_INVALID", "Worker allowlist must contain normalized DNS hostnames.");
     rejectLocalHostname(hostname);
   }
+  if (config.mailHosts !== undefined) {
+    if (!(config.mailHosts instanceof Set) || config.mailHosts.size > 10) throw new EgressGatewayError("CONFIG_INVALID", "Invalid IMAPS allowlist.");
+    for (const hostname of config.mailHosts) {
+      if (normalizeHostname(hostname) !== hostname || isIP(hostname) || !hostname.includes(".")) throw new EgressGatewayError("CONFIG_INVALID", "IMAPS allowlist requires exact DNS hostnames.");
+      rejectLocalHostname(hostname);
+    }
+  }
   const supabaseHostname = normalizeHostname(config.supabaseHostname);
   if (supabaseHostname !== config.supabaseHostname || isIP(supabaseHostname)) throw new EgressGatewayError("CONFIG_INVALID", "Supabase hostname must be normalized DNS.");
   rejectLocalHostname(supabaseHostname);
@@ -732,6 +742,7 @@ export function configFromEnvironment(): EgressGatewayConfig {
     serverToken: process.env.AIBRAIN_EGRESS_SERVER_TOKEN ?? "",
     healthToken: process.env.AIBRAIN_EGRESS_HEALTH_TOKEN ?? "",
     workerHosts,
+    mailHosts: new Set((process.env.AIBRAIN_EGRESS_MAIL_HOSTS ?? "").split(",").map(v => v.trim()).filter(Boolean)),
     supabaseHostname: normalizeHostname(supabase.hostname),
     maxHeaderBytes: envInteger("AIBRAIN_EGRESS_MAX_HEADER_BYTES", 32 * 1_024),
     maxConnections: envInteger("AIBRAIN_EGRESS_MAX_CONNECTIONS", 128),
