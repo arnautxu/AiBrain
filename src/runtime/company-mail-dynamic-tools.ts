@@ -10,7 +10,7 @@ import { companyMailAccessForIdentity, companyMailContext } from "@/connectors/c
 import { withCompanyMailbox } from "@/connectors/company-mail-client";
 import { CompanyMailError, validMailDate } from "@/connectors/company-mail-contracts";
 import { MAIL_HASH, privateMailDirectory } from "@/connectors/company-mail-store";
-import { importCompanyMailInvoices, invoiceLedgerForMailbox, mailboxIdentity, mailHash, parseMailInvoiceReview, recordMailInvoiceReview, refreshMailInvoiceWorkbook } from "@/connectors/company-mail-invoices";
+import { importCompanyMailInvoices, invoiceLedgerForMailbox, mailboxIdentity, mailHash, mailInvoiceChangesForDay, parseMailInvoiceReview, recordMailInvoiceReview, refreshMailInvoiceWorkbook } from "@/connectors/company-mail-invoices";
 import { persistGeneratedDocumentArtifact, generatedDocumentArtifactId } from "@/runtime/generated-document-artifacts";
 import { FileDocumentStorageGate } from "@/documents/storage-gate";
 import { atomicWriteFile } from "@/storage";
@@ -37,7 +37,6 @@ export type CompanyMailToolContext = {
 function result(success: boolean, value: unknown): DynamicToolCallResponse { return { success, contentItems: [{ type: "inputText", text: JSON.stringify(value) }] }; }
 function record(value: unknown): value is Record<string, unknown> { return Boolean(value && typeof value === "object" && !Array.isArray(value)); }
 function exact(value: Record<string, unknown>, keys: string[]) { return Object.keys(value).sort().join() === keys.toSorted().join(); }
-const dateInMadrid = (date: string) => new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(date));
 
 export async function handleCompanyMailTool(params: DynamicToolCallParams, c: CompanyMailToolContext): Promise<DynamicToolCallResponse> {
   if (params.namespace !== COMPANY_MAIL_NAMESPACE || !["import_attachments", "read_invoice", "record_review", "journal"].includes(params.tool)) return result(false, { error: "Herramienta de correo no disponible." });
@@ -107,7 +106,7 @@ export async function handleCompanyMailTool(params: DynamicToolCallParams, c: Co
         return result(true, { entry, excelUpdated: true, next: "Call journal after all reviews to attach the final Excel." });
       }
       const { ledger, excel } = await emitExcel();
-      const entries = args.day ? ledger.entries.filter(e => dateInMadrid(e.importedAt) === args.day || e.reviewedAt && dateInMadrid(e.reviewedAt) === args.day) : ledger.entries;
+      const entries = args.day ? mailInvoiceChangesForDay(ledger.entries, String(args.day)) : ledger.entries;
       const offset = Number(args.offset ?? 0);
       return result(true, { entries: entries.slice(offset, offset + 100), nextOffset: offset + 100 < entries.length ? offset + 100 : null, matchingEntries: entries.length,
         pending: ledger.entries.filter(e => e.status === "pending").length, needsAttention: ledger.entries.filter(e => e.status === "needs_attention").length,

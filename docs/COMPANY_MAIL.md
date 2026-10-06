@@ -83,6 +83,9 @@ entre 2 y 24 horas, sin bloquear todos los siguientes mensajes.
 `remainingMessages` cuenta mensajes que pueden continuar ahora;
 `deferredMessages` cuenta los que esperan su próximo reintento. Una tanda
 parcial sigue importando sus adjuntos sanos aunque otro haya fallado.
+La fecha de importación refleja la descarga correcta, incluso en un reintento
+posterior; el cierre diario también incluye cambios de estado e intentos fallidos
+actualizados ese día.
 
 Se consideran candidatos PDF, PNG/JPEG y XLS/XLSX adjuntos; imágenes inline,
 correos incrustados y otros formatos no se procesan como facturas. Cada
