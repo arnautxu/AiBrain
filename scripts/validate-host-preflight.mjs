@@ -207,7 +207,7 @@ const channelTokens = [
 if (channelTokens.some((token) => !CHANNEL_TOKEN.test(token)) || new Set(channelTokens).size !== 3) {
   fail("egress channel tokens must be strong and pairwise distinct");
 }
-const mailHosts = (egressPolicy.AIBRAIN_EGRESS_MAIL_HOSTS ?? "").split(",").filter(Boolean);
+const mailHosts = (egressPolicy.get("AIBRAIN_EGRESS_MAIL_HOSTS") ?? "").split(",").filter(Boolean);
 if (mailHosts.length > 10 || mailHosts.some(host => !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$/u.test(host) ||
     host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal"))) {
   fail("IMAPS egress requires exact normalized public DNS hostnames");
@@ -235,7 +235,7 @@ const runtimePolicy = parseEnv(readFileSync(runtimeEnv, "utf8"));
 const companyMail = JSON.parse(readFileSync(configFile, "utf8")).connectors?.companyMail;
 if (companyMail?.enabled) {
   if (!mailHosts.includes(companyMail.host)) fail("enabled company mailbox host is absent from the IMAPS allowlist");
-  const mailKey = runtimePolicy.AIBRAIN_COMPANY_MAIL_ENCRYPTION_KEY ?? "";
+  const mailKey = runtimePolicy.get("AIBRAIN_COMPANY_MAIL_ENCRYPTION_KEY") ?? "";
   const decodedMailKey = Buffer.from(mailKey, "base64");
   if (decodedMailKey.length !== 32 || decodedMailKey.toString("base64") !== mailKey) fail("enabled company mail requires a 32-byte base64 encryption key");
 }
