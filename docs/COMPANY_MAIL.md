@@ -32,6 +32,15 @@ la interfaz web del correo; la conexión se hace al servidor IMAP subyacente.
    incluye la capacidad; ninguna instalación genérica la activa por defecto.
    El catálogo respeta DENY de rol/grupo/usuario. Cada conexión es personal y
    no permite una credencial compartida como fallback.
+   El gestor standalone `scripts/manage-release.mjs` debe pertenecer a una
+   versión que admita este bloque y valide los mismos campos DNS que la
+   aplicación. El despliegue de imágenes no actualiza automáticamente el
+   gestor instalado en el host. Conservar una copia y comprobar el hash antes
+   de actualizarlo desde el código revisado; después promover la configuración
+   mediante el gestor, con sus recibos y rollback, sin editar directamente un
+   JSON activo atestado. La regresión de release verifica promoción/rollback
+   del bloque y rechazo previo a cualquier recreación ante valores inválidos
+   o credenciales incluidas en el JSON.
 3. En `egress.env` privado de Arnall, fijar
    `AIBRAIN_EGRESS_MAIL_HOSTS=hc65.infoselfcloud.com`. La allowlist permite
    exclusivamente al canal server el CONNECT/993; Codex conserva la política
@@ -43,6 +52,9 @@ la interfaz web del correo; la conexión se hace al servidor IMAP subyacente.
 5. Ejecutar preflight del host y comprobar salud de los tres servicios.
    El preflight requiere que host y clave estén presentes cuando el conector
    está activo. Probar el certificado desde la red real del gateway.
+   Su parser devuelve un `Map`: obtener allowlist y clave mediante `.get()`.
+   La integración de preflight cubre configuración habilitada válida y fallos
+   por host ausente, host privado o clave ausente, corta o no canónica.
 6. El cliente conecta en Ajustes: `factures@arnall.cat`, contraseña de buzón
    (o contraseña de aplicación admitida por su proveedor), carpeta exacta y
    fecha inicial. La prueba real usa login y EXAMINE de esa carpeta antes de
