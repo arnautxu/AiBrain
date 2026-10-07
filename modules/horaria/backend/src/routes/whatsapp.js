@@ -25,7 +25,7 @@ router.post('/webhook', asyncHandler(receiveMessage));
 router.post('/broadcast', requireAuth, requireRole('MANAGER_GENERAL', 'MANAGER_LOCAL'), requireEstablishmentAccess, asyncHandler(broadcast));
 router.post('/reminders', requireAuth, requireRole('MANAGER_GENERAL', 'MANAGER_LOCAL'), requireEstablishmentAccess, asyncHandler(sendRemindersHandler));
 router.get('/status', requireAuth, requireEstablishmentAccess, asyncHandler(getStatus));
-router.get('/config-check', requireAuth, requireRole('MANAGER_GENERAL', 'MANAGER_LOCAL'), configCheck);
+router.get('/config-check', requireAuth, requireRole('MANAGER_GENERAL', 'MANAGER_LOCAL'), asyncHandler(configCheck));
 router.post('/unblock', requireAuth, requireRole('MANAGER_GENERAL', 'MANAGER_LOCAL'), asyncHandler(unblockConversation));
 
 // Conversation detail for managers (used by the simulator and viewer)
