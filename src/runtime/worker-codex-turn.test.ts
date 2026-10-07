@@ -462,7 +462,10 @@ describe("worker Codex turn", () => {
     ]);
   });
 
-  it("rejects a fictional Arnall schedule answer that did not attach the required template", async () => {
+  it.each([
+    ["Cas completament fictici. Genera un horari per a la Botiga Demo amb sis persones inventades.", true],
+    ["Genera un horario real de Girona, excluye PROVA y no amplíes mínimos ficticios.", false],
+  ])("applies the invented-schedule template gate only to an affirmative request (%s)", async (message, required) => {
     const root = await mkdtemp(path.join(tmpdir(), "aibrain-fictional-schedule-"));
     let handlers: { onNotification(value: unknown, envelope: unknown): Promise<void> };
     const events: Array<{ type: string; value?: string; message?: unknown }> = [];
@@ -492,14 +495,19 @@ describe("worker Codex turn", () => {
         },
       },
     };
-    const request = { ...chatRequest(), message: "Cas completament fictici. Genera un horari per a la Botiga Demo amb sis persones inventades." };
+    const request = { ...chatRequest(), message };
     await runWorkerCodexTurn(request, installationId, userId, null, {
       tenantId: installationId, mode: "codex", codexBinary: "unused", codexHome: null,
       workspace: root, model: null, approvalPolicy: "on-request", sandbox: "workspace-write",
     }, permissions(), {} as never, memoryDependencies(), [], new AbortController().signal,
     async (event) => { events.push(event); });
-    expect(events.filter((event) => event.type === "content" || event.type === "delta")).toEqual([]);
-    expect(events.find((event) => event.type === "error")?.message).toContain("HORARI SAGARO");
+    if (required) {
+      expect(events.filter((event) => event.type === "content" || event.type === "delta")).toEqual([]);
+      expect(events.find((event) => event.type === "error")?.message).toContain("HORARI SAGARO");
+    } else {
+      expect(events.some((event) => event.type === "content" || event.type === "delta")).toBe(true);
+      expect(events.some((event) => event.type === "error")).toBe(false);
+    }
   });
 
   it.each(["ordinary", "private", "legacy"])("publishes safe prefixes and keeps explicit final over legacy (%s)", async (mode) => {
