@@ -147,6 +147,4 @@ pinned TLS, source roots and Windows policies unchanged, and do not represent
 Windows browsing as fixed. A confirmed remote desktop/policy diagnosis is
 still needed; do not infer that a folder is absent from a failed readback.
 
-The automation badge distinguishes a worker lease (En curso) from a queued
-manual request and prevents manual resubmission during an automatic lease.
-Eleven automation component tests pass; root type/lint checks pass.
+[Installation-specific operational details omitted.]
