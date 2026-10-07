@@ -62,6 +62,20 @@ afterEach(() => {
 });
 
 describe("AutomationsPanel audience", () => {
+  it("waits for the current recipient identity before opening a new automation", async () => {
+    let resolveDirectory!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { resolveDirectory = resolve; })));
+    render(<AutomationsPanel open projects={[project]} />);
+    const prematureButton = screen.queryByRole("button", { name: "Nueva" });
+    if (prematureButton) expect(prematureButton).toBeDisabled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(resolveDirectory).toBeTypeOf("function"));
+    await act(async () => { resolveDirectory(Response.json({ tasks: [], audienceDirectory: { membershipPolicy: "current", currentUserId: ownerId, users: [{ id: ownerId, name: "Owner" }], groups: [] } })); });
+    const newButton = screen.getByRole("button", { name: "Nueva" });
+    expect(newButton).toBeEnabled();
+    fireEvent.click(newButton);
+    expect(screen.getByRole("checkbox", { name: "Owner" })).toBeChecked();
+  });
   it("shows a leased automatic run as in progress and prevents duplicate manual submission", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ tasks: [{ ...viewerTask,
       lease: { workerId: "worker", runKey: "automatic", attempt: 1, claimedAt: "2026-10-07T12:00:00.000Z", expiresAt: "2026-10-07T12:10:00.000Z" },
@@ -99,7 +113,8 @@ describe("AutomationsPanel audience", () => {
       return Response.json({ task: { ...viewerTask, ...submitted, access: { canManage: true, canViewResults: true } } });
     }));
     render(<AutomationsPanel open projects={[project]} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Nueva" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Nueva" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Nueva" }));
     fireEvent.change(screen.getByPlaceholderText("Resumen diario del proyecto"), { target: { value: "Facturas" } });
     fireEvent.change(screen.getByPlaceholderText("Revisa las novedades del proyecto y prepara un resumen con próximos pasos."), { target: { value: "Importa facturas del correo de empresa." } });
     fireEvent.click(screen.getByRole("button", { name: "Por intervalo" }));
