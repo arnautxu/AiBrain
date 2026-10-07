@@ -131,9 +131,18 @@ describe("horarIA chat boundary", () => {
     await expect(run("run", { operation: "status" })).rejects.toThrow("permiso");
     expect(callHoraria).not.toHaveBeenCalled();
   });
+  it("reports missing configuration without exposing internal failure details or contacting the service", async () => {
+    const { run } = await setup();
+    vi.mocked(loadHorariaConfig).mockRejectedValue(new Error("private path and credential details"));
+    const result = await run("run", { operation: "status" });
+    expect(result).toMatchObject({ code: "HORARIA_NOT_CONFIGURED", retryable: false, noActionExecuted: true });
+    expect(JSON.stringify(result)).not.toContain("credential details");
+    expect(callHoraria).not.toHaveBeenCalled();
+  });
   it("rejects unmapped users and host/path injection", async () => {
     const { run, config } = await setup(); config.users = {};
-    await expect(run("run", { operation: "status" })).rejects.toThrow("acceso");
+    expect(await run("run", { operation: "status" })).toMatchObject({ code: "HORARIA_NOT_ASSIGNED", retryable: false, noActionExecuted: true });
+    expect(callHoraria).not.toHaveBeenCalled();
     expect(() => resolveOperation({ operation: "__proto__" })).toThrow();
     expect(() => resolveOperation({ operation: "employees.update", id: "../whatsapp/webhook" })).toThrow();
     expect(() => resolveOperation({ operation: "status", query: { secret: "guess" } })).toThrow();
