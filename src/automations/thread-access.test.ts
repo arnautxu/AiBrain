@@ -11,7 +11,7 @@ import { loadInstallationConfig } from "@/config/installation";
 import type { ChatMessage } from "@/lib/chat-contract";
 import { getTaskCenter } from "@/task-center/server-service";
 import { UserProvisioner } from "@/users/provisioner";
-import { beginThreadTurn, createProject, createThread, finishThreadTurn, updateProject } from "@/workbench/store";
+import { beginThreadTurn, createProject, createThread, finishThreadTurn, getThread, updateProject } from "@/workbench/store";
 import { loadSharedWorkbench, resolveThreadAccess } from "@/workbench/shared-access";
 
 vi.mock("server-only", () => ({}));
@@ -151,6 +151,23 @@ describe("automation result thread audience", () => {
       provenance: { source: "automation-audience", taskId: automation.id, membershipPolicy: "current" },
     });
     expect((await loadSharedWorkbench(memberSession)).threads.map(({ id }) => id)).toContain(thread.id);
+    const memberWorkbench = await loadSharedWorkbench(memberSession);
+    expect(memberWorkbench.projects.map(({ id }) => id)).not.toContain(project.id);
+    expect(memberWorkbench.threads.find(({ id }) => id === thread.id)?.access)
+      .toEqual({ role: "viewer", canEdit: false, canManage: false });
+    expect((await getThread(memberSession, thread.id)).access)
+      .toEqual({ role: "viewer", canEdit: false, canManage: false });
+    expect((await getThread(ownerSession, thread.id)).access)
+      .toEqual({ role: "owner", canEdit: true, canManage: true });
+    await updateProject(ownerSession, project.id, {
+      sharing: { visibility: "shared", members: [{
+        id: "00000000-0000-4000-8000-000000000015", email: "member@example.com",
+        name: "Member", role: "editor", status: "active", addedAt: "2026-08-30T09:00:00.000Z",
+      }] },
+    });
+    const editorWorkbench = await loadSharedWorkbench(memberSession);
+    expect(editorWorkbench.projects.find(({ id }) => id === project.id)?.access?.canEdit).toBe(true);
+    expect(editorWorkbench.threads.find(({ id }) => id === thread.id)?.access?.canEdit).toBe(false);
     expect((await getTaskCenter(memberSession)).tasks).toMatchObject([{ threadId: thread.id, unread: true }]);
     expect((await listAutomationTasks(memberSession)).tasks).toMatchObject([{ id: automation.id, access: { canManage: false, canViewResults: true } }]);
     expect(await automationRunsForSession(memberSession, automation.id)).toHaveLength(1);

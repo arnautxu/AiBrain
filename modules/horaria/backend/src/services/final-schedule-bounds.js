@@ -45,8 +45,12 @@ export function enforceFinalScheduleBounds(horario, employees, rules, closedDays
         missing += Math.max(0, min - value) ** 2;
       }
     }
-    return { hard, missing };
+    const requested = employees.reduce((sum, e) => sum + Object.entries(e.turnosRequeridosBorrador || {})
+      .filter(([day, shift]) => schedulesById.get(e.id).dias.find(d => d.dia === day)?.turno !== shift).length, 0);
+    return { hard, requested, missing };
   };
+  const improves = (after, before) => after.hard < before.hard || (after.hard === before.hard &&
+    (after.requested < before.requested || (after.requested === before.requested && after.missing < before.missing)));
   const personallyAllowed = (e, d, shift) => shift === 'LIBRE' || (!closedDays.includes(d.dia) && !e.diasAusente?.[d.dia] &&
     !e.diasPreferenciaLibre?.[d.dia] && !e.diasOcupadosOtrosEstablecimientos?.[d.dia] &&
     (!e.turnosPorDiaPreferencia?.[d.dia] || e.turnosPorDiaPreferencia[d.dia] === shift) &&
@@ -80,10 +84,11 @@ export function enforceFinalScheduleBounds(horario, employees, rules, closedDays
       change(d, 'LIBRE');
     }
   }
-  // Each accepted change strictly reduces excess or uncovered slots. Finite grid.
+  // Lexicographically reduce excess, unassigned requests and uncovered slots.
+  // Explicit work requests remain below hard bounds and above coverage minima.
   for (let pass = 0; pass < 1000; pass++) {
     const before = score();
-    if (!before.hard && !before.missing) break;
+    if (!before.hard && !before.requested && !before.missing) break;
     let best = null;
     for (const e of employees) for (const d of schedulesById.get(e.id).dias) for (const shift of SHIFTS) {
       if (shift === d.turno || !allowed(e, d, shift)) continue;
@@ -93,12 +98,12 @@ export function enforceFinalScheduleBounds(horario, employees, rules, closedDays
       d.turno = shift;
       const after = score();
       d.turno = old;
-      if (!(after.hard < before.hard || (after.hard === before.hard && after.missing < before.missing))) continue;
+      if (!improves(after, before)) continue;
       const requestedLoss = e.turnosPorDiaPreferencia?.[d.dia] === old && shift !== old ? 1 : 0;
-      const rank = [after.hard, after.missing, requestedLoss, Math.abs(delta)];
+      const rank = [after.hard, after.requested, after.missing, requestedLoss, Math.abs(delta)];
       if (!best || rank.some((v, i) => v < best.rank[i] && rank.slice(0, i).every((x, j) => x === best.rank[j]))) best = { e, d, shift, old, rank };
     }
-    if (!best && !before.hard && before.missing) {
+    if (!best && !before.hard && (before.requested || before.missing)) {
       // A capped worker may need to move hours between days. Evaluate both
       // edits atomically; never accept an intermediate excess or new gap.
       for (const e of employees) {
@@ -115,9 +120,9 @@ export function enforceFinalScheduleBounds(horario, employees, rules, closedDays
             const after = score();
             const withinHours = hours(e) <= remainingWeeklyHours(e);
             d.turno = old; other.turno = otherOld;
-            if (!withinHours || after.hard || after.missing >= before.missing) continue;
+            if (!withinHours || after.hard || !improves(after, before)) continue;
             const loss = Number(e.turnosPorDiaPreferencia?.[d.dia] === old) + Number(e.turnosPorDiaPreferencia?.[other.dia] === otherOld);
-            const rank = [after.hard, after.missing, loss, 0];
+            const rank = [after.hard, after.requested, after.missing, loss, 0];
             if (!best || rank.some((v, i) => v < best.rank[i] && rank.slice(0, i).every((x, j) => x === best.rank[j]))) best = { e, d, shift, old, rank, other, lower, otherOld };
           }
         }
@@ -155,7 +160,7 @@ export function enforceFinalScheduleBounds(horario, employees, rules, closedDays
           const after = conditionScore(e);
           if (after >= before || hours(e) > remainingWeeklyHours(e)) { d.turno = old; continue; }
           const changed = score();
-          if (!changed.hard && changed.missing <= baseline.missing) best = { e, d, shift, old };
+          if (!changed.hard && changed.requested <= baseline.requested && changed.missing <= baseline.missing) best = { e, d, shift, old };
           if (!best) for (const partner of employees.filter(x => x.id !== e.id && x.funcion === e.funcion)) {
             const other = schedulesById.get(partner.id).dias.find(x => x.dia === d.dia);
             if (other.turno === 'LIBRE' || partner.turnosPorDiaPreferencia?.[d.dia]) continue;

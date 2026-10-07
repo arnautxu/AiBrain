@@ -1,5 +1,61 @@
 Arnall documents and historical incidents — 7 October 2026
 
+Latest live checks (7 October, after the invoice-batch release):
+The same live grid left Neus free on Wednesday while marking "afternoon-only"
+as respected. The actual retained 6 October request explicitly said to put her
+to work that afternoon. Keep availability restrictions backward-compatible,
+and add draft-only requiredShiftsByDay for an actual assignment. Final bounded
+repair prioritizes that assignment over coverage, while preserving contract,
+absence, closed-day, cross-shop, fixed availability and coverage maximum bounds.
+An impossible assignment stays a visible conflict; it never becomes fake work
+or an increased contract. The final review also checks saved structured exact
+counts and maxima, including Gemma's maxPartidos=1, which the prose-only checker
+omitted when the actual draft contained two splits. No employee or business
+schedule is persisted. Live repetition with PROVA excluded is still required.
+The follow-up real Girona draft excluding PROVA produced its valid Excel and
+coverage audit, then the delivery guard falsely rejected the answer because
+the prompt said "No amplíes ... mínimos ficticios". A negated reference to
+invented data is not an affirmative simulation request. The template gate now
+ignores negated fiction mentions while retaining mandatory artifacts for an
+affirmative invented-shop request. Worker-event regressions cover both paths;
+fresh authenticated UI acceptance is still required after this candidate ships.
+The UI accepted and reopened 33 synthetic PDFs in a single message, identified
+all 33 invoice numbers, and independently totalled EUR 561. The original bytes,
+sizes and upload bindings all match the private fixture oracle. This accepts
+the 33-file transport/reading case; it cannot recover 23 missing historical
+Marta attachments. The scheduled invoice run at 17:27 Europe/Madrid completed
+at 17:37 on attempt 1: 17 genuine new documents, 28 originals total, no duplicate
+hashes/receipts, 1 reviewed, 27 needs_attention and 0 unread. Its final tracking
+Excel was previewed/downloaded through David's authorized admin UI; all 28 rows
+match the ledger, and the earlier 11 originals are unchanged. Next run 20:27.
+
+This acceptance exposed a result-view bug: automation audiences receive a
+conversation without access to its owner's private project, but the UI used
+the missing project's legacy owner fallback. It consequently displayed an
+editable composer and a misleading unavailable-runtime warning. Project
+editors can also be viewers of individual automation results. Project grants
+are not a substitute for conversation authorization. Project the existing
+server-resolved conversation role into both workbench snapshots and direct
+thread reads; use it for chat, inspector and sidebar edit controls. No server
+permissions or owner connector bindings change. Continue read-only polling of
+healthy long-running results at 15-second intervals; after a minute of failed
+reads pause with a read-only reconnect control. Never start another turn during
+reconciliation. Foreign/denied result reads retain the existing rejection.
+Local focused tests cover an unshared project, a project editor with viewer-only
+result access, revoked audience, terminal recovery and nine-minute healthy
+background execution. Publication, deployment and live UI remain separate gates
+for this follow-up until their exact candidate receipts are recorded.
+
+GP/Estartit remains absent from horarIA. David has said he does not know its
+official details: record name, address, opening days/hours and manager as facts
+to ask Arnall, without inventing a centre or aliasing it to Girona. Two independent
+complete enumerations, one using production shiftHours/puntuacio, prove that
+real Girona staff excluding PROVA cannot meet the aggregate 33 morning and 22
+afternoon sales-role slots under current contract/fixed-count bounds, even after
+relaxing day-specific conditions and synchronization. At most 52/55 slots fit.
+This is a staffing/conditions decision; it does not certify an optimal daily grid
+or authorize changing employment contracts or treating test PROVA as real staff.
+
 Base: cc7ffa7906da7ee4dcb6f8393b46db5500512d00.
 Recovered the 57-path 6 October incident candidate from its preserved
 checkout into a fresh worktree. Three iCloud reads were incomplete: rebuilt

@@ -9,7 +9,7 @@ import { ChatWorkspace } from "@/components/chat-workspace";
 import { baseBrainManifest, type BrainPreferences } from "@/config/brain";
 import type { ChatMessage } from "@/lib/chat-contract";
 import { initialRuntimeStatus } from "@/lib/runtime-status";
-import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
+import { workbenchThreadAccess, type WorkbenchProject, type WorkbenchThread } from "@/workbench/types";
 
 const project: WorkbenchProject = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -160,6 +160,17 @@ beforeAll(() => {
 });
 
 describe("chat workspace simplificado", () => {
+  it("shows a result from an unshared project without an editable composer or a misleading runtime error", () => {
+    const thread: WorkbenchThread = { id: "thread-1", projectId: "private-owner-project", title: "Programada · Factures",
+      status: "active", pinned: false, createdAt: project.createdAt, updatedAt: project.updatedAt,
+      messages: [assistantMessage()], access: { role: "viewer", canEdit: false, canManage: false } };
+    renderWorkspace(thread, null, { readOnly: !workbenchThreadAccess(thread, null).canEdit,
+      runtimeStatus: { ...initialRuntimeStatus, mode: "codex", ready: false, codex: "unavailable" } });
+    expect(screen.getByText("La información está lista.")).toBeInTheDocument();
+    expect(screen.getByText("Conversación de solo lectura · puedes consultar el historial y los archivos compartidos.")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Mensaje" })).not.toBeInTheDocument();
+    expect(screen.queryByText("El servicio no está disponible. Puedes revisar el historial.")).not.toBeInTheDocument();
+  });
   it("stages dropped and pasted files in the current draft without sending or publishing", async () => {
     const onAddDocuments = vi.fn(async () => undefined);
     const onSend = vi.fn();

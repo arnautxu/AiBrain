@@ -45,6 +45,7 @@ import {
   syncOwnSharedAccess,
   syncSharedThreadAccess,
   threadSummary,
+  threadWithAccess,
 } from "@/workbench/shared-access";
 
 function mode(session: AuthSession): "filesystem" | "demo" {
@@ -222,7 +223,7 @@ export async function getThread(session: AuthSession, threadId: string) {
       session.user.id,
       legacyPinnedIds(access.context.own.threads),
     );
-    return { ...access.thread, pinned: pinnedThreadIds.includes(threadId) };
+    return { ...threadWithAccess(access.thread, access.role), pinned: pinnedThreadIds.includes(threadId) };
   }
   assertWorkbenchId(threadId);
   return getDemoThread(session, threadId);

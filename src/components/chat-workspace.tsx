@@ -967,8 +967,10 @@ export function ChatWorkspace({
       </div>
 
       {readOnly ? (
-        <div className="shrink-0 border-t border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-3 text-center text-[11px] font-medium text-[var(--text-muted)]" role="status">
-          {" "}{t("Proyecto de solo lectura · puedes consultar el historial y los archivos compartidos.")}{" "}</div>
+        <div className="shrink-0 border-t border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-3 text-center text-[11px] font-medium text-[var(--text-muted)]">
+          {streamRecovery ? <StreamRecoveryBanner {...streamRecovery} /> : null}
+          <div role="status">{t("Conversación de solo lectura · puedes consultar el historial y los archivos compartidos.")}</div>
+        </div>
       ) : <div className={`mobile-composer-dock ${hasMessages ? "relative shrink-0 bg-[var(--surface)]/94 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:pb-6" : "chat-empty-composer-dock !absolute inset-x-0 z-10"} px-3 md:px-6`}>
         {hasMessages && !isAtBottom ? <div className="mb-2 flex justify-center md:absolute md:left-1/2 md:top-0 md:z-20 md:mb-0 md:-translate-x-1/2 md:-translate-y-full"><button
           type="button"
