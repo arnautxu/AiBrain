@@ -260,6 +260,7 @@ requireMatch(healthcheck, /docker\.sock[\s\S]*127\.0\.0\.1:3000\/api\/health\/re
 requireMatch(nginx, /server 127\.0\.0\.1:__AIBRAIN_HTTP_PORT__/u, "Nginx upstream is not constrained to the installation loopback port");
 requireMatch(nginx, /location = \/api\/chat[\s\S]*proxy_buffering off;[\s\S]*X-Accel-Buffering no/u, "Nginx buffers the streaming chat response");
 requireMatch(nginx, /\/documents\$[\s\S]*client_max_body_size 52m;[\s\S]*proxy_request_buffering off;/u, "Nginx does not stream bounded document uploads");
+requireMatch(nginx, /\/sources\$[\s\S]*client_max_body_size 22m;[\s\S]*proxy_request_buffering off;/u, "Nginx does not stream bounded project-source uploads");
 requireMatch(nginx, /zone=aibrain___AIBRAIN_INSTANCE_TOKEN___auth/u, "Nginx does not isolate the auth limit zone per installation");
 requireMatch(nginx, /upstream aibrain___AIBRAIN_INSTANCE_TOKEN___backend/u, "Nginx does not isolate the upstream per installation");
 requireMatch(nginx, /location ~ \^\/api\/auth\/[\s\S]*limit_req zone=aibrain___AIBRAIN_INSTANCE_TOKEN___auth/u, "Nginx does not rate-limit auth mutations");
