@@ -33,7 +33,14 @@ New 7 October Meta readback: solicitud_preferencies is APPROVED, language ca,
 three BODY parameters. It was not configured in horarIA. Stage only that
 binding, without sending or enabling automatic sending. Other templates remain
 PENDING; the submitted schedule template lacks the required DOCUMENT header.
-Do not create/modify provider templates or contact workers as part of this fix.
+A human authorization now permits a live test only to the designated PROVA
+number; no other employee or general sends. No provider template was modified.
+The service now reads actual Meta approval/language/body/header schemas,
+admits supported 3/4 initial and 2/4 reminder variables before state changes,
+accepts a strictly checked employeeIds subset for limited tests, skips expired
+reminders, and exposes an explicit manager-notifications disable switch.
+The new pending reminder has four variables and the old sender had two; the
+new sender uses its actual approved schema. The initial template stays three.
 
 Invoice tables now preserve inert <br> line breaks and usable minimum column
 width, with horizontal scrolling instead of squeezing long invoice numbers.
