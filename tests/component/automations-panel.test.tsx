@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "../render-spanish";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "../render-spanish";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_AUTOMATION_EXECUTION_CONTEXT, type AutomationTaskView } from "@/automations/contracts";
 import { AutomationsPanel } from "@/components/automations-panel";
@@ -58,9 +58,29 @@ const viewerTask: AutomationTaskView = {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("AutomationsPanel audience", () => {
+  it("updates a queued task after the worker finishes without reloading or resubmitting it", async () => {
+    let completed = false;
+    const request = vi.fn(async () => Response.json({ tasks: [{ ...viewerTask,
+      manualRun: completed ? null : { requestId: "30000000-0000-4000-8000-000000000001", scheduledFor: "2026-10-07T12:00:00.000Z" },
+      lastRunStatus: completed ? "succeeded" : null,
+      lastRunAt: completed ? "2026-10-07T12:00:00.000Z" : null,
+      access: { canManage: true, canViewResults: true },
+    }], audienceDirectory: { membershipPolicy: "current", currentUserId: ownerId, users: [], groups: [] } }));
+    vi.stubGlobal("fetch", request);
+    vi.useFakeTimers();
+    await act(async () => { render(<AutomationsPanel open projects={[project]} />); });
+    expect(screen.getByText("Ejecución en cola")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ejecutar ahora" })).toBeDisabled();
+    completed = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(screen.queryByText("Ejecución en cola")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ejecutar ahora" })).toBeEnabled();
+    expect(request.mock.calls).toHaveLength(2);
+  });
   it("creates a durable 120-minute interval task from the UI", async () => {
     let submitted: Record<string, unknown> | null = null;
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {

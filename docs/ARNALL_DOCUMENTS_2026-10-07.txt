@@ -140,3 +140,25 @@ than assuming two hours, so a configured three-hour interval stays authoritative
 David explicitly authorized a temporary owner session for the invoice UI work.
 It is bounded to one hour and must be revoked after restoring David's cookie;
 no password or personal-connector ownership changes are authorized or required.
+
+Additional live invoice UI finding: the automation panel kept the manual run
+queued after the worker advanced, because it refreshed only when opened. Poll
+the authorized task/history receipts every 15 seconds while visible and idle,
+without disturbing open forms, overlapping requests or resubmitting work.
+The interval help must describe the selected interval instead of always two
+hours. Component regression (10 tests) passes, including queued-to-finished.
+
+The authorized owner UI reconnected the existing factures@arnall.cat INBOX
+credential without changing its password, moving its initial date from tomorrow
+to 7 October. One owner-only Puntejar factures automation was created from the
+UI with interval 180 minutes and Europe/Madrid. Its first real manual worker run
+finished, read two invoices against both source workbooks, recorded one reviewed
+and one needs_attention, and attached the tracking Excel. Seven more supplier
+PDFs failed strict signature validation: a bounded serialized HTTP header
+prefix preceded the PDF, and declared content-length exactly matched its body.
+Accept this narrowly verified envelope for mail reading only. Keep the entire
+original and original hash private; validate/materialize/download a clearly
+named reading copy. Arbitrary HTML, unknown/duplicate headers, wrong lengths
+and oversized prefixes remain rejected. 34 focused connector/runtime/UI tests
+pass; the two actual sampled attachments pass local envelope extraction.
+Release deployment, all-seven retry and duplicate-free repeat UI remain gates.
