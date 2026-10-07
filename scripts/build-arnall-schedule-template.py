@@ -114,6 +114,10 @@ def extract(source, mode='blank'):
                         node.set(key,str(mapping[old]))
         dxfs[:]=used;dxfs.set('count',str(len(used)))
         for ext in styles.findall('m:extLst',N): styles.remove(ext)
+        # ElementTree drops declarations referenced only by mc:Ignorable.
+        # Keep that binding: Excel processes MCE even when a ZIP reader does not.
+        if styles.get('{http://schemas.openxmlformats.org/markup-compatibility/2006}Ignorable') == 'x14ac':
+            styles.set('xmlns:x14ac', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac')
         names=['HORARI','TRACTES','VACANCES','PESONAL']
         workbook=ET.Element(tag('workbook'))
         ET.SubElement(ET.SubElement(workbook,tag('bookViews')),tag('workbookView'),{'activeTab':'0'})

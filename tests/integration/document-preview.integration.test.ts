@@ -34,6 +34,30 @@ const tools = {
 };
 const hasToolchain = [tools.soffice, tools.pdfinfo, tools.pdftoppm, tools.pdftotext].every(existsSync);
 const runFullMatrix = hasToolchain && process.env.AIBRAIN_REAL_DOCUMENT_MATRIX === "1";
+
+it.skipIf(!hasToolchain)('supplies a real scanned middle PDF page together with all text pages', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'aibrain-mixed-scanned-pdf-'));
+  roots.push(root);
+  const data = await readFile(path.join(process.cwd(), 'tests/fixtures/mixed-scanned-three-pages.pdf'));
+  const locks = new ResourceLockManager({ rootDirectory: path.join(root, 'locks') });
+  const stagingRoot = path.join(root, 'staging');
+  const staged = await new FileDocumentStagingStore(stagingRoot, locks).stage({
+    threadId: '11111111-1111-4111-8111-111111111111',
+    uploadId: '22222222-2222-4222-8222-222222222222',
+    validated: validateUploadedDocument({ fileName: 'mixed.pdf', declaredMimeType: 'application/pdf', data }), data,
+  });
+  const previews = new DocumentPreviewService({ stagingRoot, previewRoot: path.join(root, 'previews'), lockManager: locks, tools, requireQpdf: Boolean(tools.qpdf) });
+  expect(await previews.create(staged)).toMatchObject({ status: 'ready', pages: 3 });
+  const inputs = await new ServerTurnDocumentInputResolver({ stagingRoot, previews, pdftotext: tools.pdftotext }).resolve(staged);
+  const images = inputs.filter(input => input.type === 'image');
+  expect(images).toHaveLength(2);
+  const middle = await previews.renderPage(staged.threadId, staged.uploadId, 2);
+  expect(images[1]).toMatchObject({ url: `data:image/png;base64,${middle.toString('base64')}` });
+  const text = JSON.stringify(inputs.filter(input => input.type === 'text'));
+  expect(text).toContain('QA-PAGE-1-TEXT');
+  expect(text).toContain('QA-PAGE-3-TEXT');
+  expect((await readFile(path.join(stagingRoot, staged.relativePath))).equals(data)).toBe(true);
+}, 30_000);
 const roots: string[] = [];
 
 it.skipIf(!hasToolchain || !tools.qpdf)("repairs the exact legacy hello-world PDF without changing source bytes", async () => {

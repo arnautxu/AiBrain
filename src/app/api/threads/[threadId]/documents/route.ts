@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import path from "node:path";
+import { stageMacroExcelUpload } from "@/documents/macro-excel-upload";
 import { stageLegacyExcelUpload } from "@/documents/legacy-excel-upload";
 import { operationalLogger } from "@/operations/server-logger";
 import { getSession } from "@/auth/session";
@@ -138,7 +139,11 @@ export async function POST(request: Request, context: RouteContext) {
           declaredMimeType: parsedUpload.declaredMimeType,
           filePath: parsedUpload.temporaryPath,
         };
-        const legacy = path.extname(parsedUpload.fileName).toLowerCase() === ".xls"
+        const legacy = path.extname(parsedUpload.fileName).toLowerCase() === ".xlsm"
+          ? await stageMacroExcelUpload({ ...uploadSource, threadId, uploadId, size: parsedUpload.size }, {
+              conversionGate: services.conversionGate, signal: request.signal, locks: services.locks, staging: services.staging, originals: services.legacyOriginals,
+            })
+          : path.extname(parsedUpload.fileName).toLowerCase() === ".xls"
           ? await stageLegacyExcelUpload({ ...uploadSource, threadId, uploadId, size: parsedUpload.size }, {
               reader: services.passiveXlsReader, soffice: services.toolchain.soffice,
               conversionGate: services.conversionGate, signal: request.signal,

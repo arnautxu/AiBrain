@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { MAX_FILES_PER_MESSAGE } from "@/lib/chat-attachment-limits";
 import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
 import { isSameOriginMutation } from "@/auth/request-security";
@@ -296,6 +297,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No autenticat." }, { status: 401 });
   }
   const body: unknown = await request.json().catch(() => null);
+  if (body && typeof body === "object" && "options" in body && body.options && typeof body.options === "object" &&
+      (("documentUploadIds" in body.options && Array.isArray(body.options.documentUploadIds) && body.options.documentUploadIds.length > MAX_FILES_PER_MESSAGE) ||
+       ("attachments" in body.options && Array.isArray(body.options.attachments) && body.options.attachments.length > MAX_FILES_PER_MESSAGE))) {
+    return NextResponse.json({ error: `Puedes adjuntar como máximo ${MAX_FILES_PER_MESSAGE} archivos por mensaje. Divide el lote en varios mensajes; no se ha procesado ningún archivo de esta petición.`, code: "CHAT_ATTACHMENT_LIMIT_EXCEEDED", maximumFiles: MAX_FILES_PER_MESSAGE }, { status: 400 });
+  }
   if (!isChatRequest(body) || (!body.message.trim() && !body.options.attachments.length && !body.options.documentUploadIds?.length) ||
     !isUuid(body.projectId) || !isUuid(body.threadId) ||
     !isUuid(body.userMessageId) || !isUuid(body.assistantMessageId)) {

@@ -7,6 +7,8 @@ import { workbenchErrorResponse } from "@/workbench/http";
 import { isUuid, type ProjectSource } from "@/workbench/types";
 import { parseStreamingDocumentUpload } from "@/documents/multipart-upload";
 import { validateUploadedDocumentFile, UploadValidationError } from "@/documents/upload-validation";
+import { documentServicesForUser } from "@/documents/server-service";
+import { stageMacroExcelUpload } from "@/documents/macro-excel-upload";
 import { projectSourceStore } from "@/documents/project-sources";
 import { FileDocumentStorageGate } from "@/documents/storage-gate";
 import path from "node:path";
@@ -28,11 +30,15 @@ export async function POST(request: Request, context: { params: Promise<{ projec
       const upload = await parseStreamingDocumentUpload(request, staging.rootDirectory, locks);
       try {
         if (!isUuid(upload.uploadId) || upload.size > 20_000_000) throw new UploadValidationError("UPLOAD_SIZE_INVALID", "Archivo demasiado grande.");
-        const validated = await validateUploadedDocumentFile({ filePath: upload.temporaryPath, fileName: upload.fileName, declaredMimeType: upload.declaredMimeType });
-        if (!["xlsx", "pdf", "docx", "pptx", "text"].includes(validated.kind)) {
+        const services = path.extname(upload.fileName).toLowerCase() === ".xlsm" ? await documentServicesForUser(config, access.ownerUserId) : null;
+        const macro = path.extname(upload.fileName).toLowerCase() === ".xlsm"
+          ? await stageMacroExcelUpload({ filePath: upload.temporaryPath, fileName: upload.fileName, declaredMimeType: upload.declaredMimeType, size: upload.size, threadId: projectId, uploadId: upload.uploadId }, { conversionGate: services!.conversionGate, staging, originals: services!.legacyOriginals, locks, signal: request.signal })
+          : null;
+        const validated = macro ? null : await validateUploadedDocumentFile({ filePath: upload.temporaryPath, fileName: upload.fileName, declaredMimeType: upload.declaredMimeType });
+        if (!["xlsx", "pdf", "docx", "pptx", "text"].includes((macro ?? validated)!.kind)) {
           return NextResponse.json({ error: "Usa XLSX, PDF, DOCX, PPTX o un archivo de texto para las referencias." }, { status: 400 });
         }
-        const doc = await staging.stageFile({ threadId: projectId, uploadId: upload.uploadId, validated, sourcePath: upload.temporaryPath });
+        const doc = macro ?? await staging.stageFile({ threadId: projectId, uploadId: upload.uploadId, validated: validated!, sourcePath: upload.temporaryPath });
         const source: ProjectSource = { id: doc.uploadId, kind: "file", name: doc.fileName, url: null,
           mimeType: doc.mediaType, size: doc.size, excerpt: null, status: "ready", createdAt: doc.createdAt };
         return NextResponse.json({ source }, { status: 201, headers: { "Cache-Control": "private, no-store" } });

@@ -20,6 +20,9 @@ for (const name of ["week", "balance", "municipis"]) add(`absences.${name}`, "GE
 add("absences.import-holidays", "POST", "absences/import-holidays", "write", "body: establecimientoId, year; calls official holiday data provider");
 add("preferences.list", "GET", "preferences", "read", "query: semana, establecimiento");
 add("preferences.sheets", "GET", "preferences/sheets", "read", "query: semana, establecimiento");
+add("collection.template", "GET", "integration/collection-template", "read", "query: semana, establecimiento. Attach a blank availability Excel and return a WhatsApp reply template and seven-day form schema; no messages or business writes.");
+add("collection.export", "GET", "integration/collection-export", "read", "query: semana, establecimiento. Attach the authorized shop's received preferences and pending responses as Excel; unknown days remain SIN_INDICAR.");
+add("collection.preview", "POST", "integration/collection-preview", "draft", "body: establecimientoId, semana, responses: [{employeeId, week, source: WHATSAPP|FORMULARIO, days:{LUNES..DOMINGO: MANANA|TARDE|AMBOS|NO_DISPONIBLE|SIN_INDICAR}, notes}]. Validate and attach Excel, never apply preferences or send messages. Employee identity/source require review before saving.");
 add("preferences.update", "PUT", "preferences/:id", "write", "id=empleadoId; body: semana, turnoPreferido, diasNoDisponible, maxHorasSemana, flexibilidad, notasAdicionales");
 add("preferences.upload-sheet", "POST", "preferences/sheets", "ai", "uploadPath: authorized project image; body: semana");
 add("schedules.list", "GET", "schedules", "read", "query: semana, establecimiento");
@@ -37,6 +40,9 @@ add("settings.get", "GET", "ajustes", "read", "query: establecimiento");
 add("settings.update", "PUT", "ajustes", "write", "body: establecimientoId, valores. Includes automatic WhatsApp collection/reminder windows.");
 for (const name of ["status", "conversation", "config-check"]) add(`whatsapp.${name}`, "GET", `whatsapp/${name}`, "read", "query: establecimiento, semana; conversation uses telefono");
 for (const name of ["broadcast", "reminders", "unblock"]) add(`whatsapp.${name}`, "POST", `whatsapp/${name}`, "delivery", "body: establecimientoId, semana; unblock uses telefono");
+OPERATIONS["whatsapp.broadcast"].fields = "body: establecimientoId, semana, employeeIds?: number[]. When the user selects one person or a limited group, ALWAYS pass their exact IDs from employees.list; never omit employeeIds for a limited test. The service verifies every selected person belongs to this shop and is active with a phone. No reset unless explicitly authorized. Never send to others.";
+OPERATIONS["whatsapp.reminders"].fields = "body: establecimientoId, semana, employeeIds?: number[]. ALWAYS include exact employeeIds for a limited test or selected recipients. Skips completed, expired and recently reminded conversations. Does not send to other employees.";
+OPERATIONS["whatsapp.config-check"].fields = "Read-only actual provider template names, language, approval status, body-variable count and document-header type, plus configured bindings and automatic/manager notification switches. Check this before recommending names/variables or claiming readiness. Configuration alone does not prove delivery.";
 
 export type OperationInput = { operation: string; id?: string; query?: Record<string, string | number | boolean>; body?: Record<string, unknown>; uploadPath?: string };
 export function resolveOperation(input: OperationInput) {

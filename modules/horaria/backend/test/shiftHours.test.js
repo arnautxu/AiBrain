@@ -3,6 +3,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { shiftHours, jornadaReducida, entradaPara, descansoPara, salidaPara, duracionDescanso, DESCANSO_HORAS, REDUCED_DAY_FIELDS } from '../src/utils/shiftHours.js';
 
+test('honours an explicit whole-week afternoon start without assuming conditional or conflicting starts', () => {
+  const condicionesFijas = 'Siempre hace de tardes, de 16h hasta el cierre. Nunca días ni mañanas';
+  assert.equal(entradaPara({ condicionesFijas }, 'TARDE'), '16:00');
+  assert.equal(salidaPara({ condicionesFijas }, 'TARDE', {}), '22:00');
+  assert.equal(entradaPara({ condicionesFijas, horaEntradaTarde: '15:00' }, 'TARDE'), '15:00');
+  for (const text of ['El lunes siempre hace de tardes, de 16h hasta el cierre', 'Siempre tardes, si trabaja de 16h hasta el cierre', 'Siempre tardes, de 25h hasta el cierre', 'Siempre tardes, de 16h hasta el cierre. Siempre tardes, de 17h hasta el cierre']) {
+    assert.equal(entradaPara({ condicionesFijas: text }, 'TARDE'), '14:45');
+  }
+});
+
 // A shift used to have one fixed length for everyone. That silently inflated
 // every part-timer's week: David Castillo works 8:00–12:00 on a 20h contract
 // and each morning counted as 7h, so his five days added up to 35h.

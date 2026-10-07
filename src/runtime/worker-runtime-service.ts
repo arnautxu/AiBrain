@@ -55,7 +55,7 @@ function randomRequest(
   return {
     method,
     id: `${purpose}:${randomUUID()}`,
-    params,
+    ...(params === undefined ? {} : { params }),
   } as ClientRequest;
 }
 
@@ -171,7 +171,7 @@ export class WorkerAppServerClient {
       await this.weeklyBudget?.beforeRequest(method, params, purpose);
     }
     const result = await this.router.request(
-      { method, id: purpose, params } as ClientRequest,
+      { method, id: purpose, ...(params === undefined ? {} : { params }) } as ClientRequest,
       timeoutMs,
       async (value, event) => {
         if (method === "turn/start" || method === "turn/steer") {

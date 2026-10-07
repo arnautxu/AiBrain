@@ -7,6 +7,7 @@ import type { DocumentArtifact } from "@/lib/chat-contract";
 import { validateUploadedDocument } from "@/documents/upload-validation";
 import { resourceLocationIndexForInstallation } from "@/library/server-resource-access";
 import { readRegularFileWithin } from "@/security/safe-file";
+import { validateGeneratedXlsxXml } from "@/documents/generated-xlsx-validation";
 
 const MAXIMUM_DOCUMENT_BYTES = 50 * 1024 * 1024;
 
@@ -116,6 +117,7 @@ export async function persistGeneratedDocumentArtifact(input: {
   if (validated.kind !== format.kind || validated.sha256 !== createHash("sha256").update(input.contents).digest("hex")) {
     throw new Error("Generated document validation changed its identity.");
   }
+  if (format.kind === "xlsx") await validateGeneratedXlsxXml(input.contents);
   const root = await secureDocumentRoot(input.context.installation.paths.dataRoot, input.context.storageOwnerId, input.artifactId);
   await persistImmutableDocument(root, fileName, input.contents);
   const relativePath = path.posix.join("generated-document-artifacts", input.context.storageOwnerId, input.artifactId, fileName);

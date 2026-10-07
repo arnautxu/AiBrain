@@ -28,3 +28,10 @@ describe("fictional Arnall schedule review", () => {
     ] }] })).toThrow("no coincide");
   });
 });
+
+it("rejects a final fictional grid above 40 or a reduced maximum", () => {
+  const base = schedule(), person = base.people[0];
+  const days = Array(7).fill({ code: "M", firstLine: "09:00–16:00", secondLine: "" });
+  expect(() => reviewFictionalArnallSchedule({ ...base, people: [{ ...person, codeHours: { M: 7, T: 6, D: 10 }, days }] })).toThrow("supera el máximo");
+  expect(() => reviewFictionalArnallSchedule({ ...base, people: [{ ...person, maxWeeklyHours: 10 }] })).toThrow("supera el máximo");
+});

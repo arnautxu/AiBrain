@@ -1,4 +1,5 @@
 import { createAiClient, requireDelivery } from '../integration/providers.js';
+import { readMetaTemplates, requireApprovedTemplate, selectedRecipients, verifySelectedRecipients } from '../integration/meta-templates.js';
 import { findOverlappingAbsence, describeOverlap } from '../utils/absenceOverlap.js';
 import { fusionaPaperIWhatsapp, marquesDelFull, TORN_DE_LA_MARCA } from '../utils/fusioPaper.js';
 // The long form — "del 17 al 23 d'agost". The local weekLabel below writes
@@ -153,6 +154,23 @@ const MANAGER_REMINDER_TEMPLATE = process.env.WHATSAPP_TEMPLATE_MANAGER_REMINDER
 const SCHEDULE_TEMPLATE = process.env.WHATSAPP_TEMPLATE_HORARIO;
 const TEMPLATE_LANG = process.env.WHATSAPP_TEMPLATE_LANG || 'es';
 
+export function requireBusinessTemplate(kind) {
+  if (MOCK_MODE || USE_TWILIO) return;
+  const templates = { broadcast: BROADCAST_TEMPLATE, reminder: REMINDER_TEMPLATE, manager: MANAGER_REMINDER_TEMPLATE, schedule: SCHEDULE_TEMPLATE };
+  const keys = { broadcast: 'WHATSAPP_TEMPLATE_BROADCAST', reminder: 'WHATSAPP_TEMPLATE_REMINDER', manager: 'WHATSAPP_TEMPLATE_MANAGER_REMINDER', schedule: 'WHATSAPP_TEMPLATE_HORARIO' };
+  if (!Object.hasOwn(templates, kind)) throw new Error('Tipo de plantilla no válido.');
+  if (!templates[kind]) throw new Error(`Falta ${keys[kind]}: configura una plantilla aprobada antes del envío automático. No se ha enviado el mensaje.`);
+}
+
+export async function approvedBusinessTemplate(kind) {
+  requireBusinessTemplate(kind);
+  if (MOCK_MODE || USE_TWILIO || USE_D360) return null;
+  const binding = { broadcast: BROADCAST_TEMPLATE, reminder: REMINDER_TEMPLATE, manager: MANAGER_REMINDER_TEMPLATE, schedule: SCHEDULE_TEMPLATE }[kind];
+  const { name, language } = nomIIdioma(binding);
+  return requireApprovedTemplate(await readMetaTemplates(), name, language,
+    kind === 'broadcast' ? [3, 4] : kind === 'reminder' ? [2, 4] : kind === 'schedule' ? [3] : [2], kind === 'schedule');
+}
+
 // One language for every template is one language too few.
 //
 // The first broadcast failed with "template name (recordatori_broadcast) does
@@ -264,6 +282,7 @@ export async function downloadTwilioMedia(mediaUrl) {
 // ─────────────────────────────────────────────
 export async function sendWhatsappMedia(telefono, { texto, mediaUrl, filename, bodyParams = [] }) {
   requireDelivery();
+  await approvedBusinessTemplate('schedule');
   if (MOCK_MODE) {
     const entry = { to: telefono, text: `${texto} [adjunto: ${filename}]`, mediaUrl, timestamp: new Date().toISOString() };
     mockMessages.push(entry);
@@ -432,6 +451,8 @@ export async function sendWhatsappTemplate(telefono, { name, language, bodyParam
 export function getMockMessages() {
   return mockMessages;
 }
+
+export function whatsappProvider() { return PROVIDER; }
 
 export function isMockMode() {
   return MOCK_MODE;
@@ -936,6 +957,7 @@ export async function sendHealthAlert() {
 // a partially-sent week is visible too.
 // ─────────────────────────────────────────────
 export async function sendWeeklyBroadcastReminder() {
+  if (process.env.HORARIA_MANAGER_NOTIFICATIONS === '0') return { avisado: false, motivo: 'desactivado' };
   const targetWeek = getNextWeek();
   const establecimientos = await prisma.establishment.findMany({
     select: { id: true, nombre: true },
@@ -975,6 +997,7 @@ export async function sendWeeklyBroadcastReminder() {
     return { targetWeek, pendientes, problemas, avisado: false, motivo: 'sin_manager' };
   }
 
+  requireBusinessTemplate('manager');
   const limite = deadlineLabel(await computeDeadline(targetWeek));
   // Problems go first: they are the part that needs acting on today.
   const aviso = problemas.length > 0
@@ -1083,23 +1106,24 @@ async function dissabteDelFullPassa(empleadoId, establecimientoId, semana, deman
   return { passa: false, ultim: ultim.turno };
 }
 
-export async function broadcastPreferenceRequest(establecimientoId, semana, { forcar = false } = {}) {
+export async function broadcastPreferenceRequest(establecimientoId, semana, { forcar = false, employeeIds } = {}) {
+  const template = await approvedBusinessTemplate('broadcast');
   const targetWeek = semana || getNextWeek();
   const fechaLimite = await computeDeadline(targetWeek); // el dimecres anterior a les 13h
+  const employees = await prisma.employee.findMany({
+    where: selectedRecipients(quiRepLaPeticio(establecimientoId), employeeIds),
+    select: { id: true, nombre: true, telefonoWhatsapp: true },
+  });
+  verifySelectedRecipients(employees, employeeIds);
 
   // Weekly heartbeat: clear personal data past its retention window. Never let
   // housekeeping stop the broadcast — the messages matter more than the cleanup.
   try {
-    await purgeOldPersonalData();
+    if (employeeIds === undefined) await purgeOldPersonalData();
   } catch (err) {
     console.error('[Retención] no se pudo purgar:', err.message);
   }
   const limiteLabel = deadlineLabel(fechaLimite);
-
-  const employees = await prisma.employee.findMany({
-    where: quiRepLaPeticio(establecimientoId),
-    select: { id: true, nombre: true, telefonoWhatsapp: true },
-  });
 
   const results = [];
 
@@ -1149,7 +1173,8 @@ export async function broadcastPreferenceRequest(establecimientoId, semana, { fo
       if (!MOCK_MODE && BROADCAST_TEMPLATE) {
         // {{3}} = deadline. Without it the approved template cannot state how
         // long they have, and the whole point of the weekly cycle is the cut-off.
-        await sendWhatsappTemplate(emp.telefonoWhatsapp, { name: BROADCAST_TEMPLATE, bodyParams: [emp.nombre, semanaLabel, limiteLabel] });
+        const parts = deadlineParts(fechaLimite);
+        await sendWhatsappTemplate(emp.telefonoWhatsapp, { name: BROADCAST_TEMPLATE, bodyParams: template?.bodyParameters === 4 ? [emp.nombre, semanaLabel, parts.date, parts.time] : [emp.nombre, semanaLabel, limiteLabel] });
       } else {
         await sendWhatsappMessage(emp.telefonoWhatsapp, mensaje);
       }
@@ -1803,6 +1828,13 @@ function deadlineLabel(date, lang = 'ca') {
     ? ''
     : ` ${aLes} ${d.getHours()}${d.getMinutes() ? ':' + String(d.getMinutes()).padStart(2, '0') : 'h'}`;
   return `${dias[d.getDay()]} ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}${hora}`;
+}
+
+export function deadlineParts(date) {
+  const value = new Date(date);
+  if (!Number.isFinite(value.getTime())) throw new Error('Termini no vàlid.');
+  return { date: new Intl.DateTimeFormat('ca-ES', { timeZone: 'Europe/Madrid', day: 'numeric', month: 'long' }).format(value),
+    time: new Intl.DateTimeFormat('ca-ES', { timeZone: 'Europe/Madrid', hour: '2-digit', minute: '2-digit', hour12: false }).format(value) };
 }
 
 // Which of the two languages to answer a closed-window message in. The model
@@ -2888,6 +2920,7 @@ export async function botiguesAutomatiques() {
 
 /** Avisa la responsable general del que ha sortit sol, si hi ha res a dir. */
 export async function informaLaResponsable(text) {
+  if (process.env.HORARIA_MANAGER_NOTIFICATIONS === '0') return false;
   const gm = await prisma.employee.findFirst({
     where: { rol: 'MANAGER_GENERAL', activo: true, telefonoWhatsapp: { not: null } },
     select: { nombre: true, telefonoWhatsapp: true },
@@ -3012,13 +3045,15 @@ export async function recordatorisAutomatics(semana, ara = new Date()) {
  * persona — amb un batec cada hora, el marge de 12 h n'hauria enviat dos al dia
  * durant tota la finestra.
  */
-export async function sendReminders(establecimientoId, semana, { margeMs = RECORDATORI_MARGE_MS } = {}) {
+export async function sendReminders(establecimientoId, semana, { margeMs = RECORDATORI_MARGE_MS, employeeIds } = {}) {
+  const template = await approvedBusinessTemplate('reminder');
   const targetWeek = semana || getNextWeek();
 
   const employees = await prisma.employee.findMany({
-    where: quiRepLaPeticio(establecimientoId),
+    where: selectedRecipients(quiRepLaPeticio(establecimientoId), employeeIds),
     select: { id: true, nombre: true, telefonoWhatsapp: true },
   });
+  verifySelectedRecipients(employees, employeeIds);
 
   const conversations = await prisma.whatsappConversation.findMany({
     where: { semana: targetWeek, telefono: { in: employees.map((e) => e.telefonoWhatsapp).filter(Boolean) } },
@@ -3038,6 +3073,7 @@ export async function sendReminders(establecimientoId, semana, { margeMs = RECOR
 
     // Only remind if conversation exists and is NOT completed
     if (!conv || conv.estado === 'COMPLETADO') continue;
+    if (conv.fechaLimite && new Date(conv.fechaLimite).getTime() <= Date.now()) continue;
 
     // Ja se li ha recordat fa poc. El broadcast tenia guarda contra la doble
     // execució i això no: un cron que es dispari dues vegades li enviava dos
@@ -3061,7 +3097,8 @@ export async function sendReminders(establecimientoId, semana, { margeMs = RECOR
     // porta — i a més s'enduia la resta de l'equip.
     try {
       if (!MOCK_MODE && REMINDER_TEMPLATE) {
-        await sendWhatsappTemplate(emp.telefonoWhatsapp, { name: REMINDER_TEMPLATE, bodyParams: [emp.nombre, semanaLabel] });
+        const parts = deadlineParts(conv.fechaLimite || await computeDeadline(targetWeek));
+        await sendWhatsappTemplate(emp.telefonoWhatsapp, { name: REMINDER_TEMPLATE, bodyParams: template?.bodyParameters === 4 ? [emp.nombre, semanaLabel, parts.date, parts.time] : [emp.nombre, semanaLabel] });
       } else {
         await sendWhatsappMessage(emp.telefonoWhatsapp, mensaje);
       }

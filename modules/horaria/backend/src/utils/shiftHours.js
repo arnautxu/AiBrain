@@ -12,6 +12,8 @@
 // assign it; the doubling here is only a safety net for data that predates this.
 // ─────────────────────────────────────────────
 
+import { fixedAfternoonEntry } from './fixedAfternoonEntry.js';
+
 export const STANDARD_SHIFT_HOURS = { MANANA: 7, TARDE: 6, PARTIDO: 10, LIBRE: 0 };
 export const DEFAULT_ENTRADA = { MANANA: '07:30', TARDE: '14:45', PARTIDO: '07:30' };
 
@@ -66,7 +68,7 @@ export function descansoPara(turno, establishment) {
 // Entry time for a shift, honouring the employee's own start time when set.
 export function entradaPara(empleado, turno) {
   if (!turno || turno === 'LIBRE') return null;
-  if (turno === 'TARDE') return empleado?.horaEntradaTarde || DEFAULT_ENTRADA.TARDE;
+  if (turno === 'TARDE') return empleado?.horaEntradaTarde || fixedAfternoonEntry(empleado?.condicionesFijas) || DEFAULT_ENTRADA.TARDE;
   return empleado?.horaEntradaManana || DEFAULT_ENTRADA[turno] || DEFAULT_ENTRADA.MANANA;
 }
 

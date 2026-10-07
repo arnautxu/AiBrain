@@ -1,0 +1,89 @@
+Arnall incidents: 6 October 2026
+
+Candidate branch: codex/arnall-incidents-20261006
+Base and observed production release: cc7ffa7906da7ee4dcb6f8393b46db5500512d00.
+No business data, production release, provider templates or messages were changed.
+Private source chats/workbooks remain outside the repository and must not be committed.
+
+Changes
+- Generated workbook XML is checked before ready artifact publication. A dropped
+  x14ac declaration made the source styles refer to an undeclared mc:Ignorable
+  namespace. Restore it in both the builder and bundled template. Translate table
+  column names together with their worksheet header cells.
+- Keep the contract maximum after ALL scheduler condition passes. Other-shop
+  hours consume the same weekly maximum. Intensity and coverage never grant a
+  five/eight-hour allowance. Clear invalid availability/absence assignments and
+  repair final coverage maxima; report remaining minima. Bounded two-day moves
+  can redistribute capped hours instead of leaving a shift empty.
+- Resolve explicitly weekday-named legacy rules that lack diasAplica, consistently
+  in generation, final repair, draft review and saved-week conflict review.
+- Recognize explicit whole-week afternoon-only prose and forbid morning/split
+  assignments for it. Include the existing fixed-condition checker in draft
+  review; disclose unparsed conditions and unconfigured coverage days.
+  Respect an explicit afternoon start (16:00 in the incident) when no stored
+  employee/shift override exists. Trailing closing/duration prose still requires
+  review; recognising the shift family does not certify the entire sentence.
+- Provide blank collection/export/validated-response Excel operations scoped to
+  the authenticated manager's shop roster, including permitted visitors. Unknown
+  availability remains SIN_INDICAR. Collection never sends or applies preferences.
+  Include WhatsApp reply text, a seven-day form schema and a local response form.
+- Include four Meta template drafts with the parameter counts used by the service.
+  Report inferred simulation/provider mode accurately. Configured credentials do
+  not prove provider approval. Missing business-initiated Meta templates block
+  before automatic collection changes or a free-form outbound attempt.
+- Attach bounded images for scanned PDF pages beyond page one, retain page
+  boundaries and explicitly identify pages not supplied. Existing total image
+  and text budgets remain enforced.
+- Reject >20 attachments with a specific error and maximum before worker work.
+- Omit undefined params from parameterless App Server requests. Strict JSON
+  validation previously rejected account/rateLimits/read and account/usage/read
+  before dispatch while mocks hid the error.
+- Deliver large responses through ordered bounded chunks, preserving the
+  8 MiB WebSocket frame ceiling. One assembly has a 32 MiB/30-second ceiling,
+  checks identity/order/base64/UTF-8/SHA-256 and discards incomplete assembly on
+  disconnect. Only complete original events reach durable projection. Local
+  gateway regression recovers the exact 9 MiB final answer, remains running,
+  then replays it after restart without dispatching the admitted request again.
+- Keep streaming text in a per-workbench/turn display buffer with narrow
+  subscriptions. Every non-delta boundary and final/abort path incorporates the
+  complete text into the chat state. Server durability and permissions remain
+  authoritative. Closed plain Markdown blocks keep their nodes at completion;
+  complex Markdown still gets its full final parse. Avoid no-op thread updates.
+  Five UI regressions cover cancellation, independent background turns,
+  persistence/refresh and recovery after a real loopback connection outage.
+- Apply the maximum to fictional schedule reviews too; reject overlapping split
+  intervals and above-maximum weeks.
+
+Acceptance boundaries
+ZIP/XML admission, openpyxl and LibreOffice read/print checks are local evidence;
+Microsoft Excel user acceptance is still required. Original 2,500 formulas and
+print geometry are preserved. Broken historical references and missing personnel,
+monthly and vacation balances remain disclosed; they are not certified calculations.
+
+A capped real schedule still has coverage/fixed-condition conflicts. In the read
+snapshot, two eligible morning workers can cover at most ten elaboration morning
+slots under 20h/40h maxima; the saved rules need twelve. Do not silently increase
+contracts or remove absences. Reinforcement or an approved business-rule change
+is needed. The final review distinguishes these decisions from code fixes.
+
+Large-answer recovery is locally validated, with authenticated live acceptance
+pending. At CPU x4, the optimized local production build passes the unchanged
+streaming budgets: 757 frames, 150 mutations, p95 18.5 ms, slow-frame ratio
+0.00132 and 200 ms total long tasks. The development build improves to p95
+17.6 ms but still fails the 500 ms long-task budget at 524 ms. Preserve both
+results; this is not authenticated production/client acceptance. Legacy customer
+files and external connector cases remain unaccepted.
+
+Production alerts also show disk pressure and missing/stale AiBrain backup/replica
+verification. Separate knowledge and horaria backup timers do not certify AiBrain
+chat restore. The allowlisted storage-cleanup dry run found no eligible reclaim;
+no broad prune or user-data deletion was performed. Backup/replica recovery needs
+its own tested operational window before any release claim.
+Today's knowledge-backup systemd job also failed with a start timeout; this is
+distinct from the missing/stale chat backup and replica evidence.
+
+Release
+Follow RELEASE_AND_ACCEPTANCE_RUNBOOK.md for explicit release gates, immutable
+image identity, pre-deploy evidence, backup/readiness and authenticated readbacks.
+Meta approval, business schedule publication and user Excel acceptance are separate
+from deploying the code. Do not send or activate delivery as part of this release.

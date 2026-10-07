@@ -14,6 +14,7 @@ import { etiquetaTorn, etiquetaDia, llistaDies } from './etiquetes.js';
 
 const CA = {
   diesFesta: (n, te) => `Li toquen ${n} dia/es de festa i en té ${te}`,
+  nomesTardes: (m, p, L) => `Només ha de fer ${L('TARDE')}, i té ${m} de ${L('MANANA')} i ${p} de ${L('PARTIDO')}`,
   nomesMatins: (t, p, L) => `Només ha de fer ${L('MANANA')}, i té ${t} de ${L('TARDE')} i ${p} de ${L('PARTIDO')}`,
   restaMatins: (t, L) => `Fora dels torns de ${L('PARTIDO')} ha de fer ${L('MANANA')}, i té ${t} de ${L('TARDE')}`,
   maxTardes: (max, te, detall) => `Màxim ${max} tardes i en té ${te}${detall}`,
@@ -48,6 +49,7 @@ const CA = {
 
 const ES = {
   diesFesta: (n, te) => `Le tocan ${n} día(s) de fiesta y tiene ${te}`,
+  nomesTardes: (m, p, L) => `Solo debe hacer ${L('TARDE')}, y tiene ${m} de ${L('MANANA')} y ${p} de ${L('PARTIDO')}`,
   nomesMatins: (t, p, L) => `Solo debe hacer ${L('MANANA')}, y tiene ${t} de ${L('TARDE')} y ${p} de ${L('PARTIDO')}`,
   restaMatins: (t, L) => `Fuera de los turnos de ${L('PARTIDO')} debe hacer ${L('MANANA')}, y tiene ${t} de ${L('TARDE')}`,
   maxTardes: (max, te, detall) => `Máximo ${max} tardes y tiene ${te}${detall}`,

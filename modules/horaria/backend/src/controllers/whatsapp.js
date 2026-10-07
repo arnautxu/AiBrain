@@ -12,7 +12,7 @@ import {
   sendWeeklyBroadcastReminder,
   sendHealthAlert,
   getMockMessages,
-  isMockMode,
+  isMockMode, whatsappProvider,
   sendWhatsappMessage,
   mockReset,
   getConversationByPhone,
@@ -24,6 +24,7 @@ import { revisaElCicleSetmanal, textAvis } from '../services/vigilant.js';
 import { verifyMetaSignature } from '../utils/verifyMetaSignature.js';
 import { prisma } from '../services/prisma.js';
 import { nomIIdioma } from '../services/whatsapp.js';
+import { readMetaTemplates } from '../integration/meta-templates.js';
 
 // ─────────────────────────────────────────────
 // WEBHOOK — Meta verification (GET)
@@ -189,7 +190,7 @@ export async function processCloudMessage(message) {
 // BROADCAST — Send preference requests to all employees
 // ─────────────────────────────────────────────
 export async function broadcast(req, res) {
-  const { establecimientoId, semana, forcar } = req.body;
+  const { establecimientoId, semana, forcar, employeeIds } = req.body;
   if (!establecimientoId) {
     return res.status(400).json({ error: 'establecimientoId requerido' });
   }
@@ -198,7 +199,7 @@ export async function broadcast(req, res) {
     // `forcar` només arriba per aquí, mai des dels crons: reenviar esborra el
     // que la gent ja hagi contestat, i això només ho pot decidir una persona
     // que sap què està fent i a qui se li ha advertit.
-    const result = await broadcastPreferenceRequest(parseInt(establecimientoId), semana, { forcar: forcar === true });
+    const result = await broadcastPreferenceRequest(parseInt(establecimientoId), semana, { forcar: forcar === true, employeeIds });
     return res.json(result);
   } catch (err) {
     console.error('Error en broadcast:', err);
@@ -369,13 +370,13 @@ export async function healthCheckHandler(req, res) {
 }
 
 export async function sendRemindersHandler(req, res) {
-  const { establecimientoId, semana } = req.body;
+  const { establecimientoId, semana, employeeIds } = req.body;
   if (!establecimientoId) {
     return res.status(400).json({ error: 'establecimientoId requerido' });
   }
 
   try {
-    const result = await sendReminders(parseInt(establecimientoId), semana);
+    const result = await sendReminders(parseInt(establecimientoId), semana, { employeeIds });
     return res.json(result);
   } catch (err) {
     console.error('Error enviando recordatorios:', err);
@@ -512,17 +513,31 @@ export async function getConversationByPhoneHandler(req, res) {
 // Managers only, and deliberately no secrets: knowing that WHATSAPP_TOKEN is
 // set tells you nothing about what it is.
 // ─────────────────────────────────────────────
-export function configCheck(_req, res) {
+export async function configCheck(_req, res) {
+  let providerTemplates = null, providerVerificationError = null;
+  if (!isMockMode() && whatsappProvider() === 'meta') {
+    try { providerTemplates = await readMetaTemplates(); }
+    catch (error) { providerVerificationError = error instanceof Error && !/Bearer|https?:|token/i.test(error.message) ? error.message : 'No s’han pogut verificar les plantilles a Meta.'; }
+  }
   const hi = (k) => !!(process.env[k] && String(process.env[k]).trim());
   const descriuPlantilla = (clau, variables, per) => {
     const brut = String(process.env[clau] || '').trim();
     if (!brut) return { posada: false, per };
     const { name, language } = nomIIdioma(brut);
-    return { posada: true, nom: name, idioma: language, variablesQueSEnvien: variables, per };
+    const actual = providerTemplates?.find(t => t.name === name && t.language === language);
+    const supported = clau === 'WHATSAPP_TEMPLATE_BROADCAST' ? [3, 4] : clau === 'WHATSAPP_TEMPLATE_REMINDER' ? [2, 4] : [variables];
+    return { posada: true, nom: name, idioma: language, variablesQueSEnvien: actual && supported.includes(actual.bodyParameters) ? actual.bodyParameters : variables, per,
+      providerStatus: actual?.status || null, fieldsMatch: actual ? supported.includes(actual.bodyParameters) && (clau !== 'WHATSAPP_TEMPLATE_HORARIO' || actual.headerFormat === 'DOCUMENT') : null };
   };
   return res.json({
-    modo: process.env.WHATSAPP_MOCK === 'true' ? 'simulacio' : 'real',
-    proveidor: process.env.WHATSAPP_PROVIDER || 'meta',
+    modo: isMockMode() ? 'simulacio' : 'real',
+    deliveryEnabled: process.env.HORARIA_ALLOW_DELIVERY === '1' && !isMockMode(),
+    providerApprovalVerified: providerTemplates !== null,
+    providerTemplates,
+    providerVerificationError,
+    automaticEnabled: process.env.HORARIA_ALLOW_AUTOMATIC === '1',
+    managerNotificationsEnabled: process.env.HORARIA_MANAGER_NOTIFICATIONS !== '0',
+    proveidor: whatsappProvider(),
     credencials: {
       WHATSAPP_TOKEN: hi('WHATSAPP_TOKEN'),
       WHATSAPP_PHONE_NUMBER_ID: hi('WHATSAPP_PHONE_NUMBER_ID') || hi('WHATSAPP_PHONE_ID'),

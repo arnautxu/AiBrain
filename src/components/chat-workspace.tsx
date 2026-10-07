@@ -37,6 +37,7 @@ import { useComposerFileDrop } from "@/ui/use-composer-file-drop";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { DaySeparator } from "@/components/assistant-ui/elements/day-separator";
 import { MarkdownMessage } from "@/components/markdown-message";
+import { type LiveAnswerStore, useLiveAnswer } from '@/ui/live-answer-store';
 import { StreamingResponse } from "@/components/agents/streaming-response";
 import { MessageQueue, type QueuedMessage } from "@/components/assistant-ui/elements/message-queue";
 import { ThinkingOrb } from "thinking-orbs";
@@ -64,6 +65,7 @@ import { restoreRequestDocument } from "@/ui/restore-request-documents";
 import { readerScrolledAway } from "@/ui/reader-scroll-intent";
 
 type ChatWorkspaceProps = {
+  liveAnswers?: LiveAnswerStore;
   manifest: BrainManifest;
   preferences: BrainPreferences;
   project: WorkbenchProject | null;
@@ -286,6 +288,8 @@ function ResultActions({ content }: { content: string }) {
 }
 
 function AssistantMessage({
+  liveAnswers,
+  threadId,
   message,
   assistantName,
   projectId,
@@ -304,6 +308,8 @@ function AssistantMessage({
   readOnly = false,
   recoveryPaused = false,
 }: {
+  liveAnswers?: LiveAnswerStore;
+  threadId: string;
   message: ChatMessage;
   assistantName: string;
   projectId: string | undefined;
@@ -327,10 +333,12 @@ function AssistantMessage({
   recoveryPaused?: boolean;
 }) {
   const t = useUiText();
+  const liveContent = useLiveAnswer(liveAnswers, `${threadId}:${message.id}`);
+  const content = message.status === 'streaming' ? liveContent ?? message.content : message.content;
   const streaming = message.status === "streaming" && !recoveryPaused;
   const hasExecution = hasRelevantWorkProcess(message);
   const liveStatus = currentTurnStatusLabel(message, t) ?? t("Enviando solicitud");
-  const publicContent = publicAssistantText(message.content, assistantName);
+  const publicContent = publicAssistantText(content, assistantName);
 
   return (
     <article className="message-enter group">
@@ -338,7 +346,7 @@ function AssistantMessage({
         <TurnActivity message={message} recoveryPaused={recoveryPaused} projectId={projectId} readOnly={readOnly} onResolveApproval={onResolveApproval} onOpenReview={() => onOpenReview(message.id)} onOpenBrowser={onOpenBrowser} managedAppAction={readOnly ? null : managedAppAction} managedAppApprovalKeys={managedAppApprovalKeys} />
       ) : null}
 
-      {streaming && !message.content && !hasExecution ? (
+      {streaming && !content && !hasExecution ? (
         <div className="flex items-center gap-2 py-1 text-[15px] leading-5 text-[var(--text-muted)]" role="status">
           <ThinkingOrb state="working" size={20} aria-hidden="true" />
           <span className="activity-shimmer">{liveStatus}…</span>
@@ -427,6 +435,7 @@ function UserMessage({ message, connectorMentions, threadId, onRequestPublicatio
 }
 
 export function ChatWorkspace({
+  liveAnswers,
   manifest,
   preferences,
   project,
@@ -924,6 +933,8 @@ export function ChatWorkspace({
                   <DaySeparator date={message.createdAt} previousDate={thread.messages[index - 1]?.createdAt} />
                   {message.role === "user" ? <UserMessage message={message} connectorMentions={connectorMentions} threadId={thread.id} onRequestPublication={onRequestPublication && thread.messages[index + 1]?.role === "assistant" ? (attachment) => onRequestPublication(attachment, thread.messages[index + 1]!.id) : undefined} readOnly={readOnly} onEdit={(content) => onEditMessage(message, content)} /> : (
                     <AssistantMessage
+                      liveAnswers={liveAnswers}
+                      threadId={thread.id}
                       message={message}
                       recoveryPaused={streamRecovery?.paused === true && message.status === "streaming" && message.id === latestAssistantMessageId}
                       assistantName={assistantName}
@@ -1128,7 +1139,7 @@ export function ChatWorkspace({
             <div data-testid="composer-controls" className="composer-controls relative flex items-center justify-between gap-3 px-1 pb-0.5">
               <div className="composer-controls-start flex min-w-0 items-center gap-1 overflow-visible">
                 <button ref={composerAddButtonRef} aria-label={t("Añadir al mensaje")} aria-haspopup="menu" aria-controls={composerMenuOpen ? "composer-add-menu" : undefined} aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setMentionOpen(false); setConnectorCatalogOpen(false); setComposerMenuOpen((current) => !current); }}><span className="composer-add-icon" aria-hidden="true"><Plus size={15} /></span></button>
-                {canAttachImages || canAttachDocuments ? <input ref={fileInputRef} aria-label={t("Seleccionar archivos para adjuntar")} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.docx,.xlsx,.xls,.pptx,.txt,.md,.csv,.json" multiple tabIndex={-1} onChange={(event) => void addFiles(event.target.files)} /> : null}
+                {canAttachImages || canAttachDocuments ? <input ref={fileInputRef} aria-label={t("Seleccionar archivos para adjuntar")} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.docx,.xlsx,.xls,.xlsm,.pptx,.txt,.md,.csv,.json" multiple tabIndex={-1} onChange={(event) => void addFiles(event.target.files)} /> : null}
               </div>
               <div className="composer-controls-end flex shrink-0 items-center gap-2">
                 <ComposerPicker

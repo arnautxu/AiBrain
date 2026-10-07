@@ -397,3 +397,16 @@ describe('les altres famílies que ningú comprovava', () => {
     }
   });
 });
+
+ test('afternoon-only whole-week prose forbids mornings and split shifts without broadening weekday conditions', async () => {
+  const { turnoPermitido } = await import('../src/services/conditionCheck.js');
+  const c = parseConditions('Siempre hace de tardes, de 16h hasta el cierre. Nunca días ni mañanas');
+  assert.equal(c.soloTardes, true);
+  assert.equal(turnoPermitido(c, 'MANANA'), false);
+  assert.equal(turnoPermitido(c, 'PARTIDO'), false);
+  assert.equal(turnoPermitido(c, 'TARDE'), true);
+  assert.notEqual(parseConditions('El lunes siempre tardes').soloTardes, true);
+  assert.notEqual(parseConditions('Si el sábado trabaja, siempre hace tardes').soloTardes, true);
+  assert.notEqual(parseConditions('Nunca hace tardes').soloTardes, true);
+  assert.equal(checkEmployeeConditions({ empleado: { condicionesFijas: 'Siempre hace de tardes' }, dias: [{ dia: 'LUNES', turno: 'PARTIDO' }], idioma: 'es' }).problemas.length, 1);
+ });
