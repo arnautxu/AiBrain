@@ -633,3 +633,17 @@ it("confirms a remembered file only after the persistence callback succeeds", as
   expect((await handleLocalDocumentDynamicToolCall({ ...call, turnId: "foreign-turn" }, { ...ctx, rememberProjectFile: persist })).response.success).toBe(false);
   expect(persist).not.toHaveBeenCalled();
 });
+
+it("confirms project preferences only after a verified scoped save", async () => {
+  const ctx = await context(USER_A);
+  const call = { threadId: ctx.runtimeThreadId, turnId: ctx.runtimeTurnId, callId: "preferences-1", namespace: AIBRAIN_DOCUMENT_TOOL_NAMESPACE,
+    tool: "remember_preferences", arguments: { notes: "Usar cinco columnas y tolerancia inferior a 0,05 €." } };
+  const persist = vi.fn().mockResolvedValue({ status: "saved", notes: call.arguments.notes });
+  expect((await handleLocalDocumentDynamicToolCall(call, { ...ctx, rememberProjectPreferences: persist })).response.success).toBe(true);
+  expect(persist).toHaveBeenCalledWith(call.arguments.notes);
+  persist.mockRejectedValue(new Error("Los criterios han cambiado en otra conversación."));
+  expect((await handleLocalDocumentDynamicToolCall(call, { ...ctx, rememberProjectPreferences: persist })).response.success).toBe(false);
+  persist.mockClear();
+  expect((await handleLocalDocumentDynamicToolCall({ ...call, turnId: "foreign-turn" }, { ...ctx, rememberProjectPreferences: persist })).response.success).toBe(false);
+  expect(persist).not.toHaveBeenCalled();
+});
