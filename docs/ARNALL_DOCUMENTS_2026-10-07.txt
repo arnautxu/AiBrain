@@ -79,3 +79,32 @@ Scoped invoice criteria reconciliation completed through the locked workbench
 with exact pre-change workbench/procedure backups and verified saved text.
 The current production-compatible record uses ordinary spaces until the
 multiline-capable release is live. No sharing, tariffs or invoice totals changed.
+
+First release accepted at 017f1c0bbb79d0385eab7abfad3f786a3e478204.
+Backend CI 37612210698, GHCR publication 37612858091 and deployment
+37613289366 all passed; live/ready and app/gateway/horaria OCI match.
+Authenticated David UI accepted all five actual XLSM books and returned the
+exact original sheet counts and sampled values. Fresh-project criteria were
+saved through remember_preferences and a separate chat correctly ignored 0.04
+while reviewing exactly 0.05. Twenty synthetic PDFs were accepted and an
+attachment-only turn completed. Full PDF reading and schedules remain in QA.
+Knowledge backup 12aa6813-3b81-445b-87ad-6245031eaeab completed verified after
+30m16s, inside the revised bounded service limit; off-host replica still absent.
+Meta rejected editing the pending malformed PDF template (code 100/subcode
+2388003). A corrected DOCUMENT template enviament_horari_pdf_document was
+submitted PENDING, with unchanged body and synthetic sample, preserving the
+original template. Its named binding is active; automatic/general sends remain
+disabled. No WhatsApp was sent. Approval remains a provider gate.
+
+New authenticated UI finding: current David identity has no horaria mapping.
+The service is healthy but run failed immediately while catalog worked. The
+existing access boundary correctly denied it, yet the generic dynamic tool
+error hid the cause and prompted pointless retries. Return a fixed, safe,
+non-retryable NOT_ASSIGNED/NOT_CONFIGURED result without calling the service.
+Scope/tenant/permissions mismatches stay fatal; do not grant access implicitly.
+David explicitly authorized linking his current account to the existing active
+general manager. The scoped integration mapping was backed up and atomically
+updated with no background operations, other mappings or secret changes.
+Authenticated UI config/employee reads then succeeded; only employee 123
+(+34 683 529 819) is authorized for real message tests. Windows browse independently timed out in readback on
+both C/Arnall/Compres and Y/FACTURES PROVEIDORS 2026; it is not accepted.
