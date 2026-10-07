@@ -116,7 +116,7 @@ def browse(manifest, request, lock_wait_seconds=0):
             with rdp.RdpSession(config, credentials, access["target"], job) as session:
                 timings['sessionStartMs'] = round((time.monotonic() - started) * 1000)
                 phase, started = 'readback', time.monotonic()
-                result = session.execute(program, nonce, timeout=45)
+                result = session.execute(program, nonce, timeout=45, staged_read=True)
                 timings['readbackMs'] = round((time.monotonic() - started) * 1000)
             result['transportDiagnostic'] = {'phase': 'complete', 'timingsMs': timings, **({'readbackTransport': result['readbackTransport']} if result.get('readbackTransport') in ('redirected-file', 'clipboard') else {})}
             result["recordedAt"] = sync.now()

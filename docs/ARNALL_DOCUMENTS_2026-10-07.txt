@@ -162,3 +162,23 @@ named reading copy. Arbitrary HTML, unknown/duplicate headers, wrong lengths
 and oversized prefixes remain rejected. 34 focused connector/runtime/UI tests
 pass; the two actual sampled attachments pass local envelope extraction.
 Release deployment, all-seven retry and duplicate-free repeat UI remain gates.
+7 October follow-up: the seven enveloped supplier PDFs were successfully
+imported and read from the owner UI after c29fe93 deployed. Another genuine
+mail arrival brought the ledger to ten originals. The second manual worker
+run succeeded and attached seven clearly named reading copies plus tracking
+Excel; missing delivery dates remain needs_attention. A duplicate-free repeat
+and the 17:27 Europe/Madrid scheduled tick remain separate acceptance gates.
+
+Two real server-browser UI attempts timed out at remote command readback.
+Read-only browse now stages its trusted fixed program on the private Linux
+redirected job drive and types a short launcher, avoiding a several-kilobyte
+clipboard paste. No Windows source file, ACL, endpoint, certificate or policy
+is changed. Non-browse writes/copy/export keep their existing execution path;
+no command is retried after reaching Windows. The 45-second readback budget
+includes submission. Current nonce/private-file receipt checks are unchanged.
+The host broker/helper installation and fresh C/Y UI listing remain required
+before claiming Windows acceptance. Local RDP infra suite: 90 tests pass.
+
+The automation badge distinguishes a worker lease (En curso) from a queued
+manual request and prevents manual resubmission during an automatic lease.
+Eleven automation component tests pass; root type/lint checks pass.
