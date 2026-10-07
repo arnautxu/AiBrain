@@ -40,6 +40,11 @@ width, with horizontal scrolling instead of squeezing long invoice numbers.
 Arbitrary HTML remains disabled. Preserve users' existing project criteria;
 PUNTEIG_FORMAT.md is present but explicit old/new project notes need a fresh
 conversation readback before declaring preferences effective.
+The new remember_preferences tool requires an explicit current-user request,
+the current owned project, turn-bound identity and tools permission. It saves
+consolidated criteria through the locked workbench, verifies the actual text,
+and rejects concurrent stale edits. A local procedure file or assistant promise
+does not count as persistence. Fresh-chat readback remains a live gate.
 
 Operational evidence: fresh verified backup
 20261007T102900Z-13d25108-ec40-4234-824f-1020320906a3.
