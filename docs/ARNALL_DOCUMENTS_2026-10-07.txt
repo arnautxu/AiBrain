@@ -169,15 +169,12 @@ run succeeded and attached seven clearly named reading copies plus tracking
 Excel; missing delivery dates remain needs_attention. A duplicate-free repeat
 and the 17:27 Europe/Madrid scheduled tick remain separate acceptance gates.
 
-Two real server-browser UI attempts timed out at remote command readback.
-Read-only browse now stages its trusted fixed program on the private Linux
-redirected job drive and types a short launcher, avoiding a several-kilobyte
-clipboard paste. No Windows source file, ACL, endpoint, certificate or policy
-is changed. Non-browse writes/copy/export keep their existing execution path;
-no command is retried after reaching Windows. The 45-second readback budget
-includes submission. Current nonce/private-file receipt checks are unchanged.
-The host broker/helper installation and fresh C/Y UI listing remain required
-before claiming Windows acceptance. Local RDP infra suite: 90 tests pass.
+A third real C/Arnall/Compres browse from the owner UI still timed out after
+trying a bounded short launcher on the private redirected Linux job drive.
+The trial was not accepted. Restore the exact pre-trial host helpers, keep
+pinned TLS, source roots and Windows policies unchanged, and do not represent
+Windows browsing as fixed. A confirmed remote desktop/policy diagnosis is
+still needed; do not infer that a folder is absent from a failed readback.
 
 The automation badge distinguishes a worker lease (En curso) from a queued
 manual request and prevents manual resubmission during an automatic lease.
