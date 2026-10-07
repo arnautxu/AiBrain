@@ -48,6 +48,7 @@ type Context = { projectId: string; permissions: ResolvedPermissions; session: A
 const draftPrerequisiteOperations = new Set(["preferences.update", "absences.create", "absences.update", "employees.update", "rules.create", "rules.update", "schedules.generate"]);
 type Proposal = { input: OperationInput; threadId: string; turnId: string; state: "pending" | "executing" | "complete"; result?: unknown; createdAt: number; uploadHash?: string };
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+const unavailable = (code: string, message: string): DynamicToolCallResponse => ({ success: false, contentItems: [{ type: "inputText", text: JSON.stringify({ code, message, retryable: false, noActionExecuted: true }) }] });
 const response = (value: unknown): DynamicToolCallResponse => ({ success: true, contentItems: [{ type: "inputText", text: JSON.stringify(value) }] });
 export function confirmsHoraria(message: string) { return /^(sí|si|yes|ok|confirmo|confirmat|confirma|confirmar|endavant|fes-ho|adelante|aplica-ho|publica-ho|envia-ho)[.!\s]*$/iu.test(message.trim()); }
 
@@ -58,8 +59,9 @@ export async function handleHorariaToolCall(params: DynamicToolCallParams, conte
   if (permissions.installationId !== context.session.tenant.id || permissions.userId !== context.session.user.id || permissions.projectId !== context.projectId || toolRules.some(rule => rule.effect === "deny") || !toolRules.some(rule => rule.effect === "allow")) throw new Error("No tienes permiso para utilizar las herramientas de horarios en este proyecto.");
   if (params.tool === "catalog") return response(OPERATIONS);
   let config;
-  try { config = await loadHorariaConfig(context.installation); } catch { throw new Error("Horarios todavía no está configurado en esta instalación. Hay que conectar el servicio privado y asignar a los responsables."); }
-  if (context.session.provider !== "local" || context.session.tenant.id !== config.installationId || !Object.hasOwn(config.users, context.session.user.id)) throw new Error("No tienes acceso a Horarios.");
+  try { config = await loadHorariaConfig(context.installation); } catch { return unavailable("HORARIA_NOT_CONFIGURED", "Horarios todavía no está configurado en esta instalación. Un administrador debe conectar el servicio privado; no repitas otras operaciones ni cambies permisos por tu cuenta."); }
+  if (context.session.provider !== "local" || context.session.tenant.id !== config.installationId) throw new Error("No tienes acceso a Horarios.");
+  if (!Object.hasOwn(config.users, context.session.user.id)) return unavailable("HORARIA_NOT_ASSIGNED", "Tu usuario de AI Brain no está asignado a horarIA. Usa una cuenta ya autorizada o solicita a un administrador la asignación apropiada. El servicio no se ha consultado ni se ha ejecutado ninguna acción. No repitas otras operaciones ni amplíes permisos por tu cuenta.");
   const root = path.join(context.installation.paths.usersRoot, context.session.user.id, "horaria-proposals");
   await mkdir(root, { recursive: true, mode: 0o700 });
   const metadata = await lstat(root);
