@@ -445,6 +445,7 @@
       "additionalProperties": false,
       "required": ["id", "projectId", "title", "status", "pinned", "createdAt", "updatedAt", "messages"],
       "properties": {
+        "access": { "$ref": "#/$defs/ProjectAccess" },
         "id": { "$ref": "#/$defs/Uuid" },
         "projectId": { "$ref": "#/$defs/Uuid" },
         "title": { "type": "string", "minLength": 1, "maxLength": 120 },

@@ -36,6 +36,10 @@ function projectWithAccess(project: WorkbenchProject, role: SharedAccessRole): W
   return { ...project, access: projectAccess(role) };
 }
 
+export function threadWithAccess(thread: WorkbenchThread, role: SharedAccessRole): WorkbenchThread {
+  return { ...thread, access: projectAccess(role) };
+}
+
 async function installationForSession(session: AuthSession) {
   if (session.provider !== "local") throw new WorkbenchPersistenceError("La compartición requiere una cuenta local.");
   const installation = await loadInstallationConfig();
@@ -95,7 +99,8 @@ async function loadSharedWorkbenchFromContext(
     !deliveredThreadIds.has(threadId) || authorizedAutomationThreadIds.has(threadId);
   const grants = await index.listProjectsForPrincipal(principal);
   const projects = own.projects.map((project) => projectWithAccess(project, "owner"));
-  const threads = own.threads.filter(({ id }) => visibleAutomationThread(id));
+  const threads = own.threads.filter(({ id }) => visibleAutomationThread(id))
+    .map((thread) => threadWithAccess(thread, "owner"));
   const byOwner = Map.groupBy(grants, (grant) => grant.ownerUserId);
   const sharedSnapshots = await Promise.all([...byOwner].map(async ([ownerUserId, ownerGrants]) => {
     const snapshot = await store.load(ownerUserId);
@@ -105,7 +110,8 @@ async function loadSharedWorkbenchFromContext(
       projects: snapshot.projects
         .filter((project) => sharedIds.has(project.id))
         .map((project) => projectWithAccess(project, roles.get(project.id) ?? "viewer")),
-      threads: snapshot.threads.filter((thread) => sharedIds.has(thread.projectId) && visibleAutomationThread(thread.id)),
+      threads: snapshot.threads.filter((thread) => sharedIds.has(thread.projectId) && visibleAutomationThread(thread.id))
+        .map((thread) => threadWithAccess(thread, roles.get(thread.projectId) ?? "viewer")),
     };
   }));
   for (const snapshot of sharedSnapshots) {
@@ -119,11 +125,16 @@ async function loadSharedWorkbenchFromContext(
   const automationThreads = await Promise.all([...automationByOwner].map(async ([ownerUserId, grants]) => {
     const snapshot = await store.load(ownerUserId);
     const allowed = new Set(grants.map(({ delivery }) => delivery.threadId));
-    return snapshot.threads.filter(({ id }) => allowed.has(id));
+    return snapshot.threads.filter(({ id }) => allowed.has(id))
+      .map((thread) => threadWithAccess(thread, ownerUserId === principal.userId ? "owner" : "viewer"));
   }));
   const knownThreadIds = new Set(threads.map(({ id }) => id));
   for (const thread of automationThreads.flat()) {
-    if (!knownThreadIds.has(thread.id)) {
+    if (knownThreadIds.has(thread.id)) {
+      // A result recipient remains a viewer even when they can edit its project.
+      const existing = threads.findIndex((item) => item.id === thread.id);
+      threads[existing] = thread;
+    } else {
       knownThreadIds.add(thread.id);
       threads.push(thread);
     }

@@ -4,9 +4,10 @@ import { isWorkbenchThread, type WorkbenchThread } from "@/workbench/types";
 import type { ChatMessage } from "@/lib/chat-contract";
 
 /** Read-only reconciliation after refresh or a detached client. Never starts a turn. */
-export function useStoredResponse({ thread, enabled, attached, online, retry, onSnapshot }: {
+export function useStoredResponse({ thread, enabled, attached, online, retry, onSnapshot, readOnly = false }: {
   thread: WorkbenchThread | null; enabled: boolean; attached: boolean; online: boolean;
   retry: number; onSnapshot: (threadId: string, message: ChatMessage) => void;
+  readOnly?: boolean;
 }) {
   const threadId = thread?.id;
   const projectId = thread?.projectId;
@@ -19,7 +20,8 @@ export function useStoredResponse({ thread, enabled, attached, online, retry, on
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let request: AbortController | null = null;
-    const started = Date.now();
+    let lastSuccessfulRead = Date.now();
+    const started = lastSuccessfulRead;
     const check = async () => {
       request = new AbortController();
       const timeout = setTimeout(() => request?.abort(), 8_000);
@@ -36,6 +38,7 @@ export function useStoredResponse({ thread, enabled, attached, online, retry, on
         if (message) {
           onSnapshot(threadId, message);
           if (message.status !== "streaming") return;
+          lastSuccessfulRead = Date.now();
         }
       } catch {
         // A failed read cannot change the persisted turn to failed/stopped.
@@ -43,11 +46,11 @@ export function useStoredResponse({ thread, enabled, attached, online, retry, on
         clearTimeout(timeout);
       }
       if (disposed) return;
-      if (Date.now() - started >= 60_000) { setPausedKey(key); return; }
-      timer = setTimeout(() => { void check(); }, 2_000);
+      if (Date.now() - (readOnly ? lastSuccessfulRead : started) >= 60_000) { setPausedKey(key); return; }
+      timer = setTimeout(() => { void check(); }, readOnly ? 15_000 : 2_000);
     };
     void check();
     return () => { disposed = true; clearTimeout(timer); request?.abort(); };
-  }, [active, online, threadId, projectId, messageId, retry, onSnapshot, key]);
+  }, [active, online, threadId, projectId, messageId, retry, onSnapshot, key, readOnly]);
   return active ? pausedKey === key ? "paused" : "checking" : null;
 }
