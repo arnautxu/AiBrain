@@ -1,5 +1,6 @@
 import { ruleForDay } from '../utils/ruleForDay.js';
 import { shiftHours } from '../utils/shiftHours.js';
+import { puntuacio } from './passadesCondicions.js';
 
 const DAYS = ['LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO', 'DOMINGO'];
 const SHIFTS = ['LIBRE', 'MANANA', 'TARDE', 'PARTIDO'];
@@ -55,7 +56,22 @@ export function enforceFinalScheduleBounds(horario, employees, rules, closedDays
     !(shift === 'PARTIDO' && e.condParsed?.partidosMax === 0) &&
     (shift === 'TARDE' || e.dispParsed?.[d.dia]?.M !== false) &&
     (shift === 'MANANA' || e.dispParsed?.[d.dia]?.T !== false));
-  const allowed = (e, d, shift) => personallyAllowed(e, d, shift) && (shift === 'LIBRE' || canAssign(e, d.dia, shift));
+  const protectedMornings = new Set();
+  for (const e of employees) {
+    const peer = e.condicionesEstructuradas?.sincronitzatAmb?.empleadoId;
+    if (Number.isSafeInteger(peer)) { protectedMornings.add(e.id); protectedMornings.add(peer); }
+  }
+  const keepsMorningSync = (e, old, next) => !protectedMornings.has(e.id) ||
+    slots(old).includes('Manana') === slots(next).includes('Manana');
+  const allowed = (e, d, shift) => {
+    if (!personallyAllowed(e, d, shift)) return false;
+    if (shift === 'LIBRE') return true;
+    // The candidate replaces this day; its old shift must not consume the
+    // exact-count allowance while the caller evaluates the replacement.
+    const old = d.turno;
+    try { d.turno = 'LIBRE'; return canAssign(e, d.dia, shift); }
+    finally { d.turno = old; }
+  };
   const change = (d, shift) => { d.turno = shift; d.horaEntrada = null; d.horaDescanso = null; };
   const adjustments = [];
   for (const e of employees) for (const d of schedulesById.get(e.id).dias) {
@@ -116,5 +132,60 @@ export function enforceFinalScheduleBounds(horario, employees, rules, closedDays
     adjustments.push({ employeeId: best.e.id, day: best.d.dia, from: best.old, to: best.shift });
   }
   if (score().hard) throw new Error('No se ha podido obtener un borrador dentro de los máximos semanales y de cobertura.');
+  // Late hour/coverage repairs can undo an exact morning/afternoon count.
+  // Recover feasible conditions without erasing work, changing requested
+  // shifts or worsening any other person's conditions. A same-day exchange
+  // keeps role coverage unchanged when a one-person edit has no spare cover.
+  const conditionScore = e => puntuacio(schedulesById.get(e.id).dias.filter(d =>
+    !closedDays.includes(d.dia) && !e.diasAusente?.[d.dia] && !e.diasOcupadosOtrosEstablecimientos?.[d.dia]), e.condicionesEstructuradas);
+  let examined = 0;
+  for (let pass = 0; pass < 20 && examined < 20000; pass++) {
+    let best = null;
+    const baseline = score();
+    for (const e of employees) {
+      const before = conditionScore(e);
+      if (!before) continue;
+      for (const d of schedulesById.get(e.id).dias) {
+        if (d.turno === 'LIBRE' || e.turnosPorDiaPreferencia?.[d.dia]) continue;
+        const old = d.turno;
+        for (const shift of SHIFTS.filter(t => t !== 'LIBRE' && t !== old)) {
+          if (++examined > 20000) break;
+          if (!keepsMorningSync(e, old, shift) || !allowed(e, d, shift)) continue;
+          d.turno = shift;
+          const after = conditionScore(e);
+          if (after >= before || hours(e) > remainingWeeklyHours(e)) { d.turno = old; continue; }
+          const changed = score();
+          if (!changed.hard && changed.missing <= baseline.missing) best = { e, d, shift, old };
+          if (!best) for (const partner of employees.filter(x => x.id !== e.id && x.funcion === e.funcion)) {
+            const other = schedulesById.get(partner.id).dias.find(x => x.dia === d.dia);
+            if (other.turno === 'LIBRE' || partner.turnosPorDiaPreferencia?.[d.dia]) continue;
+            const otherOld = other.turno, partnerBefore = conditionScore(partner);
+            for (const lower of SHIFTS.filter(t => t !== 'LIBRE' && t !== otherOld)) {
+              if (++examined > 20000) break;
+              if (!['Manana', 'Tarde'].every(period =>
+                Number(slots(old).includes(period)) + Number(slots(otherOld).includes(period)) ===
+                Number(slots(shift).includes(period)) + Number(slots(lower).includes(period))) || !keepsMorningSync(partner, otherOld, lower) || !allowed(partner, other, lower)) continue;
+              other.turno = lower;
+              const safe = hours(partner) <= remainingWeeklyHours(partner) && conditionScore(partner) <= partnerBefore;
+              other.turno = otherOld;
+              if (safe) { best = { e, d, shift, old, partner, other, lower, otherOld }; break; }
+            }
+            if (best || examined >= 20000) break;
+          }
+          d.turno = old;
+          if (best || examined >= 20000) break;
+        }
+        if (best || examined >= 20000) break;
+      }
+      if (best || examined >= 20000) break;
+    }
+    if (!best) break;
+    if (best.other) {
+      change(best.other, best.lower);
+      adjustments.push({ employeeId: best.partner.id, day: best.other.dia, from: best.otherOld, to: best.lower });
+    }
+    change(best.d, best.shift);
+    adjustments.push({ employeeId: best.e.id, day: best.d.dia, from: best.old, to: best.shift });
+  }
   return adjustments;
 }
