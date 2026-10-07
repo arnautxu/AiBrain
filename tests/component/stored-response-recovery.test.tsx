@@ -11,6 +11,21 @@ const thread: WorkbenchThread = {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("stored response reconciliation", () => {
+  it("keeps reading a healthy background result after a minute, without starting another turn", async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn(async (_input: string, _init: RequestInit) => Response.json({ thread }));
+    vi.stubGlobal("fetch", fetcher);
+    const onSnapshot = vi.fn();
+    const { result } = renderHook(() => useStoredResponse({ thread, enabled: true, attached: false,
+      online: true, retry: 0, onSnapshot, readOnly: true }));
+    await act(() => vi.advanceTimersByTimeAsync(540_000));
+    expect(result.current).toBe("checking");
+    const finished = { ...thread.messages[0], content: "Scheduled result", status: "complete" as const };
+    fetcher.mockImplementation(async () => Response.json({ thread: { ...thread, messages: [finished] } }));
+    await act(() => vi.advanceTimersByTimeAsync(15_000));
+    expect(onSnapshot).toHaveBeenLastCalledWith(thread.id, finished);
+    expect(fetcher.mock.calls.every((call) => call.length === 2)).toBe(true);
+  });
   it("recovers a terminal response after reload using reads only", async () => {
     const finished = { ...thread.messages[0], content: "Durable result", status: "complete" as const };
     const fetcher = vi.fn(async () => Response.json({ thread: { ...thread, messages: [finished] } }));
@@ -22,12 +37,12 @@ describe("stored response reconciliation", () => {
     expect(fetcher).toHaveBeenCalledOnce();
     expect(fetcher.mock.calls[0]).toEqual([`/api/threads/${thread.id}`, expect.objectContaining({ cache: "no-store", signal: expect.any(AbortSignal) })]);
   });
-  it("never fabricates a failed turn and stops reading after a minute of outages", async () => {
+  it.each([false, true])("never fabricates a failed turn and stops reading after a minute of outages (readOnly=%s)", async (readOnly) => {
     vi.useFakeTimers();
     const fetcher = vi.fn(async () => { throw new TypeError("offline"); });
     vi.stubGlobal("fetch", fetcher);
     const onSnapshot = vi.fn();
-    const { result } = renderHook(() => useStoredResponse({ thread, enabled: true, attached: false, online: true, retry: 0, onSnapshot }));
+    const { result } = renderHook(() => useStoredResponse({ thread, enabled: true, attached: false, online: true, retry: 0, onSnapshot, readOnly }));
     await act(() => vi.advanceTimersByTimeAsync(61_000));
     expect(result.current).toBe("paused");
     const reads = fetcher.mock.calls.length;

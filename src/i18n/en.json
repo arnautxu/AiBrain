@@ -242,6 +242,7 @@
   "Puedes adjuntar un máximo de {p0} archivos por mensaje.": "You can attach up to {p0} files per message.",
   "Conversación vacía": "Empty conversation",
   "Proyecto de solo lectura · puedes consultar el historial y los archivos compartidos.": "Read-only project · you can view history and shared files.",
+  "Conversación de solo lectura · puedes consultar el historial y los archivos compartidos.": "Read-only conversation · you can view history and shared files.",
   "Volver al final": "Back to the bottom",
   "Sin conexión. El historial sigue disponible y no se enviará nada.": "Offline. History is still available and nothing will be sent.",
   "Conectando con el servicio…": "Connecting to the service…",

@@ -109,6 +109,8 @@ export type WorkbenchThread = {
   createdAt: string;
   updatedAt: string;
   messages: ChatMessage[];
+  /** Server-issued capabilities for this conversation, independent of its project. */
+  access?: WorkbenchProjectAccess;
   /** Present only for conversations created from a specific point in another conversation. */
   lineage?: {
     parentThreadId: string;
@@ -116,6 +118,15 @@ export type WorkbenchThread = {
     kind: ThreadBranchKind;
   } | null;
 };
+
+export function workbenchThreadAccess(
+  thread: Pick<WorkbenchThread, "access"> | null | undefined,
+  project: Pick<WorkbenchProject, "access"> | null | undefined,
+): Readonly<WorkbenchProjectAccess> {
+  return thread?.access ?? (thread && !project
+    ? { role: "viewer", canEdit: false, canManage: false }
+    : workbenchProjectAccess(project));
+}
 
 export type WorkbenchThreadSummary = Omit<WorkbenchThread, "messages"> & {
   messageCount: number;
@@ -286,6 +297,7 @@ export function isWorkbenchThread(value: unknown): value is WorkbenchThread {
     isIsoDate(value.updatedAt) &&
     Array.isArray(value.messages) &&
     value.messages.every(isChatMessage) &&
+    (value.access === undefined || isWorkbenchProjectAccess(value.access)) &&
     (lineage === undefined || lineage === null || (
       isRecord(lineage) && Object.keys(lineage).length === 3 &&
       isUuid(lineage.parentThreadId) && isUuid(lineage.branchedFromMessageId) &&
@@ -299,7 +311,7 @@ export function isWorkbenchThreadSummary(value: unknown): value is WorkbenchThre
     "id", "projectId", "title", "status", "pinned", "createdAt", "updatedAt",
     "messageCount", "lastMessageAt",
   ];
-  if (Object.keys(value).some((key) => ![...keys, "lineage"].includes(key)) ||
+  if (Object.keys(value).some((key) => ![...keys, "lineage", "access"].includes(key)) ||
     keys.some((key) => !Object.hasOwn(value, key))) {
     return false;
   }
