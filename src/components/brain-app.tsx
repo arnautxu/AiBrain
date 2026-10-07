@@ -1281,7 +1281,7 @@ export function BrainApp({
     }
     const available = Math.max(0, MAX_FILES_PER_MESSAGE - attachments.length - documents.filter((document) => document.status !== "error").length);
     const selected = files.slice(0, available);
-    if (files.length > available) setNotice(workbenchNotice(t("Puedes adjuntar un máximo de 20 archivos por mensaje."), "warning"));
+    if (files.length > available) setNotice(workbenchNotice(t("Puedes adjuntar un máximo de {p0} archivos por mensaje.", { p0: MAX_FILES_PER_MESSAGE }), "warning"));
     if (!selected.length) return;
 
     let thread = activeThread && activeThread.status === "active" && activeThread.projectId === activeProject.id

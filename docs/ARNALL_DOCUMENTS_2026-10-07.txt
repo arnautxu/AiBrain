@@ -148,3 +148,13 @@ Windows browsing as fixed. A confirmed remote desktop/policy diagnosis is
 still needed; do not infer that a folder is absent from a failed readback.
 
 [Installation-specific operational details omitted.]
+
+The full historical review found Marta's explicit 33-invoice request on
+25 September still exceeded the shared 20-file limit. Raise the common count
+to 50 across composer, request contract and server binding, including mixed
+images/documents. Translate the actual shared limit instead of hardcoding it.
+Keep aggregate original-byte and prepared-input budgets, per-file validation,
+private originals, permissions and macro isolation unchanged. Binding tests
+cover real staged batches of 33/50, refusal of 51 before reads/conversion and
+unchanged aggregate budgets. A live 33-file UI acceptance remains a release gate;
+synthetic fixtures must not be described as Marta's missing 33 originals.

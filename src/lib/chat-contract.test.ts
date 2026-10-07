@@ -45,14 +45,14 @@ describe("chat attachment contract", () => {
     expect(isTurnOptions({ ...base, documentUploadIds: ["../escape"] })).toBe(false);
   });
 
-  it("allows at most twenty files across inline images and staged documents", () => {
+  it("allows at most fifty files across inline images and staged documents", () => {
     const base = {
       mode: "agent", model: null, effort: null, webSearch: false,
       imageGeneration: false, skill: null, attachments: [],
     };
-    const ids = Array.from({ length: 21 }, (_, index) =>
+    const ids = Array.from({ length: 51 }, (_, index) =>
       `22222222-2222-4222-8222-${String(index + 1).padStart(12, "0")}`);
-    for (const count of [10, 11, 20]) {
+    for (const count of [10, 11, 20, 33, 50]) {
       expect(isTurnOptions({ ...base, documentUploadIds: ids.slice(0, count) })).toBe(true);
     }
     expect(isTurnOptions({ ...base, documentUploadIds: ids })).toBe(false);
@@ -62,8 +62,8 @@ describe("chat attachment contract", () => {
       id: "11111111-1111-4111-8111-111111111111", name: "image.png",
       mimeType: "image/png", size: png.length, dataUrl: dataUrl("image/png", png),
     };
-    expect(isTurnOptions({ ...base, attachments: [image], documentUploadIds: ids.slice(0, 19) })).toBe(true);
-    expect(isTurnOptions({ ...base, attachments: [image], documentUploadIds: ids.slice(0, 20) })).toBe(false);
+    expect(isTurnOptions({ ...base, attachments: [image], documentUploadIds: ids.slice(0, 49) })).toBe(true);
+    expect(isTurnOptions({ ...base, attachments: [image], documentUploadIds: ids.slice(0, 50) })).toBe(false);
   });
 
   it("accepts only unique catalog connector mentions", () => {

@@ -376,10 +376,10 @@ describe("chat turn transport lifecycle", () => {
   });
 });
 
-it.each([21, 33])("explains the maximum of 20 for %i attachments before starting any worker", async count => {
+it.each([51, 99])("explains the maximum of 50 for %i attachments before starting any worker", async count => {
   mocked.runWorkerCodexTurn.mockClear();
   const response = await POST(chatRequest(new AbortController().signal, { documentUploadIds: Array(count).fill("00000000-0000-4000-8000-000000000099") }));
   expect(response.status).toBe(400);
-  expect(await response.json()).toMatchObject({ code: "CHAT_ATTACHMENT_LIMIT_EXCEEDED", maximumFiles: 20 });
+  expect(await response.json()).toMatchObject({ code: "CHAT_ATTACHMENT_LIMIT_EXCEEDED", maximumFiles: 50 });
   expect(mocked.runWorkerCodexTurn).not.toHaveBeenCalled();
 });

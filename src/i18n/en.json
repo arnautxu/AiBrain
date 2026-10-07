@@ -239,7 +239,7 @@
   "ahí": "there",
   "¿Qué imagen quieres crear?": "What image would you like to create?",
   "No hay conectores habilitados en tu catálogo.": "No connectors are enabled in your catalog.",
-  "Puedes adjuntar un máximo de 20 archivos por mensaje.": "You can attach up to 20 files per message.",
+  "Puedes adjuntar un máximo de {p0} archivos por mensaje.": "You can attach up to {p0} files per message.",
   "Conversación vacía": "Empty conversation",
   "Proyecto de solo lectura · puedes consultar el historial y los archivos compartidos.": "Read-only project · you can view history and shared files.",
   "Volver al final": "Back to the bottom",
