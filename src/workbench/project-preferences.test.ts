@@ -18,12 +18,13 @@ it("persists verified criteria for a fresh chat, rejects stale edits and never w
   const config = { installationId: "test", paths: { dataRoot: root, usersRoot } } as InstallationConfig;
   const ws = FileWorkbenchStore.fromInstallation(config), project = await ws.createProject(userId, "Invoices"), thread = await ws.createThread(userId, project.id, "Review");
   const permissions = { installationId: "test", userId, projectId: project.id, rules: [{ ruleId: "tools.execute", action: "execute", effect: "allow" }] } as unknown as ResolvedPermissions;
-  const input = { config, userId, ownerUserId: userId, projectId: project.id, threadId: thread.id, message: "Actualiza estos criterios en el proyecto para futuros chats", expectedNotes: "", notes: "Ignorar diferencias menores de 0,05 €. Tabla de cinco columnas.", permissions };
+  const input = { config, userId, ownerUserId: userId, projectId: project.id, threadId: thread.id, message: "Actualiza estos criterios en el proyecto para futuros chats", expectedNotes: "", notes: "Ignorar diferencias menores de 0,05 €.\n\nTabla de cinco columnas.\n- Factura y albarán\n- Producto", permissions };
   const receipt = await saveProjectPreferences(input);
   expect(receipt).toMatchObject({ status: "saved", notes: input.notes });
   expect(await saveProjectPreferences(input)).toMatchObject({ sha256: receipt.sha256 });
   const next = await ws.createThread(userId, project.id, "Next review");
   expect((await ws.getThreadRuntimeContext(userId, next.id)).projectMemory).toBe(input.notes);
+  await expect(saveProjectPreferences({ ...input, expectedNotes: input.notes, notes: "Criterios con un control oculto\0" })).rejects.toThrow(/válidos/);
   await expect(saveProjectPreferences({ ...input, notes: "Una edición obsoleta que pierde la corrección." })).rejects.toThrow(/cambiado/);
   await expect(saveProjectPreferences({ ...input, message: "Revisa las facturas" })).rejects.toThrow(/explícitamente/);
   await expect(saveProjectPreferences({ ...input, ownerUserId: randomUUID() })).rejects.toThrow(/autorizar/);

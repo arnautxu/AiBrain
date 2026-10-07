@@ -50,7 +50,9 @@ conversation readback before declaring preferences effective.
 The new remember_preferences tool requires an explicit current-user request,
 the current owned project, turn-bound identity and tools permission. It saves
 consolidated criteria through the locked workbench, verifies the actual text,
-and rejects concurrent stale edits. A local procedure file or assistant promise
+and rejects concurrent stale edits. Project criteria/instructions accept ordinary
+line breaks and tabs while still rejecting hidden/control characters; the old
+validator rejected multiline criteria, another observed persistence failure. A local procedure file or assistant promise
 does not count as persistence. Fresh-chat readback remains a live gate.
 
 Operational evidence: fresh verified backup
@@ -72,3 +74,8 @@ Require the complete unchanged CI suite and exact immutable release identity.
 Live UI acceptance with all five originals is a separate post-deploy gate.
 Staffing minima, real Meta sends, editable My Maps sessions, mailbox connection
 credentials and Microsoft Excel acceptance remain separately observable gates.
+
+Scoped invoice criteria reconciliation completed through the locked workbench
+with exact pre-change workbench/procedure backups and verified saved text.
+The current production-compatible record uses ordinary spaces until the
+multiline-capable release is live. No sharing, tariffs or invoice totals changed.

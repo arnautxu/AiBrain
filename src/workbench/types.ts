@@ -191,6 +191,10 @@ function isSafeText(value: unknown, maximum: number) {
   return typeof value === "string" && value.length <= maximum && !/\p{C}/u.test(value);
 }
 
+function isSafeMultilineText(value: unknown, maximum: number) {
+  return typeof value === "string" && value.length <= maximum && !/\p{C}/u.test(value.replace(/[\t\r\n]/g, ""));
+}
+
 function isProjectSource(value: unknown): value is ProjectSource {
   if (!isRecord(value)) return false;
   return Object.keys(value).length === 9 &&
@@ -218,7 +222,7 @@ function isProjectMember(value: unknown): value is ProjectMember {
 
 function isProjectMemory(value: unknown): value is ProjectMemory {
   return isRecord(value) && Object.keys(value).length === 3 &&
-    typeof value.enabled === "boolean" && isSafeText(value.notes, 16_000) &&
+    typeof value.enabled === "boolean" && isSafeMultilineText(value.notes, 16_000) &&
     (value.updatedAt === null || isIsoDate(value.updatedAt));
 }
 
@@ -260,7 +264,7 @@ export function isWorkbenchProject(value: unknown): value is WorkbenchProject {
     typeof value.slug === "string" && /^[a-z0-9][a-z0-9-]{0,62}$/.test(value.slug) &&
     (value.status === "active" || value.status === "archived") &&
     typeof value.pinned === "boolean" &&
-    isSafeText(value.instructions, 16_000) &&
+    isSafeMultilineText(value.instructions, 16_000) &&
     Array.isArray(value.sources) && value.sources.length <= 100 && value.sources.every(isProjectSource) &&
     isProjectMemory(value.memory) &&
     isProjectSharing(value.sharing) &&
@@ -398,7 +402,7 @@ export function isUpdateProjectInput(value: unknown): value is UpdateProjectInpu
   return (!("name" in value) || isProjectName(value.name)) &&
     (!("pinned" in value) || typeof value.pinned === "boolean") &&
     (!("status" in value) || value.status === "active" || value.status === "archived") &&
-    (!("instructions" in value) || isSafeText(value.instructions, 16_000)) &&
+    (!("instructions" in value) || isSafeMultilineText(value.instructions, 16_000)) &&
     (!("sources" in value) || (Array.isArray(value.sources) && value.sources.length <= 100 && value.sources.every(isProjectSource))) &&
     (!("memory" in value) || isProjectMemory(value.memory)) &&
     (!("sharing" in value) || isProjectSharing(value.sharing));
