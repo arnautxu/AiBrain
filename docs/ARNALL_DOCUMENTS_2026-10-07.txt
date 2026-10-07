@@ -94,7 +94,8 @@ Meta rejected editing the pending malformed PDF template (code 100/subcode
 2388003). A corrected DOCUMENT template enviament_horari_pdf_document was
 submitted PENDING, with unchanged body and synthetic sample, preserving the
 original template. Its named binding is active; automatic/general sends remain
-disabled. No WhatsApp was sent. Approval remains a provider gate.
+disabled. At that checkpoint no WhatsApp was sent; see the later scoped PROVA
+UI result below. Reminder/document approval remains a provider gate.
 
 New authenticated UI finding: current David identity has no horaria mapping.
 The service is healthy but run failed immediately while catalog worked. The
@@ -108,3 +109,34 @@ updated with no background operations, other mappings or secret changes.
 Authenticated UI config/employee reads then succeeded; only employee 123
 (+34 683 529 819) is authorized for real message tests. Windows browse independently timed out in readback on
 both C/Arnall/Compres and Y/FACTURES PROVEIDORS 2026; it is not accepted.
+
+Authenticated long-identifier invoice-table QA found that five 8rem minimum
+columns hid the final claim column even in the normal desktop message width.
+Use a smaller readable minimum and wrap unbroken identifiers so five columns
+fit the desktop response. Keep horizontal scrolling for genuinely wider tables.
+The live real schedule draft respected Neus Wednesday afternoon and 34/40h,
+but reported Eva/Jordi fixed-condition conflicts; it is not fully accepted.
+The downloaded workbook passed ZIP/XML checks and opened in Numbers; this
+is not Microsoft Excel acceptance or repair of original historical REF errors.
+David authorized the initial PROVA send; the UI and ledger show exactly one
+outbound message and none to others. Delivery to the phone is not yet proven.
+The additional invoice-email request found company-mail connected personally
+to Mª Àngels, factures@arnall.cat, INBOX, initial date 2026-10-08. No 3-hour task
+exists. Owner-session UI acceptance, duplicate-free repeat import and scheduled
+execution are pending; never copy the credential to another user.
+
+A feasible exact-count repair can require two people to exchange a half/split
+shift on the same day. The final bounds pass previously stopped as soon as
+hours and coverage passed and double-counted the replaced shift in its callback.
+Add a bounded recovery that improves structured conditions, keeps requested
+shifts and morning synchronization, and never worsens role coverage, contracts,
+absences or the partner's conditions. Unresolved conflicts still stay visible;
+this is not permission to increase Jordi's 14-hour contract or publish a draft.
+
+Local validation for this follow-up: all 711 horaria tests in 130 suites pass,
+including feasible pair recovery and refusal of contract/explicit-shift losses.
+Root lint passes. Company-mail tool wording now says next scheduled run rather
+than assuming two hours, so a configured three-hour interval stays authoritative.
+David explicitly authorized a temporary owner session for the invoice UI work.
+It is bounded to one hour and must be revoked after restoring David's cookie;
+no password or personal-connector ownership changes are authorized or required.
