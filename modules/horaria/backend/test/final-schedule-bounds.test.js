@@ -62,3 +62,29 @@ test('moves capped hours between days to spread unavoidable shortages without le
   for (const day of days.slice(0, 2)) assert.equal(h.filter(x => x.dias.find(d => d.dia === day).turno === 'MANANA').length, 1);
   for (const e of es) assert.equal(hours(h.find(x => x.empleadoId === e.id), e), 7);
 });
+
+
+test('recovers an exact afternoon count with an atomic same-role exchange, without losing coverage', () => {
+  const es = [employee(1, { condicionesEstructuradas: { matinsExactes: 3, tardesExactes: 3, partidoCompta: 'MATI_I_TARDA' } }), employee(2)];
+  const h = [grid(1, ['PARTIDO', 'PARTIDO', 'TARDE', 'TARDE', 'MANANA']), grid(2, ['MANANA', 'MANANA', 'MANANA', 'MANANA', 'MANANA'])];
+  const rules = [{ diasAplica: JSON.stringify(days.slice(0, 2)), minDependientasManana: 2, minDependientasTarde: 1, maxDependientasManana: 2, maxDependientasTarde: 1 }, { diasAplica: JSON.stringify(days.slice(2, 5)), minDependientasManana: 1, minDependientasTarde: 0, maxDependientasManana: 2, maxDependientasTarde: 1 }];
+  const oldCounts = days.slice(0, 5).map(day => ['MANANA', 'TARDE'].map(t => h.filter(x => [t, 'PARTIDO'].includes(x.dias.find(d => d.dia === day).turno)).length));
+  enforceFinalScheduleBounds(h, es, rules, days.slice(5), (e, _day, shift) => {
+    if (e.id !== 1 || shift !== 'MANANA') return true;
+    return h[0].dias.filter(d => ['MANANA', 'PARTIDO'].includes(d.turno)).length < 3;
+  });
+  assert.equal(h[0].dias.filter(d => ['TARDE', 'PARTIDO'].includes(d.turno)).length, 3);
+  assert.equal(h[0].dias.filter(d => ['MANANA', 'PARTIDO'].includes(d.turno)).length, 3);
+  assert.deepEqual(days.slice(0, 5).map(day => ['MANANA', 'TARDE'].map(t => h.filter(x => [t, 'PARTIDO'].includes(x.dias.find(d => d.dia === day).turno)).length)), oldCounts);
+  for (const e of es) assert.ok(hours(h.find(x => x.empleadoId === e.id), e) <= e.maxHorasSemana);
+});
+
+test('does not buy a fixed condition by exceeding a partner contract or changing requested shifts', () => {
+  for (const protection of [{ maxHorasSemana: 35 }, { condicionesEstructuradas: { maxPartidos: 0 } }, { turnosPorDiaPreferencia: Object.fromEntries(days.slice(0, 5).map(d => [d, 'MANANA'])) }]) {
+    const es = [employee(1, { condicionesEstructuradas: { matinsExactes: 3, tardesExactes: 3, partidoCompta: 'MATI_I_TARDA' } }), employee(2, protection)];
+    const h = [grid(1, ['PARTIDO', 'PARTIDO', 'TARDE', 'TARDE', 'MANANA']), grid(2, ['MANANA', 'MANANA', 'MANANA', 'MANANA', 'MANANA'])];
+    const before = structuredClone(h);
+    enforceFinalScheduleBounds(h, es, [{ diasAplica: JSON.stringify(days.slice(0, 2)), minDependientasManana: 2, minDependientasTarde: 1, maxDependientasManana: 2, maxDependientasTarde: 1 }, { diasAplica: JSON.stringify(days.slice(2, 5)), minDependientasManana: 1, minDependientasTarde: 0, maxDependientasManana: 2, maxDependientasTarde: 1 }], days.slice(5));
+    assert.deepEqual(h, before);
+  }
+});

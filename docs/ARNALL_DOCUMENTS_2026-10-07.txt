@@ -84,7 +84,8 @@ Meta rejected editing the pending malformed PDF template (code 100/subcode
 2388003). A corrected DOCUMENT template enviament_horari_pdf_document was
 submitted PENDING, with unchanged body and synthetic sample, preserving the
 original template. Its named binding is active; automatic/general sends remain
-disabled. No WhatsApp was sent. Approval remains a provider gate.
+disabled. At that checkpoint no WhatsApp was sent; see the later scoped PROVA
+UI result below. Reminder/document approval remains a provider gate.
 
 New authenticated UI finding: current David identity has no horaria mapping.
 The service is healthy but run failed immediately while catalog worked. The
@@ -98,3 +99,15 @@ updated with no background operations, other mappings or secret changes.
 Authenticated UI config/employee reads then succeeded; only employee 123
 (+34 683 529 819) is authorized for real message tests. Windows browse independently timed out in readback on
 both C/Arnall/Compres and Y/FACTURES PROVEIDORS 2026; it is not accepted.
+
+[Installation-specific operational details omitted.]
+
+[Installation-specific operational details omitted.]
+
+Local validation for this follow-up: all 711 horaria tests in 130 suites pass,
+including feasible pair recovery and refusal of contract/explicit-shift losses.
+Root lint passes. Company-mail tool wording now says next scheduled run rather
+than assuming two hours, so a configured three-hour interval stays authoritative.
+David explicitly authorized a temporary owner session for the invoice UI work.
+It is bounded to one hour and must be revoked after restoring David's cookie;
+no password or personal-connector ownership changes are authorized or required.
