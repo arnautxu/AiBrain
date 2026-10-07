@@ -328,20 +328,34 @@ class RdpSession:
             self.__exit__(*sys.exc_info())
             raise
 
-    def execute(self, command, nonce, timeout=30):
-        # Paste fixed generated commands as text; simulating thousands of Shift
-        # presses can trigger Windows Sticky Keys and race console input.
-        publisher = subprocess.Popen(["xclip", "-selection", "clipboard", "-in", "-quiet"],
-                                     env=self.env, stdin=subprocess.PIPE,
-                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        self.processes.append(publisher)
-        publisher.stdin.write(command.encode("ascii"))
-        publisher.stdin.close()
-        time.sleep(0.7)
-        self.key("ctrl+v")
-        time.sleep(1)
-        self.key("Return")
+    def stage_read_command(self, command, nonce):
+        # Only the server-side browse generator opts into this path. Stage on
+        # the private Linux job drive, never on a Windows business/source disk.
+        prefix = 'powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand '
+        require(re.fullmatch(r'[0-9a-f]{32}', nonce) is not None, 'Invalid request nonce')
+        require(command.startswith(prefix) and len(command) <= 7800, 'Invalid staged command')
+        try:
+            program = base64.b64decode(command[len(prefix):], validate=True).decode('utf-16le')
+        except (ValueError, UnicodeError):
+            raise ValueError('Invalid staged command') from None
+        path = Path(self.destination) / ('request-' + nonce + '.ps1')
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'wb') as staged:
+            staged.write(program.encode('utf-16'))
+            staged.flush()
+            os.fsync(staged.fileno())
+        launcher = "& ([scriptblock]::Create([IO.File]::ReadAllText('\\\\tsclient\\AiBrain\\request-" + nonce + ".ps1')))"
+        return prefix + base64.b64encode(launcher.encode('utf-16le')).decode('ascii')
+
+    def execute(self, command, nonce, timeout=30, staged_read=False):
         deadline = time.monotonic() + timeout
+        if staged_read:
+            # A short launcher avoids the unreliable remote clipboard paste of
+            # a several-kilobyte query. No retry, policy bypass or write opt-in.
+            self.type_text(self.stage_read_command(command, nonce))
+            self.key('Return')
+        else:
+            self.paste_command(command)
         while time.monotonic() < deadline:
             require(self.rdp.poll() is None, "RDP_CONNECTION_LOST")
             result = file_readback(self.destination, nonce)
@@ -356,6 +370,20 @@ class RdpSession:
                 return {**result, 'readbackTransport': 'clipboard'}
             time.sleep(0.5)
         raise ValueError("No matching RDP readback; source access was not confirmed")
+
+    def paste_command(self, command):
+        # Paste fixed generated commands as text; simulating thousands of Shift
+        # presses can trigger Windows Sticky Keys and race console input.
+        publisher = subprocess.Popen(["xclip", "-selection", "clipboard", "-in", "-quiet"],
+                                     env=self.env, stdin=subprocess.PIPE,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.processes.append(publisher)
+        publisher.stdin.write(command.encode("ascii"))
+        publisher.stdin.close()
+        time.sleep(0.7)
+        self.key("ctrl+v")
+        time.sleep(1)
+        self.key("Return")
 
     def __exit__(self, error_type, *_):
         if self.console_open and error_type is None:

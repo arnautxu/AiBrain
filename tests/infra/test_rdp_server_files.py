@@ -232,7 +232,9 @@ class InteractiveAdmissionTests(unittest.TestCase):
                 def __init__(self, *args): pass
                 def __enter__(self): return self
                 def __exit__(self, *args): pass
-                def execute(self, command, nonce, timeout):
+                def execute(self, command, nonce, timeout, staged_read=False):
+                    if staged_read is not True:
+                        raise AssertionError('Browse must use the bounded read-only launcher')
                     self.calls += 1
                     return {'ok': True, 'entries': [], 'nonce': nonce}
             session = FakeSession()

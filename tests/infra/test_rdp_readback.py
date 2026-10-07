@@ -99,6 +99,37 @@ class ReadbackTests(unittest.TestCase):
         self.assertNotIn('Copy-Item', program)
         self.assertLessEqual(len(command), 7800)
 
+    def test_read_only_staging_preserves_unicode_and_uses_short_keyboard_launcher(self):
+        command = rdp.build_command('list', 'C:\\Work\\Comprés', 'C:\\Work', self.nonce, {'maxEntries': 50, 'maxFileBytes': 100})
+        self.write({'ok': True, 'nonce': self.nonce, 'entries': []})
+        s = self.session()
+        s.type_text = Mock()
+        with patch.object(rdp.time, 'sleep'), patch.object(rdp.subprocess, 'Popen') as clipboard:
+            result = s.execute(command, self.nonce, staged_read=True)
+        self.assertEqual(result['readbackTransport'], 'redirected-file')
+        clipboard.assert_not_called()
+        s.key.assert_called_once_with('Return')
+        launcher = s.type_text.call_args.args[0]
+        self.assertLess(len(launcher), 500)
+        decoded = base64.b64decode(launcher.split()[-1]).decode('utf-16le')
+        self.assertIn('\\\\tsclient\\AiBrain\\request-' + self.nonce + '.ps1', decoded)
+        self.assertNotIn('ExecutionPolicy', launcher)
+        staged = self.root / ('request-' + self.nonce + '.ps1')
+        self.assertEqual(staged.read_text(encoding='utf-16'), base64.b64decode(command.split()[-1]).decode('utf-16le'))
+        self.assertEqual(staged.stat().st_mode & 0o777, 0o600)
+
+    def test_staging_rejects_nonce_traversal_non_encoded_command_and_existing_files(self):
+        s = self.session()
+        command = rdp.build_command('list', 'C:\\Work', 'C:\\Work', self.nonce, {'maxEntries': 50, 'maxFileBytes': 100})
+        for nonce, request in [('../outside', command), (self.nonce, 'cmd /c anything'), (self.nonce, command + '!')]:
+            with self.assertRaises(ValueError):
+                s.stage_read_command(request, nonce)
+        staged = self.root / ('request-' + self.nonce + '.ps1')
+        staged.write_text('preserve')
+        with self.assertRaises(FileExistsError):
+            s.stage_read_command(command, self.nonce)
+        self.assertEqual(staged.read_text(), 'preserve')
+
 
 if __name__ == '__main__':
     unittest.main()
