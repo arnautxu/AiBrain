@@ -303,7 +303,7 @@ test("mobile viewer projects expose an accessible read-only history and context 
   const main = page.getByRole("main");
   await expect(main).toHaveAttribute("aria-busy", "false");
   await expect(main).toHaveAttribute("data-read-only", "true");
-  await expect(page.getByRole("status")).toContainText("Proyecto de solo lectura");
+  await expect(page.getByRole("status")).toContainText("Conversación de solo lectura");
   await expect(page.getByRole("textbox", { name: "Mensaje" })).toHaveCount(0);
   await assertNoBlockingViolations(page, "mobile viewer read-only history");
 

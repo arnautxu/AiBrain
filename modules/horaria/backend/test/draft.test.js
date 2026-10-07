@@ -4,8 +4,49 @@ import http from 'node:http';
 import { prisma } from '../src/services/prisma.js';
 import { aiIdentity } from '../src/integration/providers.js';
 import { draftHandler } from '../src/integration/draft.js';
-import { DAYS, applyDraftCoverage, validateDraftCoverage, validateDraftRequests } from '../src/services/draft-scenario.js';
+import { DAYS, applyDraftCoverage, applyDraftRequests, reviewDraft, validateDraftCoverage, validateDraftRequests } from '../src/services/draft-scenario.js';
+import { enforceFinalScheduleBounds } from '../src/services/final-schedule-bounds.js';
 import { generateAISchedule } from '../src/services/aiScheduler.js';
+
+test('assigning a requested afternoon differs from afternoon-only availability and never raises the contract', () => {
+  const employee = { id: 88, funcion: 'DEPENDIENTA', maxHorasSemana: 40, diasAusente: {}, diasPreferenciaLibre: {}, turnosPorDiaPreferencia: {} };
+  const request = { employeeId: 88, requiredShiftsByDay: { MIERCOLES: 'TARDE' } };
+  applyDraftRequests([request], [employee]);
+  const horario = [{ empleadoId: 88, dias: DAYS.map((dia, i) => ({ dia, turno: ['PARTIDO', 'PARTIDO', 'LIBRE', 'PARTIDO', 'LIBRE', 'PARTIDO', 'LIBRE'][i] })) }];
+  enforceFinalScheduleBounds(horario, [employee], [], ['DOMINGO']);
+  assert.equal(horario[0].dias[2].turno, 'TARDE');
+  const schedules = horario[0].dias.map(d => ({ ...d, empleadoId: 88, empleado: employee }));
+  const review = reviewDraft(schedules, [employee], [], ['DOMINGO'], [request], []);
+  assert.equal(review.checks.find(c => c.requirement === 'MIERCOLES TARDE asignada').status, 'respected');
+  assert.equal(review.checks.find(c => c.requirement === 'Horas máximas semanales').status, 'respected');
+  assert.equal(employee.maxHorasSemana, 40);
+});
+
+for (const reason of ['closed', 'absent', 'other-shop', 'unavailable', 'zero-hours']) test(`an impossible explicit shift remains visible and cannot override ${reason}`, () => {
+  const employee = { id: 1, funcion: 'DEPENDIENTA', maxHorasSemana: reason === 'zero-hours' ? 0 : 40,
+    diasAusente: reason === 'absent' ? { MIERCOLES: 'VACACIONES' } : {}, diasPreferenciaLibre: {},
+    diasOcupadosOtrosEstablecimientos: reason === 'other-shop' ? { MIERCOLES: true } : {},
+    dispParsed: reason === 'unavailable' ? { MIERCOLES: { T: false } } : null, turnosPorDiaPreferencia: {} };
+  const request = { employeeId: 1, requiredShiftsByDay: { MIERCOLES: 'TARDE' } };
+  applyDraftRequests([request], [employee]);
+  const horario = [{ empleadoId: 1, dias: DAYS.map(dia => ({ dia, turno: 'LIBRE' })) }];
+  const closed = reason === 'closed' ? ['MIERCOLES', 'DOMINGO'] : ['DOMINGO'];
+  enforceFinalScheduleBounds(horario, [employee], [], closed);
+  assert.equal(horario[0].dias[2].turno, 'LIBRE');
+  const schedules = horario[0].dias.map(d => ({ ...d, empleadoId: 1, empleado: employee }));
+  const review = reviewDraft(schedules, [employee], [], closed, [request], []);
+  assert.equal(review.checks.find(c => c.requirement === 'MIERCOLES TARDE asignada').status, 'conflict');
+  assert.equal(review.allRespected, false);
+});
+
+test('structured split-shift limits are checked even when the prose parser cannot interpret them', () => {
+  const employee = { id: 93, funcion: 'DEPENDIENTA', maxHorasSemana: 40, diasAusente: {}, diasPreferenciaLibre: {},
+    turnosPorDiaPreferencia: {}, condicionesEstructuradas: { maxPartidos: 1, maxTardes: 3, partidoCompta: 'TARDA' } };
+  const schedules = DAYS.map((dia, i) => ({ dia, turno: i < 2 ? 'PARTIDO' : 'LIBRE', empleadoId: 93, empleado: employee }));
+  const review = reviewDraft(schedules, [employee], [], ['DOMINGO'], [], []);
+  assert.ok(review.conflicts.some(c => c.employeeId === 93 && c.detail === '2 partidos; máximo 1'));
+  assert.equal(review.allRespected, false);
+});
 
 test('temporary coverage preserves saved bounds and scopes without mutating them', () => {
   const rules = [{ diasAplica: '["LUNES"]', minDependientasManana: 2, maxDependientasManana: 3 }];
@@ -41,6 +82,8 @@ test('draft validates request shape, employee membership and rejects ignored fie
     [{ employeeId: 1, maxHours: -1 }], [{ employeeId: 1 }, { employeeId: 1 }]]) {
     assert.throws(() => validateDraftRequests(requests, employees));
   }
+  assert.throws(() => validateDraftRequests([{ employeeId: 1, requiredShiftsByDay: { MIERCOLES: 'PARTIDO' } }], employees));
+  assert.throws(() => validateDraftRequests([{ employeeId: 1, shiftsByDay: { MIERCOLES: 'MANANA' }, requiredShiftsByDay: { MIERCOLES: 'TARDE' } }], employees));
 });
 
 for (const temporaryCoverage of [false, true]) test(`real draft pipeline checks final grid without ANY business writes (temporary coverage: ${temporaryCoverage})`, async () => {

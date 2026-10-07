@@ -93,7 +93,7 @@ import {
 import {
   isWorkbenchSnapshot,
   STANDALONE_PROJECT_SLUG,
-  workbenchProjectAccess,
+  workbenchThreadAccess,
   type BranchThreadInput,
   type UpdateProjectInput,
   type UpdateThreadInput,
@@ -895,6 +895,7 @@ export function BrainApp({
   }, []);
   const storedResponsePhase = useStoredResponse({
     thread: activeThread, enabled: initialWorkbench.persistence === "filesystem", online: networkOnline,
+    readOnly: !workbenchThreadAccess(activeThread, activeProject).canEdit,
     attached: Boolean(activeThread && runningThreadIds.has(activeThread.id) &&
       !(streamRecoveryNotice?.threadId === activeThread.id && streamRecoveryNotice.attempt === null)),
     retry: storedResponseRetry, onSnapshot: applyStoredResponse,
@@ -1217,16 +1218,18 @@ export function BrainApp({
         // Background work and search results can refer to conversations absent
         // from the initial sidebar snapshot. Revalidate access before opening.
         thread = await getThreadRequest(threadId);
-        const project = await getProjectRequest(thread.projectId);
+        const project = thread.access?.role === "viewer"
+          ? await getProjectRequest(thread.projectId).catch(() => null)
+          : await getProjectRequest(thread.projectId);
         if (generation !== selectionGenerationRef.current) return;
-        if (thread.id !== threadId || project.id !== thread.projectId ||
-            thread.status !== "active" || project.status !== "active") {
+        if (thread.id !== threadId || (project && project.id !== thread.projectId) ||
+            thread.status !== "active" || (project && project.status !== "active")) {
           throw new Error(t("Esta conversación ya no está disponible."));
         }
         const loadedThread = thread;
         setThreads((current) => current.some((item) => item.id === loadedThread.id)
           ? current : [loadedThread, ...current]);
-        setProjects((current) => current.some((item) => item.id === project.id)
+        if (project) setProjects((current) => current.some((item) => item.id === project.id)
           ? current : [project, ...current]);
       } catch {
         if (generation === selectionGenerationRef.current) {
@@ -2428,7 +2431,7 @@ export function BrainApp({
           setPreviewDocument(null);
           setActiveSideWindow("browser");
         }}
-        readOnly={!workbenchProjectAccess(activeProject).canEdit}
+        readOnly={!workbenchThreadAccess(activeThread, activeProject).canEdit}
       />}
       </div>
 
@@ -2438,6 +2441,7 @@ export function BrainApp({
 
       {inspectorEnabled && preferences.showInspector && activeSideWindow === "inspector" ? (
         <DetailsPanel
+          readOnly={!workbenchThreadAccess(activeThread, activeProject).canEdit}
           message={selectedMessage}
           performance={selectedMessage ? clientTurnReadbacks[selectedMessage.id] ?? null : null}
           open

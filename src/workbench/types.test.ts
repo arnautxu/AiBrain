@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isWorkbenchProject, type WorkbenchProject } from "@/workbench/types";
+import { isWorkbenchProject, isWorkbenchThread, workbenchThreadAccess, type WorkbenchProject } from "@/workbench/types";
 
 const project: WorkbenchProject = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -23,6 +23,16 @@ const project: WorkbenchProject = {
 };
 
 describe("workbench project access projection", () => {
+  it("uses conversation capabilities ahead of project edit rights and fails closed without either", () => {
+    const viewer = { role: "viewer" as const, canEdit: false, canManage: false };
+    expect(workbenchThreadAccess({ access: viewer }, project)).toEqual(viewer);
+    expect(workbenchThreadAccess({}, null)).toEqual(viewer);
+    expect(workbenchThreadAccess(null, project).canEdit).toBe(true);
+    const thread = { id: project.id, projectId: project.id, title: "Saved", status: "active", pinned: false,
+      createdAt: project.createdAt, updatedAt: project.updatedAt, messages: [], access: viewer };
+    expect(isWorkbenchThread(thread)).toBe(true);
+    expect(isWorkbenchThread({ ...thread, access: { ...viewer, canEdit: true } })).toBe(false);
+  });
   it("accepts legacy projects and coherent server-issued capability sets", () => {
     expect(isWorkbenchProject(project)).toBe(true);
     expect(isWorkbenchProject({

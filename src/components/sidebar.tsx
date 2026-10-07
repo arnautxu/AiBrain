@@ -41,6 +41,7 @@ import type { PublicInstallationBranding } from "@/config/installation-branding"
 import {
   STANDALONE_PROJECT_SLUG,
   workbenchProjectAccess,
+  workbenchThreadAccess,
   type WorkbenchProject,
   type WorkbenchThread,
 } from "@/workbench/types";
@@ -382,7 +383,7 @@ export function Sidebar({
               {pinnedOpen ? <SidebarMenu id="pinned-conversations" size="compact" className="gap-0.5">
                 {pinnedThreads.map((thread) => {
                   const project = projects.find((candidate) => candidate.id === thread.projectId) ?? null;
-                  const access = project ? workbenchProjectAccess(project) : null;
+                  const access = workbenchThreadAccess(thread, project);
                   const active = thread.id === activeThreadId;
                   const menuOpen = threadMenuId === thread.id;
                   return (
@@ -438,6 +439,7 @@ export function Sidebar({
                     {projectThreadsOpen ? <div aria-label={t("Chats de {p0}", { p0: project.name })} className={styles.projectChildren}>
                       <div className="space-y-0.5">
                         {activeProjectThreads.length === 0 ? <p data-testid="sidebar-project-thread" className="px-2 py-1 text-[11px] leading-5 text-[var(--text-subtle)]">{allActiveProjectThreads.length > 0 ? t("Sus conversaciones están en Anclados.") : t("Aún no hay conversaciones.")}</p> : activeProjectThreads.map((thread) => {
+                          const threadAccess = workbenchThreadAccess(thread, project);
                           const threadActive = thread.id === activeThreadId;
                           const threadMenuOpen = threadMenuId === thread.id;
                           return (
@@ -448,7 +450,7 @@ export function Sidebar({
                                 {thread.pinned ? <PushPin size={10} weight="fill" /> : null}
                               </button>
                               <button aria-label={t("Acciones de {p0}", { p0: thread.title })} aria-haspopup="menu" aria-expanded={threadMenuOpen} aria-controls={threadMenuOpen ? `sidebar-thread-actions-${thread.id}` : undefined} className={`sidebar-item-action absolute right-0 top-1/2 z-20 grid size-11 -translate-y-1/2 place-items-center text-[var(--text-subtle)] opacity-0 hover:text-[var(--text)] group-hover/thread:opacity-100 focus:opacity-100 ${contextMenuOpen && !threadMenuOpen ? "context-menu-suppressed" : ""}`} onClick={() => { setProjectMenuId(null); setThreadMenuId(threadMenuOpen ? null : thread.id); }}><DotsThree size={13} weight="bold" /></button>
-                              {threadMenuOpen ? <ItemActions kind="thread" item={thread} canEdit={access.canEdit} canPin canArchive={access.canEdit} onClose={closeMenus} onAction={(action, returnFocus) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction, returnFocus); }} /> : null}
+                              {threadMenuOpen ? <ItemActions kind="thread" item={thread} canEdit={threadAccess.canEdit} canPin canArchive={threadAccess.canEdit} onClose={closeMenus} onAction={(action, returnFocus) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction, returnFocus); }} /> : null}
                             </div>
                           );
                         })}
@@ -469,6 +471,7 @@ export function Sidebar({
               {activeStandaloneThreads.length === 0 ? (
                 <li className="px-2 py-2 text-[12px] leading-5 text-[var(--text-subtle)]">{t("Tus chats sin proyecto aparecerán aquí.")}</li>
               ) : visibleStandaloneThreads.map((thread) => {
+                const access = workbenchThreadAccess(thread, standaloneProject);
                 const active = thread.id === activeThreadId;
                 const menuOpen = threadMenuId === thread.id;
                 return (
@@ -479,7 +482,7 @@ export function Sidebar({
                       {thread.pinned ? <PushPin size={10} weight="fill" /> : threadActivityById[thread.id]?.state === "idle" ? <span className="text-[11px] text-[var(--text-subtle)] opacity-0 group-hover/thread:opacity-100">{relativeDate(thread.updatedAt, locale)}</span> : null}
                     </SidebarMenuButton>
                     <button aria-label={t("Acciones de {p0}", { p0: thread.title })} aria-haspopup="menu" aria-expanded={menuOpen} aria-controls={menuOpen ? `sidebar-thread-actions-${thread.id}` : undefined} className={`sidebar-item-action absolute right-0 top-1/2 z-20 grid size-11 -translate-y-1/2 place-items-center text-[var(--text-subtle)] opacity-0 hover:text-[var(--text)] group-hover/thread:opacity-100 focus:opacity-100 ${contextMenuOpen && !menuOpen ? "context-menu-suppressed" : ""}`} onClick={() => { setProjectMenuId(null); setThreadMenuId(menuOpen ? null : thread.id); }}><DotsThree size={14} weight="bold" /></button>
-                    {menuOpen ? <ItemActions kind="thread" item={thread} onClose={closeMenus} onAction={(action, returnFocus) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction, returnFocus); }} /> : null}
+                    {menuOpen ? <ItemActions kind="thread" item={thread} canEdit={access.canEdit} canPin canArchive={access.canEdit} onClose={closeMenus} onAction={(action, returnFocus) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction, returnFocus); }} /> : null}
                   </SidebarMenuItem>
                 );
               })}
