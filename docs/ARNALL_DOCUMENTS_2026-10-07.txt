@@ -191,3 +191,13 @@ with no duplicate hashes/receipts. Exact scheduled-time acceptance is separate.
 The fresh real Girona draft after PR15 passes Eva 3 mornings/3 afternoons,
 Neus Wednesday afternoon and 36/40 hours, all contracts and numeric coverage.
 Jordi's 14-hour condition conflict remains explicit; no schedule was persisted.
+
+The full historical review found Marta's explicit 33-invoice request on
+25 September still exceeded the shared 20-file limit. Raise the common count
+to 50 across composer, request contract and server binding, including mixed
+images/documents. Translate the actual shared limit instead of hardcoding it.
+Keep aggregate original-byte and prepared-input budgets, per-file validation,
+private originals, permissions and macro isolation unchanged. Binding tests
+cover real staged batches of 33/50, refusal of 51 before reads/conversion and
+unchanged aggregate budgets. A live 33-file UI acceptance remains a release gate;
+synthetic fixtures must not be described as Marta's missing 33 originals.

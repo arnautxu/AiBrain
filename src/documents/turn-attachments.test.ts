@@ -75,7 +75,7 @@ function textInputResolver(stagingRoot: string) {
 }
 
 describe("turn document attachment binding", () => {
-  it.each([10, 11, 20])("binds %i fictional invoices from real validated staging without model calls", async (count) => {
+  it.each([10, 11, 20, 33, 50])("binds %i fictional invoices from real validated staging without model calls", async (count) => {
     const { staging, stagingRoot } = await fixture();
     const ids: string[] = [];
     for (let index = 0; index < count; index++) {
@@ -94,12 +94,12 @@ describe("turn document attachment binding", () => {
     expect(JSON.stringify(turnDocumentCodexInputs(resolved))).not.toContain(stagingRoot);
   });
 
-  it("rejects 21 documents before staging reads or conversion", async () => {
+  it("rejects 51 documents before staging reads or conversion", async () => {
     const { staging, stagingRoot } = await fixture();
     const read = vi.spyOn(staging, "resolveContentById");
     const resolver = textInputResolver(stagingRoot);
     const resolve = vi.spyOn(resolver, "resolve");
-    const ids = Array.from({ length: 21 }, (_, index) => `22222222-2222-4222-8222-${String(index + 1).padStart(12, "0")}`);
+    const ids = Array.from({ length: 51 }, (_, index) => `22222222-2222-4222-8222-${String(index + 1).padStart(12, "0")}`);
     await expect(resolveTurnDocumentAttachments({ staging, threadId: THREAD_ID, uploadIds: ids,
       permissions: permissions("allow"), inputResolver: resolver })).rejects.toMatchObject({ code: "TURN_DOCUMENT_SET_INVALID" });
     expect(read).not.toHaveBeenCalled();
