@@ -259,7 +259,7 @@ async function openSharedProjectMenu(page: Page, mobile: boolean) {
 }
 
 async function verifyViewerSurface(page: Page, mobile: boolean) {
-  await expect(page.getByText(/Proyecto de solo lectura/)).toBeVisible();
+  await expect(page.getByText(/Conversación de solo lectura/)).toBeVisible();
   await expect(page.getByTestId("composer")).toHaveCount(0);
   await expect(page.getByRole("button", { name: `Nueva conversación en ${projectName}` })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Editar mensaje y crear una rama" })).toHaveCount(0);

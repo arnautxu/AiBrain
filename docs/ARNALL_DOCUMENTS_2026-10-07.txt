@@ -1,6 +1,24 @@
 Arnall documents and historical incidents — 7 October 2026
 
 Latest live checks (7 October, after the invoice-batch release):
+The same live grid left Neus free on Wednesday while marking "afternoon-only"
+as respected. The actual retained 6 October request explicitly said to put her
+to work that afternoon. Keep availability restrictions backward-compatible,
+and add draft-only requiredShiftsByDay for an actual assignment. Final bounded
+repair prioritizes that assignment over coverage, while preserving contract,
+absence, closed-day, cross-shop, fixed availability and coverage maximum bounds.
+An impossible assignment stays a visible conflict; it never becomes fake work
+or an increased contract. The final review also checks saved structured exact
+counts and maxima, including Gemma's maxPartidos=1, which the prose-only checker
+omitted when the actual draft contained two splits. No employee or business
+schedule is persisted. Live repetition with PROVA excluded is still required.
+The follow-up real Girona draft excluding PROVA produced its valid Excel and
+coverage audit, then the delivery guard falsely rejected the answer because
+the prompt said "No amplíes ... mínimos ficticios". A negated reference to
+invented data is not an affirmative simulation request. The template gate now
+ignores negated fiction mentions while retaining mandatory artifacts for an
+affirmative invented-shop request. Worker-event regressions cover both paths;
+fresh authenticated UI acceptance is still required after this candidate ships.
 The UI accepted and reopened 33 synthetic PDFs in a single message, identified
 all 33 invoice numbers, and independently totalled EUR 561. The original bytes,
 sizes and upload bindings all match the private fixture oracle. This accepts

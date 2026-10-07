@@ -33,12 +33,14 @@ export function validateDraftRequests(requests, employees) {
   if (!Array.isArray(requests) || requests.length > employees.length) throw new Error('Peticiones de simulación no válidas.');
   const ids = new Set();
   for (const r of requests) {
-    if (!record(r) || Object.keys(r).some(k => !['employeeId', 'daysOff', 'shiftsByDay', 'noSplit', 'absences', 'maxHours'].includes(k)) ||
+    if (!record(r) || Object.keys(r).some(k => !['employeeId', 'daysOff', 'shiftsByDay', 'requiredShiftsByDay', 'noSplit', 'absences', 'maxHours'].includes(k)) ||
         !Number.isSafeInteger(r.employeeId) || ids.has(r.employeeId) || !employees.some(e => e.id === r.employeeId) ||
         (r.daysOff !== undefined && !days(r.daysOff)) ||
         (r.noSplit !== undefined && typeof r.noSplit !== 'boolean') ||
         (r.maxHours !== undefined && (!Number.isFinite(r.maxHours) || r.maxHours < 0 || r.maxHours > 168)) ||
         (r.shiftsByDay !== undefined && (!record(r.shiftsByDay) || Object.entries(r.shiftsByDay).some(([d, t]) => !DAYS.includes(d) || !['MANANA', 'TARDE'].includes(t)))) ||
+        (r.requiredShiftsByDay !== undefined && (!record(r.requiredShiftsByDay) || Object.entries(r.requiredShiftsByDay).some(([d, t]) =>
+          !DAYS.includes(d) || !['MANANA', 'TARDE'].includes(t) || (r.shiftsByDay?.[d] && r.shiftsByDay[d] !== t)))) ||
         (r.absences !== undefined && (!record(r.absences) || Object.entries(r.absences).some(([d, t]) => !DAYS.includes(d) || !['VACACIONES', 'BAJA_MEDICA'].includes(t))))) {
       throw new Error('Petición no admitida o persona ajena a la tienda.');
     }
@@ -53,6 +55,8 @@ export function applyDraftRequests(requests, employees) {
     const e = employees.find(e => e.id === r.employeeId);
     for (const d of r.daysOff || []) e.diasPreferenciaLibre[d] = true;
     Object.assign(e.turnosPorDiaPreferencia, r.shiftsByDay || {});
+    e.turnosRequeridosBorrador = { ...r.requiredShiftsByDay };
+    Object.assign(e.turnosPorDiaPreferencia, e.turnosRequeridosBorrador);
     Object.assign(e.diasAusente, r.absences || {});
     if (r.maxHours !== undefined) e.maxHorasSemana = Math.min(e.maxHorasSemana, r.maxHours);
     if (r.noSplit) {
@@ -84,10 +88,23 @@ export function reviewDraft(schedules, employees, rules, closedDays, requests, f
       diesDemanats: Object.keys(e.turnosPorDiaPreferencia || {}) });
     for (const problem of fixed.problemas) check(e.id, 'Condiciones fijas', false, problem);
     for (const text of fixed.cond.noInterpretadas) unverifiedConditions.push(`Persona ${e.id}: condición no verificada: ${text}`);
+    const structured = e.condicionesEstructuradas || {};
+    const split = work.filter(s => s.turno === 'PARTIDO').length;
+    const morning = work.filter(s => s.turno === 'MANANA').length + (structured.partidoCompta === 'MATI_I_TARDA' ? split : 0);
+    const afternoon = work.filter(s => s.turno === 'TARDE').length + (['TARDA', 'MATI_I_TARDA'].includes(structured.partidoCompta) ? split : 0);
+    for (const [field, actual, label, exact] of [
+      ['maxPartidos', split, 'partidos', false], ['partidosExactes', split, 'partidos', true],
+      ['maxTardes', afternoon, 'tardes', false], ['tardesExactes', afternoon, 'tardes', true],
+      ['matinsExactes', morning, 'mañanas', true],
+    ]) if (structured[field] !== undefined) check(e.id, 'Condiciones estructuradas',
+      exact ? actual === structured[field] : actual <= structured[field],
+      `${actual} ${label}; ${exact ? 'exactamente' : 'máximo'} ${structured[field]}`);
     const r = requests.find(r => r.employeeId === e.id);
     if (r?.noSplit) check(e.id, 'Sin turnos partidos', !work.some(s => s.turno === 'PARTIDO'), 'Petición de la simulación');
     for (const d of r?.daysOff || []) check(e.id, `${d} libre`, shifts.some(s => s.dia === d && s.turno === 'LIBRE'), 'Petición de la simulación');
     for (const [d, t] of Object.entries(r?.shiftsByDay || {})) check(e.id, `${d} solo ${t}`, shifts.some(s => s.dia === d && [t, 'LIBRE'].includes(s.turno)), 'Petición de la simulación');
+    for (const [d, t] of Object.entries(r?.requiredShiftsByDay || {})) check(e.id, `${d} ${t} asignada`,
+      shifts.some(s => s.dia === d && s.turno === t), 'Turno solicitado; libre no equivale a asignado');
     for (const [d, t] of Object.entries(r?.absences || {})) check(e.id, `${d} ${t}`, shifts.some(s => s.dia === d && s.turno === 'LIBRE' && s.ausencia === t), 'Ausencia simulada, sin guardar');
   }
   for (const d of DAYS.filter(d => !closedDays.includes(d))) {
