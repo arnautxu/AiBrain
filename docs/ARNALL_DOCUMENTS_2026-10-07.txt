@@ -179,3 +179,15 @@ still needed; do not infer that a folder is absent from a failed readback.
 The automation badge distinguishes a worker lease (En curso) from a queued
 manual request and prevents manual resubmission during an automatic lease.
 Eleven automation component tests pass; root type/lint checks pass.
+Final follow-up: the main CI after PR16 caught a real initial-load race in
+the create-interval component test: Nueva could open before the authorized
+audience directory supplied currentUserId, so the default owner recipient
+was empty. Disable only new-task opening until that identity arrives; wait
+for the eligible button in the UI test. Add a delayed-directory regression
+that verifies the owner remains the selected default without implicit grants.
+The owner invoice UI has now completed four manual worker runs; the fourth
+reports zero new documents, zero unread invoices and eleven immutable originals
+with no duplicate hashes/receipts. Exact scheduled-time acceptance is separate.
+The fresh real Girona draft after PR15 passes Eva 3 mornings/3 afternoons,
+Neus Wednesday afternoon and 36/40 hours, all contracts and numeric coverage.
+Jordi's 14-hour condition conflict remains explicit; no schedule was persisted.
