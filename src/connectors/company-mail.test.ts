@@ -10,7 +10,7 @@ import type { InstallationConfig } from "@/config/installation-schema";
 import { companyMailAttachmentParts, companyMailClientOptions, downloadCompanyMailAttachment, MAX_MAIL_ATTACHMENT_BYTES } from "./company-mail-client";
 import { parseCompanyMailCredential, validMailDate } from "./company-mail-contracts";
 import { FileCompanyMailStore, companyMailEncryptionKey } from "./company-mail-store";
-import { importCompanyMailInvoices, invoiceLedgerForMailbox, mailboxIdentity, mailInvoiceChangesForDay, mailInvoiceWorkbook, parseMailInvoiceReview, recordMailInvoiceReview, refreshMailInvoiceWorkbook } from "./company-mail-invoices";
+import { importCompanyMailInvoices, invoiceLedgerForMailbox, mailboxIdentity, mailHash, mailInvoiceChangesForDay, mailInvoiceWorkbook, parseMailInvoiceReview, recordMailInvoiceReview, refreshMailInvoiceWorkbook } from "./company-mail-invoices";
 import { validateUploadedDocument } from "@/documents/upload-validation";
 import JSZip from "jszip";
 
@@ -120,6 +120,19 @@ describe("durable local invoice import", () => {
     expect((await ledger.read()).processedMessages).toHaveLength(0);
     expect((await importCompanyMailInvoices({ client: imap, credential, store: ledger })).imported).toHaveLength(3);
     expect((await ledger.read()).processedMessages).toHaveLength(1);
+  });
+  it("imports supplier HTTP-prefixed PDFs without altering originals or duplicating them", async () => {
+    const { ledger } = await setup();
+    const body = await pdf(209452);
+    const original = Buffer.concat([Buffer.from(`content-type: application/pdf\\ncontent-length: ${body.length}\\n`), body]);
+    const imap = client([{ uid: 1, parts: [{ name: "209452.pdf", data: original }] }]);
+    const first = await importCompanyMailInvoices({ client: imap, credential, store: ledger });
+    expect(first.errors).toEqual([]);
+    expect(first.imported).toHaveLength(1);
+    expect(first.imported[0].sha256).toBe(mailHash(original));
+    expect(await ledger.original(first.imported[0])).toEqual(original);
+    expect((await importCompanyMailInvoices({ client: imap, credential, store: ledger })).imported).toHaveLength(0);
+    expect((await ledger.read()).entries).toHaveLength(1);
   });
   it("retains partial success on a download failure, backs off, and retries without duplicating the original", async () => {
     vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-10-06T10:00:00Z"));

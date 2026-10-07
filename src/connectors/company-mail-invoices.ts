@@ -9,6 +9,7 @@ import { companyMailAttachmentParts, downloadCompanyMailAttachment, MAX_MAIL_ATT
 import { CompanyMailError, type CompanyMailCredential } from "./company-mail-contracts";
 import { HetznerMailInvoiceDestination, type MailInvoiceDestination } from "./company-mail-destination";
 import { MAIL_HASH, MAIL_UUID, privateMailDirectory } from "./company-mail-store";
+import { mailInvoiceReadingContents } from "./company-mail-pdf";
 
 export type InvoiceReviewStatus = "pending" | "reviewed" | "needs_attention" | "ignored";
 export type MailInvoiceEntry = {
@@ -132,15 +133,15 @@ export async function importCompanyMailInvoices(input: { client: ImapFlow; crede
           const genericMime = part.type.toLowerCase() === "application/octet-stream";
           const inferredMime: Record<string, string> = { ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".xls": "application/vnd.ms-excel", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" };
           const declaredMimeType = genericMime ? inferredMime[path.extname(part.name).toLowerCase()] ?? part.type : part.type.toLowerCase();
-          const document = validateUploadedDocument({ fileName: part.name, declaredMimeType, data });
-          base.sha256 = document.sha256;
+          const document = validateUploadedDocument({ fileName: part.name, declaredMimeType, data: mailInvoiceReadingContents(data, declaredMimeType) });
+          base.sha256 = mailHash(data);
           base.size = data.length;
           base.mediaType = document.mediaType;
           const duplicate = ledger.entries.find(e => e.receipt !== receipt && e.sha256 === base.sha256 && !e.errorCode && !e.duplicateOf);
           base.duplicateOf = duplicate?.id ?? null;
           if (duplicate) { base.status = "ignored"; base.note = "Original repetido por contenido; se conserva una sola copia."; }
           else {
-            await store.destination.putOriginal(document.sha256, data);
+            await store.destination.putOriginal(base.sha256, data);
             base.status = "pending"; base.note = "Adjunto importado, comprobación de factura pendiente.";
             outputs.push(base);
           }

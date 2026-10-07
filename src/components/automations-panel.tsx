@@ -213,6 +213,35 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
   }, [open, refresh]);
 
   useEffect(() => {
+    if (!open || formOpen || saving || deleteTarget) return;
+    const controller = new AbortController();
+    let pending = false;
+    const timer = setInterval(() => {
+      if (pending || document.visibilityState === "hidden") return;
+      pending = true;
+      void (async () => {
+        try {
+          const response = await fetch("/api/automations", { cache: "no-store", signal: controller.signal });
+          if (!response.ok) return;
+          const body = await response.json();
+          if (controller.signal.aborted) return;
+          setTasks(Array.isArray(body.tasks) ? body.tasks : []);
+          setAudienceDirectory(body.audienceDirectory ?? emptyDirectory);
+          if (historyTaskId) {
+            const history = await fetch(`/api/automations/${historyTaskId}/runs`, { cache: "no-store", signal: controller.signal });
+            if (!history.ok) return;
+            const result = await history.json();
+            if (!controller.signal.aborted) setRunsByTask(current => ({ ...current, [historyTaskId]: Array.isArray(result.runs) ? result.runs : [] }));
+          }
+        } catch {
+          // Keep the last visible receipt during transient transport failures.
+        } finally { pending = false; }
+      })();
+    }, 15_000);
+    return () => { clearInterval(timer); controller.abort(); };
+  }, [open, formOpen, saving, deleteTarget, historyTaskId]);
+
+  useEffect(() => {
     if (!discardConfirmation && !restoreDraftFocusRef.current) return;
     const frame = requestAnimationFrame(() => {
       if (discardConfirmation) discardContinueRef.current?.focus();
@@ -428,7 +457,7 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
           </div></fieldset>
           <fieldset><legend className="text-[11px] font-semibold text-[var(--text)]">{t("Frecuencia")}</legend><div className="mt-2 flex gap-1 rounded-xl bg-[var(--surface-muted)] p-1">{(["once", "interval", "daily", "weekly"] as const).map((option) => <button key={option} type="button" aria-pressed={kind === option} onClick={() => setKind(option)} className={`touch-target min-h-9 flex-1 rounded-lg text-[11px] font-medium ${kind === option ? "bg-[var(--surface-raised)] text-[var(--text)] shadow-[var(--shadow-sm)]" : "text-[var(--text-muted)]"}`}>{option === "once" ? t("Una vez") : option === "interval" ? t("Por intervalo") : option === "daily" ? t("Cada día") : t("Semanal")}</button>)}</div></fieldset>
           {kind === "weekly" ? <fieldset><legend className="text-[11px] font-semibold text-[var(--text)]">{t("Días")}</legend><div className="mt-2 flex gap-1.5">{weekdays.map((label, day) => <button key={day} type="button" aria-pressed={selectedWeekdays.includes(day)} onClick={() => setSelectedWeekdays((current) => current.includes(day) ? current.filter((item) => item !== day) : [...current, day])} className={`touch-target grid size-9 place-items-center rounded-full text-[10px] font-semibold ${selectedWeekdays.includes(day) ? "bg-[var(--text)] text-[var(--surface)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`}>{label}</button>)}</div></fieldset> : null}
-          {kind === "interval" ? <label className="block text-[11px] font-semibold text-[var(--text)]">{t("Intervalo en minutos")}<input type="number" min={60} max={10080} step={1} value={intervalMinutes} onChange={event => setIntervalMinutes(Number(event.target.value))} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /><span className="mt-1 block text-[11px] font-normal text-[var(--text-subtle)]">{t("120 minutos = cada 2 horas. La primera ejecución será dentro de ese intervalo.")}</span></label> : kind === "once" ? <div className="grid grid-cols-2 gap-3"><label className="block text-[11px] font-semibold text-[var(--text)]">{t("Fecha")}<input type="date" value={onceAt.split("T")[0] ?? ""} onChange={(event) => setOnceAt(`${event.target.value}T${onceAt.split("T")[1] ?? "09:00"}`)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label><label className="block text-[11px] font-semibold text-[var(--text)]">{t("Hora")}<input type="time" value={onceAt.split("T")[1] ?? "09:00"} onChange={(event) => setOnceAt(`${onceAt.split("T")[0] ?? ""}T${event.target.value}`)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label></div> : <label className="block text-[11px] font-semibold text-[var(--text)]">{t("Hora")}<input type="time" value={time} onChange={(event) => setTime(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label>}
+          {kind === "interval" ? <label className="block text-[11px] font-semibold text-[var(--text)]">{t("Intervalo en minutos")}<input type="number" min={60} max={10080} step={1} value={intervalMinutes} onChange={event => setIntervalMinutes(Number(event.target.value))} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /><span className="mt-1 block text-[11px] font-normal text-[var(--text-subtle)]">{t("La primera ejecución será dentro del intervalo seleccionado.")}</span></label> : kind === "once" ? <div className="grid grid-cols-2 gap-3"><label className="block text-[11px] font-semibold text-[var(--text)]">{t("Fecha")}<input type="date" value={onceAt.split("T")[0] ?? ""} onChange={(event) => setOnceAt(`${event.target.value}T${onceAt.split("T")[1] ?? "09:00"}`)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label><label className="block text-[11px] font-semibold text-[var(--text)]">{t("Hora")}<input type="time" value={onceAt.split("T")[1] ?? "09:00"} onChange={(event) => setOnceAt(`${onceAt.split("T")[0] ?? ""}T${event.target.value}`)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label></div> : <label className="block text-[11px] font-semibold text-[var(--text)]">{t("Hora")}<input type="time" value={time} onChange={(event) => setTime(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label>}
           <label className="block text-[11px] font-semibold text-[var(--text)]">{t("Zona horaria")}<select value={timeZone} onChange={(event) => setTimeZone(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal">{AUTOMATION_TIME_ZONES.map((zone) => <option key={zone} value={zone}>{zone}</option>)}</select></label>
           <p id="automation-form-description" className="rounded-xl bg-[var(--surface-muted)] px-3 py-2.5 text-[10px] leading-4 text-[var(--text-muted)]">{t("La tarea crea una conversación en el proyecto y ejecuta este prompt. Las acciones sensibles solo se ejecutan con autorización durable previa; el worker no espera aprobaciones interactivas. No envía mensajes externos por sí sola.")}</p>
         </form>
