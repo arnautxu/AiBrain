@@ -11,6 +11,26 @@ same definition.
 
 ## Lifecycle contract
 
+### 6 October 2026 local candidate
+
+CPU profiling of the existing paced-answer fixture showed JSX construction in
+`BrainApp`, `ChatWorkspace` and `Sidebar` on every text fragment. The candidate
+keeps a per-mounted-workbench, thread/message-scoped display buffer, so only the
+active answer subscribes to text changes. Non-delta events and final/abort paths
+flush the exact accumulated content to chat state; server projection is still
+durable and authoritative. Completed plain paragraphs/headings keep their DOM
+nodes; complex Markdown retains its full terminal parse. No-op message updates
+do not invalidate the workbench.
+
+The unchanged CPU x4 fixture passes on a local optimized production build:
+757 frames, 150 mutations, p95 frame gap 18.5 ms, slow-frame ratio 0.00132,
+200 ms total long tasks. The local development build still fails its total
+long-task ceiling at 524 ms, despite p95 17.6 ms and ratio 0.00690. These are
+separate results, not deployed/client acceptance. Five local browser regressions
+pass cancellation, independent concurrent turns, refresh/persistence and a real
+loopback connection outage. Evidence is outside the repo in the task's
+`arnall-incidents-20261006/evidence` directory.
+
 | Capability | State | Contract and evidence |
 | --- | --- | --- |
 | Stable turn identity and replay | validated locally | UI IDs are idempotency keys; App Server IDs are bound server-side. `src/runtime/worker-codex-turn.ts`, `src/runtime/transport/app-server-rpc-router.ts`, `tests/integration/worker-crash-recovery.integration.test.ts`. |

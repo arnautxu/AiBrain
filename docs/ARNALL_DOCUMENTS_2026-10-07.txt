@@ -1,0 +1,62 @@
+Arnall documents and historical incidents — 7 October 2026
+
+Base: cc7ffa7906da7ee4dcb6f8393b46db5500512d00.
+Recovered the 57-path 6 October incident candidate from its preserved
+checkout into a fresh worktree. Three iCloud reads were incomplete: rebuilt
+the afternoon-entry helper, its Meta guard test and fixture attributes, then
+verified all 704 horarIA tests. That candidate was never pushed/deployed.
+Do not equate the recovered content with its historical commit identity.
+
+Marta's five XLSM originals were obtained from the exact link in her email.
+The live UI reproduced UPLOAD_MACROS_REJECTED on the Girona original.
+New admission retains the exact original in the private original vault and
+reads saved worksheet XML directly; it never gives VBA/objects/external links
+to LibreOffice, the worker, or the browser. The normal boundary remains strict.
+Only a newly generated passive XLSX enters staging/workspaces/project sources.
+Missing formula caches are explicit, formulas are inert text, dates retain the
+Excel epoch. Formatting/macros are not represented as preserved by this reader.
+Original hashes and readback evidence remain private, outside Git.
+
+All five actual files pass local full admission/conversion/retry checks:
+Girona 50 sheets / 71,214 formulas; Calonge 48 / 50,367;
+S'Agaro 50 / 109,923; Begur 48 / 68,744; GP 49 / 68,339.
+No tabular sheets omitted; each original remained byte-identical.
+The XLSM derivative supports up to 500k cells/formulas and the 50 MiB input
+boundary. OOXML output uses bounded 200 MiB XML/50 MiB compressed output;
+legacy BIFF retains its original extraction/output boundaries.
+
+The initial available-history inventory contains 355 threads / 1,530 messages
+and includes archived chats. The pre-change backup captured later activity
+(355 threads / 1,546 messages). Preserve deleted-history uncertainty and
+separate real employee conversations from onboarding/technical tests.
+New 7 October Meta readback: solicitud_preferencies is APPROVED, language ca,
+three BODY parameters. It was not configured in horarIA. Stage only that
+binding, without sending or enabling automatic sending. Other templates remain
+PENDING; the submitted schedule template lacks the required DOCUMENT header.
+Do not create/modify provider templates or contact workers as part of this fix.
+
+Invoice tables now preserve inert <br> line breaks and usable minimum column
+width, with horizontal scrolling instead of squeezing long invoice numbers.
+Arbitrary HTML remains disabled. Preserve users' existing project criteria;
+PUNTEIG_FORMAT.md is present but explicit old/new project notes need a fresh
+conversation readback before declaring preferences effective.
+
+Operational evidence: fresh verified backup
+20261007T102900Z-13d25108-ec40-4234-824f-1020320906a3.
+An isolated dual-root restore recovered 23 workbenches, 355 threads and 1,546
+messages. Only the temporary QA restore created by this task was cleaned;
+all verified snapshots and previous restores remain preserved.
+The off-host replica configuration contains a placeholder; an authorized real
+destination is needed. Do not invent one or reuse InsiJets/BGreenly resources.
+The knowledge backup exceeds its 20-minute deadline under 25% CPU throttling.
+The bounded service configuration gives it 50% of one CPU and 60 minutes,
+without changing isolation, memory limit or retention. Verify execution before
+claiming that operational incident resolved.
+
+Local evidence: types and production build pass; 13 authenticated upload route
+tests pass, 34 parser/UI tests pass, 82 incident regressions pass. The initial
+contended broad suite was interrupted after timeouts; it is not release proof.
+Require the complete unchanged CI suite and exact immutable release identity.
+Live UI acceptance with all five originals is a separate post-deploy gate.
+Staffing minima, real Meta sends, editable My Maps sessions, mailbox connection
+credentials and Microsoft Excel acceptance remain separately observable gates.

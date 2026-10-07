@@ -39,7 +39,21 @@ const markdownComponents: Components = {
   table: ({ children: content }) => <div className="markdown-table-wrap"><table>{content}</table></div>,
 };
 
-const markdownPlugins = [remarkGfm];
+// Allow only inert table line breaks; keep arbitrary HTML disabled.
+function remarkTableLineBreaks() {
+  return (tree: { type: string; value?: string; children?: unknown[] }) => {
+    function visit(node: typeof tree, inTable = false) {
+      const table = inTable || node.type === "table";
+      if (table && node.type === "html" && /^<br\s*\/?\s*>$/i.test(node.value ?? "")) {
+        node.type = "break";
+        delete node.value;
+      }
+      for (const child of node.children ?? []) visit(child as typeof tree, table);
+    }
+    visit(tree);
+  };
+}
+const markdownPlugins = [remarkGfm, remarkTableLineBreaks];
 
 /**
  * Markdown is block-oriented. Once a blank line closes a block outside a
@@ -89,8 +103,17 @@ const MarkdownBlock = memo(function MarkdownBlock({ source }: { source: string }
   );
 });
 
+// Plain paragraphs and ATX headings have no cross-block dependencies. Keep
+// their already painted nodes when streaming ends instead of reparsing the
+// entire answer. Complex Markdown still gets one authoritative final parse
+// (reference links, loose lists, HTML, tables and code can span blocks).
+function hasIndependentPlainBlocks(source: string) {
+  return !/[`~*_\[\]<>|\\]/u.test(source) &&
+    !/^(?: {4}|\t| {0,3}(?:[-+]\s|\d+[.)]\s|={2,}\s*$|-{2,}\s*$))/mu.test(source);
+}
+
 export const MarkdownMessage = memo(function MarkdownMessage({ children, streaming = false }: { children: string; streaming?: boolean }) {
-  const blocks = streaming ? splitStreamingMarkdown(children) : [children];
+  const blocks = streaming || hasIndependentPlainBlocks(children) ? splitStreamingMarkdown(children) : [children];
   const completedBlocks = streaming ? blocks.slice(0, -1) : blocks;
   const streamingTail = streaming ? blocks.at(-1) ?? "" : "";
   return (

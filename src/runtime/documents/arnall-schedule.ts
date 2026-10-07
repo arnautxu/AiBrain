@@ -8,6 +8,7 @@ export type ArnallSchedule = Readonly<{
     id: number;
     name: string;
     section: "DEPENDIENTA" | "ELABORACION";
+    maxWeeklyHours?: number;
     codeHours: Readonly<{ M: number; T: number; D: number }>;
     days: readonly (Readonly<{ code: string; firstLine: string; secondLine: string; requested?: boolean }> | null)[];
   }>[];
@@ -178,6 +179,16 @@ export function arnallScheduleParts(input: ArnallSchedule): Record<string, strin
   for (const [number, translations] of Object.entries(auxiliaryLabels)) {
     const part = `xl/worksheets/sheet${number}.xml`;
     for (const [address, label] of Object.entries(translations)) parts[part] = setInSheet(parts[part], address, label);
+    // A table's column names must agree with its header cells. Translating only
+    // the worksheet leaves inconsistent table metadata for Excel to repair.
+    const tablePart = `xl/tables/table${Number(number) - 1}.xml`;
+    const columns = Array.from(parts[tablePart].matchAll(/<tableColumn\b[^>]*>/gu));
+    for (const [address, label] of Object.entries(translations)) {
+      if (!address.endsWith("1")) continue;
+      const column = Array.from(address.replace(/\d+$/u, "")).reduce((sum, c) => sum * 26 + c.charCodeAt(0) - 64, 0);
+      const original = columns[column - 1]?.[0];
+      if (original) parts[tablePart] = parts[tablePart].replace(original, original.replace(/\bname="[^"]*"/u, `name="${escape(label)}"`));
+    }
   }
 
   set("G4", input.establishmentName); set("D4", week); set("O4", year);

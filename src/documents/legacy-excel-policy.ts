@@ -44,14 +44,14 @@ export function parseLegacyExcelProvenance(value: unknown): LegacyExcelProvenanc
   const record = value as Record<string, unknown>;
   if (Object.keys(record).length !== keys.length || keys.some(key => !Object.hasOwn(record, key)) ||
       record.policy !== "values-only-v1" || typeof record.originalFileName !== "string" ||
-      !/^[^/\\\u0000-\u001f\u007f]{1,120}\.xls$/iu.test(record.originalFileName) ||
+      !/^[^/\\\u0000-\u001f\u007f]{1,120}\.xlsm?$/iu.test(record.originalFileName) ||
       record.originalFileName.length > 120 ||
       typeof record.originalSha256 !== "string" || !/^[0-9a-f]{64}$/.test(record.originalSha256)) {
     throw new Error("Invalid passive XLS provenance.");
   }
   const bounds: Record<string, [number, number]> = {
-    originalSize: [1, 16 * 1024 * 1024], sheetCount: [1, 100], cellCount: [1, 500_000],
-    formulaCount: [0, 100_000], missingFormulaCaches: [0, 100_000], undecodedFormulas: [0, 100_000],
+    originalSize: [1, record.originalFileName.toLowerCase().endsWith(".xlsm") ? 50 * 1024 * 1024 : 16 * 1024 * 1024], sheetCount: [1, 100], cellCount: [1, 500_000],
+    formulaCount: [0, 500_000], missingFormulaCaches: [0, 500_000], undecodedFormulas: [0, 500_000],
     omittedSheets: [0, 100], omittedStreams: [0, 5000],
   };
   for (const [key, [min, max]] of Object.entries(bounds)) {

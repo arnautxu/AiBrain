@@ -5,6 +5,18 @@ import { describe, expect, it } from "vitest";
 import { MarkdownMessage, splitStreamingMarkdown } from "@/components/markdown-message";
 
 describe("MarkdownMessage", () => {
+  it('keeps completed plain heading/paragraph nodes at terminal state, and resolves complex references in the full final document', () => {
+    const content = '### Primero\n\nPárrafo terminado.\n\n### Segundo\n\nÚltimo párrafo.';
+    const { rerender, container } = render(<MarkdownMessage streaming>{content}</MarkdownMessage>);
+    const heading = screen.getByRole('heading', { name: 'Primero' });
+    const paragraph = screen.getByText('Párrafo terminado.');
+    rerender(<MarkdownMessage>{content}</MarkdownMessage>);
+    expect(screen.getByRole('heading', { name: 'Primero' })).toBe(heading);
+    expect(screen.getByText('Párrafo terminado.')).toBe(paragraph);
+    expect(container.querySelector('.t-stream-caret')).toBeNull();
+    rerender(<MarkdownMessage>{'[Fuente][ref]\n\n[ref]: https://example.test'}</MarkdownMessage>);
+    expect(screen.getByRole('link', { name: 'Fuente' })).toHaveAttribute('href', 'https://example.test');
+  });
   it("renders GFM tables, links, lists and labelled code blocks", () => {
     render(<MarkdownMessage>{[
       "## Resultado",
@@ -38,6 +50,13 @@ describe("MarkdownMessage", () => {
     expect(screen.getByRole("link", { name: "Referencia" })).toHaveAttribute("target", "_blank");
     expect(screen.getByRole("button", { name: "Copiar bloque de código" })).toBeInTheDocument();
     expect(screen.getByText("const ready = true;")).toBeInTheDocument();
+  });
+
+  it("renders the invoice table's line breaks without enabling active HTML", () => {
+    const { container } = render(<MarkdownMessage>{"| Factura y albarán | A reclamar |\n| --- | --- |\n| M26/007811<br>M26/042664 | 3,01 € |\n\n<script>alert(1)</script>"}</MarkdownMessage>);
+    expect(container.querySelector("td br")).not.toBeNull();
+    expect(container.querySelector("td")?.textContent).toBe("M26/007811\nM26/042664");
+    expect(container.querySelector("script")).toBeNull();
   });
 
   it("shows streamed prose immediately with one lightweight caret and no word wrappers", () => {

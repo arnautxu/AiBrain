@@ -237,6 +237,49 @@ describe("authenticated document routes", () => {
     await expect(services.staging.readById(threadId, BAD_UPLOAD_ID)).rejects.toThrow();
   });
 
+  it("admits XLSM through the authenticated route, retains the original and isolates its passive derivative", async () => {
+    const [{ default: JSZip }, { generateLocalDocument }, { DocumentPreviewService }, uploadRoute, contentRoute,
+      { loadInstallationConfig }, { documentServicesForUser }, projectRoute, { FileWorkbenchStore }] = await Promise.all([
+      import("jszip"), import("@/runtime/documents/local-document-generator"), import("@/documents/preview-service"),
+      import("@/app/api/threads/[threadId]/documents/route"), import("@/app/api/threads/[threadId]/documents/[uploadId]/versions/[versionId]/route"),
+      import("@/config/installation"), import("@/documents/server-service"), import("@/app/api/projects/[projectId]/sources/route"), import("@/workbench/filesystem-store"),
+    ]);
+    const generated = await generateLocalDocument({ format: "xlsx", title: "Synthetic", content: "Synthetic", rows: [["Fixture", 12.5]] });
+    const zip = await JSZip.loadAsync(generated.data);
+    zip.file("xl/vbaProject.bin", "INERT_TEST_VBA_PAYLOAD");
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    const id = "0198b9f0-6631-7000-8000-000000000595";
+    const request = () => uploadRequest(id, new File([new Uint8Array(bytes)], "fixture.xlsm", { type: "application/vnd.ms-excel.sheet.macroEnabled.12" }));
+    const preview = vi.spyOn(DocumentPreviewService.prototype, "create").mockRejectedValue(new Error("OPTIONAL_PREVIEW_FAILED"));
+    try {
+      auth.session = session(USER_A);
+      const response = await uploadRoute.POST(request(), { params: Promise.resolve({ threadId }) });
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      assertUiContract("DocumentUploadResponse", body);
+      expect(body.document.fileName).toBe("fixture.passive.xlsx");
+      expect(body.document.legacyExcel.originalFileName).toBe("fixture.xlsm");
+      const config = await loadInstallationConfig();
+      const services = await documentServicesForUser(config, USER_A);
+      expect(await readFile((await services.legacyOriginals.resolveContentById(threadId, id)).absolutePath)).toEqual(bytes);
+      expect((await uploadRoute.POST(request(), { params: Promise.resolve({ threadId }) })).status).toBe(201);
+      const context = { params: Promise.resolve({ threadId, uploadId: id, versionId: id }) };
+      const content = await contentRoute.GET(new Request("http://localhost/content"), context);
+      expect(content.status).toBe(200);
+      const passive = await JSZip.loadAsync(await content.arrayBuffer());
+      expect(passive.file("xl/vbaProject.bin")).toBeNull();
+      const workbench = FileWorkbenchStore.fromInstallation(config);
+      const project = await workbench.createProject(USER_A, "XLSM reference");
+      const source = await projectRoute.POST(request(), { params: Promise.resolve({ projectId: project.id }) });
+      expect(source.status).toBe(201);
+      expect((await source.json()).source.name).toBe("fixture.passive.xlsx");
+      auth.session = session(USER_B);
+      expect((await uploadRoute.POST(request(), { params: Promise.resolve({ threadId }) })).status).toBe(404);
+      expect((await contentRoute.GET(new Request("http://localhost/content"), context)).status).toBe(404);
+      expect((await projectRoute.POST(request(), { params: Promise.resolve({ projectId: project.id }) })).status).toBe(404);
+    } finally { preview.mockRestore(); }
+  }, 20_000);
+
   it.each(["passive", "native"])("stores %s XLS originals outside workers and serves only the authorized derivative with stable retries", async mode => {
     const [{ SystemDocumentToolRunner, DocumentPreviewService }, { documentServicesForUser }, { loadInstallationConfig },
       { buildWorkerLaunchContext }, uploadRoute, contentRoute, { generateLocalDocument }] = await Promise.all([

@@ -12,7 +12,7 @@ import {
   sendWeeklyBroadcastReminder,
   sendHealthAlert,
   getMockMessages,
-  isMockMode,
+  isMockMode, whatsappProvider,
   sendWhatsappMessage,
   mockReset,
   getConversationByPhone,
@@ -521,8 +521,10 @@ export function configCheck(_req, res) {
     return { posada: true, nom: name, idioma: language, variablesQueSEnvien: variables, per };
   };
   return res.json({
-    modo: process.env.WHATSAPP_MOCK === 'true' ? 'simulacio' : 'real',
-    proveidor: process.env.WHATSAPP_PROVIDER || 'meta',
+    modo: isMockMode() ? 'simulacio' : 'real',
+    deliveryEnabled: process.env.HORARIA_ALLOW_DELIVERY === '1' && !isMockMode(),
+    providerApprovalVerified: false,
+    proveidor: whatsappProvider(),
     credencials: {
       WHATSAPP_TOKEN: hi('WHATSAPP_TOKEN'),
       WHATSAPP_PHONE_NUMBER_ID: hi('WHATSAPP_PHONE_NUMBER_ID') || hi('WHATSAPP_PHONE_ID'),

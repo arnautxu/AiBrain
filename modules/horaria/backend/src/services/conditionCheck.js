@@ -26,6 +26,9 @@ const RE = {
   diasLibres: /(\d+)\s*d[ií]a?e?s?\s+(?:m[ée]s\s+)?(?:de\s+)?(?:festa|fiesta|libre)/i,
   // "Sempre MATINS", "siempre mañanas" — never an afternoon at all
   soloMananas: /sempre\s+mat(?:ins|í)|siempre\s+ma[ñn]anas?/i,
+  // Explicit whole-week afternoon-only conditions; do not interpret a weekday
+  // or conditional sentence as a weekly restriction.
+  soloTardes: /^(?:siempre\s+(?:hace\s+)?(?:de\s+)?tardes|sempre\s+(?:fa\s+)?(?:de\s+)?tardes|solo\s+tardes|nom[ée]s\s+tardes)\b/i,
   // "La resta de dies sempre MATÍ" — everything outside the stated split shifts
   restaMananas: /(?:la\s+)?resta\s+(?:de\s+)?d[ií]e?a?s?\s+sempre\s+mat|resto\s+(?:de\s+)?d[ií]as\s+siempre\s+ma[ñn]ana/i,
   // "Màxim 3 tardes per setmana"
@@ -96,6 +99,14 @@ export function parseConditions(texto) {
     if (RE.soloMananas.test(frase)) {
       if (!esResta && !esDiaConcret) out.soloMananas = true;
       entesa = true;
+    }
+
+    if (RE.soloTardes.test(frase) && !esDiaConcret) {
+      out.soloTardes = true; entesa = true;
+      // A recognised shift family does not certify all trailing time prose.
+      // Preserve it for review, including closing-time/duration requirements.
+      const remainder = frase.replace(RE.soloTardes, '').replace(/^\s*[,;:]?\s*/, '');
+      if (remainder) out.noInterpretadas.push(remainder);
     }
 
     const maxT = RE.maxTardes.exec(frase);
@@ -253,6 +264,7 @@ export function contarTurnos(dias) {
 export function turnoPermitido(cond, turno, actual) {
   if (!cond) return true;
   const c = actual || { mananas: 0, tardes: 0, partidos: 0 };
+  if (cond.soloTardes && ['MANANA', 'PARTIDO'].includes(turno)) return false;
 
   if (turno === 'TARDE') {
     if (cond.soloMananas) return false;
@@ -294,9 +306,9 @@ export function turnoRestringido(cond, turno) {
     return !!(cond.soloMananas || cond.restaMananas || cond.maxTardes != null || cond.tardesExactas != null);
   }
   if (turno === 'PARTIDO') {
-    return !!(cond.soloMananas || cond.partidosMax != null || cond.partidosExactos != null || cond.maxTardes != null);
+    return !!(cond.soloTardes || cond.soloMananas || cond.partidosMax != null || cond.partidosExactos != null || cond.maxTardes != null);
   }
-  if (turno === 'MANANA') return cond.mananasExactas != null;
+  if (turno === 'MANANA') return !!cond.soloTardes || cond.mananasExactas != null;
   return false;
 }
 
@@ -372,6 +384,8 @@ export function checkEmployeeConditions({ empleado, dias, diasHabituales, compan
   if (cond.minDiasLibres != null && nLibres < cond.minDiasLibres) {
     problemas.push(M.diesFesta(cond.minDiasLibres, nLibres));
   }
+
+  if (cond.soloTardes && (nMananas > 0 || nPartidos > 0)) problemas.push(M.nomesTardes(nMananas, nPartidos, T));
 
   if (cond.soloMananas && (nTardes > 0 || nPartidos > 0)) {
     problemas.push(M.nomesMatins(nTardes, nPartidos, T));

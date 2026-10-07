@@ -30,6 +30,7 @@ export function reviewFictionalArnallSchedule(schedule: ArnallSchedule) {
         if (first === null || second === null || !Number.isFinite(expected) || Math.abs(first + second - expected) > 1 / 60) {
           throw new Error(`El turno de ${person.name} del ${DAYS[index]} no coincide con sus horas de código.`);
         }
+        if (day.code === "D" && day.firstLine.trim().slice(-5) > day.secondLine.trim().slice(0, 5)) throw new Error(`Los intervalos de ${person.name} se solapan.`);
         shifts[day.code as "M" | "T" | "D"]++;
         workDays++;
         hours += first + second;
@@ -41,6 +42,10 @@ export function reviewFictionalArnallSchedule(schedule: ArnallSchedule) {
         throw new Error(`Código de turno no válido para ${person.name}.`);
       }
     });
+    const maximum = person.maxWeeklyHours ?? 40;
+    if (!Number.isFinite(maximum) || maximum < 0 || maximum > 40 || hours > maximum + 1e-8) {
+      throw new Error(`El horario de ${person.name} suma ${hours} horas y supera el máximo de ${maximum}.`);
+    }
     return { name: person.name, workDays, shifts, hours };
   });
   return { people, coverage, totalHours: people.reduce((sum, person) => sum + person.hours, 0) };

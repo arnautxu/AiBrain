@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { AuthSession } from "@/auth/types";
 import { ChatWorkspace } from "@/components/chat-workspace";
+import { LiveAnswerStore } from '@/ui/live-answer-store';
 import { BrowserPanel } from "@/components/browser-panel";
 import { CommandPalette } from "@/components/command-palette";
 import { CustomizationPanel } from "@/components/customization-panel";
@@ -316,15 +317,21 @@ function updateThreadMessage(
   updater: (message: ChatMessage) => ChatMessage,
 ) {
   const now = new Date().toISOString();
-  return threads.map((thread) => thread.id === threadId
-    ? {
-        ...thread,
-        updatedAt: now,
-        messages: thread.messages.map((message) =>
-          message.id === messageId ? updater(message) : message,
-        ),
-      }
-    : thread);
+  let changed = false;
+  const updated = threads.map(thread => {
+    if (thread.id !== threadId) return thread;
+    let messageChanged = false;
+    const messages = thread.messages.map(message => {
+      if (message.id !== messageId) return message;
+      const next = updater(message);
+      if (next !== message) messageChanged = true;
+      return next;
+    });
+    if (!messageChanged) return thread;
+    changed = true;
+    return { ...thread, updatedAt: now, messages };
+  });
+  return changed ? updated : threads;
 }
 
 function loadPreferences(key: string, defaults: BrainPreferences): BrainPreferences {
@@ -567,6 +574,12 @@ export function BrainApp({
   const taskCenterKey = `aibrain.${session.tenant.id}.${session.user.id}.task-center.v1`;
   const [projects, setProjects] = useState(initialWorkbench.projects);
   const [threads, setThreads] = useState(initialWorkbench.threads);
+  const [liveAnswers] = useState(() => new LiveAnswerStore());
+  useEffect(() => {
+    liveAnswers.retain(new Set(threads.flatMap(thread => thread.messages
+      .filter(message => message.status === 'streaming')
+      .map(message => liveAnswers.key(thread.id, message.id)))));
+  }, [threads, liveAnswers]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
@@ -1411,12 +1424,23 @@ export function BrainApp({
     performance: ClientTurnPerformance,
     startedAt: number,
   ) => {
+    let accumulated = '';
+    const liveKey = liveAnswers.key(threadId, assistantMessageId);
     const dispatcher = createChatEventFrameDispatcher((event) => {
+      if (event.type === 'delta') {
+        accumulated += event.value;
+        liveAnswers.write(liveKey, accumulated);
+        return;
+      }
+      if (event.type === 'content') accumulated = event.value;
+      if (event.type === 'snapshot') accumulated = event.message.content;
+      liveAnswers.write(liveKey, accumulated);
+      const contentAtEvent = accumulated;
       setThreads((current) => updateThreadMessage(
         current,
         threadId,
         assistantMessageId,
-        (message) => applyChatStreamEvent(message, event),
+        (message) => applyChatStreamEvent({ ...message, content: contentAtEvent }, event),
       ));
     }, undefined, { onEventApplied: (event) => performance.eventApplied(event) });
     try {
@@ -1472,10 +1496,13 @@ export function BrainApp({
       });
     } finally {
       dispatcher.close();
+      const finalContent = accumulated;
+      setThreads(current => updateThreadMessage(current, threadId, assistantMessageId, message =>
+        message.status === 'streaming' ? { ...message, content: finalContent } : message));
       setStreamRecoveryNotice((current) => current?.threadId === threadId &&
         current.assistantMessageId === assistantMessageId ? null : current);
     }
-  }, [t]);
+  }, [t, liveAnswers]);
 
   const sendMessage = useCallback(async (messageOverride?: string, displayMessageOverride?: string) => {
     const visibleContent = (displayMessageOverride ?? messageOverride ?? prompt).trim();
@@ -2330,6 +2357,7 @@ export function BrainApp({
         onBlockingSurfaceChange={setAutomationsBlockingSurfaceOpen}
         onOpenThread={(threadId) => { setAutomationsOpen(false); selectThread(threadId); }}
       /> : <ChatWorkspace
+        liveAnswers={liveAnswers}
         manifest={manifest}
         preferences={preferences}
         project={activeProject}

@@ -70,6 +70,7 @@ export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze(
         people: { type: "array", minItems: 1, maxItems: 43, items: { type: "object", properties: {
           name: { type: "string", minLength: 1, maxLength: 100 },
           section: { type: "string", enum: ["DEPENDIENTA", "ELABORACION"] },
+          maxWeeklyHours: { type: "number", minimum: 0, maximum: 40, description: "Weekly maximum; defaults to 40. Use the lower contract limit for a reduced week." },
           codeHours: { type: "object", properties: { M: { type: "number", minimum: 0, maximum: 24 }, T: { type: "number", minimum: 0, maximum: 24 }, D: { type: "number", minimum: 0, maximum: 24 } }, required: ["M", "T", "D"], additionalProperties: false },
           days: { type: "array", minItems: 7, maxItems: 7, items: { anyOf: [{ type: "null" }, { type: "object", properties: {
             code: { type: "string", enum: ["M", "T", "D", "F", "V", "B"] },
@@ -318,7 +319,7 @@ function parseFictionalArnallSchedule(value: unknown): { input: CreateArguments;
   }
   const people = value.people.map((person: unknown, index: number) => {
     if (!isRecord(person)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Persona ficticia no válida.");
-    exactKeys(person, ["name", "section", "codeHours", "days"]);
+    exactKeys(person, ["name", "section", "codeHours", "days"], ["maxWeeklyHours"]);
     if (!isRecord(person.codeHours)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Horas ficticias no válidas.");
     exactKeys(person.codeHours, ["M", "T", "D"]);
     if (typeof person.name !== "string" || !["DEPENDIENTA", "ELABORACION"].includes(String(person.section)) ||

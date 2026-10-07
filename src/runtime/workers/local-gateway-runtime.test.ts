@@ -205,6 +205,34 @@ describe("private per-user worker gateway", () => {
     });
   }
 
+  it('recovers an exact 9 MiB answer while running and replays it after restart without redispatch', async () => {
+    const answer = 'Q'.repeat(9 * 1024 * 1024) + 'END-QA';
+    const requestLog = path.join(root, 'large-answer-requests.jsonl');
+    await writeFile(fakeServer, `import { createInterface } from 'node:readline';
+      import {appendFileSync} from 'node:fs';
+      createInterface({input:process.stdin}).on('line',line=>{ const r=JSON.parse(line); if(r.id===undefined)return;
+      appendFileSync(${JSON.stringify(requestLog)}, JSON.stringify({id:r.id,method:r.method})+'\\n');
+      const result=r.method==='thread/turns/list'?{data:[{id:'qa-turn',status:'completed',items:[{type:'userMessage',clientId:'qa-input'},{type:'agentMessage',text:'Q'.repeat(9*1024*1024)+'END-QA'}]}],nextCursor:null}:{acceptedMethod:r.method};
+      process.stdout.write(JSON.stringify({id:r.id,result})+'\\n');});`, { mode: 0o600 });
+    let worker = gateway(); await worker.start();
+    let router = new AppServerRpcRouter(transport(worker));
+    const request = { method: 'thread/turns/list' as const, id: 'large-final-answer', params: { threadId: 'qa-thread', limit: 1, itemsView: 'full' as const } };
+    try {
+      const result = await router.request(request, 10_000) as { data: { items: { text?: string }[] }[] };
+      expect(result.data[0].items[1].text).toBe(answer);
+      expect((await worker.health()).state).toBe('running');
+      await expect(router.request({ method: 'thread/read', id: 'after-large-answer', params: { threadId: 'qa-thread', includeTurns: false } }, 3_000)).resolves.toEqual({ acceptedMethod: 'thread/read' });
+      await router.close(); await worker.stop();
+      worker = gateway(); await worker.start();
+      router = new AppServerRpcRouter(transport(worker));
+      const recovered = await router.request(request, 10_000) as typeof result;
+      expect(recovered.data[0].items[1].text).toBe(answer);
+      expect((await worker.health()).state).toBe('running');
+      const dispatched = (await readFile(requestLog, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+      expect(dispatched.filter(r => r.id === request.id)).toHaveLength(1);
+    } finally { await router.close(); await worker.stop(); }
+  }, PROCESS_RECOVERY_TEST_TIMEOUT_MS);
+
   it("handles external login and renewal privately without writing access tokens to either journal", async () => {
     await writeFile(fakeServer, [
       'import { createInterface } from "node:readline";',
