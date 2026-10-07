@@ -162,3 +162,20 @@ named reading copy. Arbitrary HTML, unknown/duplicate headers, wrong lengths
 and oversized prefixes remain rejected. 34 focused connector/runtime/UI tests
 pass; the two actual sampled attachments pass local envelope extraction.
 Release deployment, all-seven retry and duplicate-free repeat UI remain gates.
+7 October follow-up: the seven enveloped supplier PDFs were successfully
+imported and read from the owner UI after c29fe93 deployed. Another genuine
+mail arrival brought the ledger to ten originals. The second manual worker
+run succeeded and attached seven clearly named reading copies plus tracking
+Excel; missing delivery dates remain needs_attention. A duplicate-free repeat
+and the 17:27 Europe/Madrid scheduled tick remain separate acceptance gates.
+
+A third real C/Arnall/Compres browse from the owner UI still timed out after
+trying a bounded short launcher on the private redirected Linux job drive.
+The trial was not accepted. Restore the exact pre-trial host helpers, keep
+pinned TLS, source roots and Windows policies unchanged, and do not represent
+Windows browsing as fixed. A confirmed remote desktop/policy diagnosis is
+still needed; do not infer that a folder is absent from a failed readback.
+
+The automation badge distinguishes a worker lease (En curso) from a queued
+manual request and prevents manual resubmission during an automatic lease.
+Eleven automation component tests pass; root type/lint checks pass.

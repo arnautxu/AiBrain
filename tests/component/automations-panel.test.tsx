@@ -62,6 +62,16 @@ afterEach(() => {
 });
 
 describe("AutomationsPanel audience", () => {
+  it("shows a leased automatic run as in progress and prevents duplicate manual submission", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ tasks: [{ ...viewerTask,
+      lease: { workerId: "worker", runKey: "automatic", attempt: 1, claimedAt: "2026-10-07T12:00:00.000Z", expiresAt: "2026-10-07T12:10:00.000Z" },
+      access: { canManage: true, canViewResults: true },
+    }], audienceDirectory: { membershipPolicy: "current", currentUserId: ownerId, users: [], groups: [] } })));
+    render(<AutomationsPanel open projects={[project]} />);
+    expect(await screen.findByText("En curso")).toBeInTheDocument();
+    expect(screen.queryByText("Ejecución en cola")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ejecutar ahora" })).toBeDisabled();
+  });
   it("updates a queued task after the worker finishes without reloading or resubmitting it", async () => {
     let completed = false;
     const request = vi.fn(async () => Response.json({ tasks: [{ ...viewerTask,
