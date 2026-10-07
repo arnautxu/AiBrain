@@ -10,6 +10,7 @@ import { requireEstablishmentAccess, requireRole } from '../middleware/roles.js'
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { previewHandler, publishHandler } from './preview.js';
 import { draftHandler } from './draft.js';
+import { collectionTemplateHandler, collectionResponseHandler, collectionExportHandler } from './collection.js';
 import { verifyInbound } from './webhook.js';
 import { createVerifier } from './signature.js';
 import { prisma } from '../services/prisma.js';
@@ -127,7 +128,7 @@ export function createHorariaApp({ secret, installationId, database = prisma, me
   app.get('/api/integration/whatsapp-inbox', requireRole('MANAGER_GENERAL'), (_req, res) => res.json({ enabled: !!inbox, counts: inbox?.summary() || {} }));
   // Serialize foreground writes so a reviewed publish cannot race a manual edit.
   app.use((req, res, next) => {
-    if (['GET', 'HEAD'].includes(req.method) || req.path === '/api/integration/draft') return next();
+    if (['GET', 'HEAD'].includes(req.method) || ['/api/integration/draft', '/api/integration/collection-preview'].includes(req.path)) return next();
     lockWrite().then(release => {
       if (res.destroyed) return release();
       res.once('finish', release); res.once('close', release);
@@ -137,6 +138,9 @@ export function createHorariaApp({ secret, installationId, database = prisma, me
   app.use('/api/schedules/generate-async', rateLimit({ windowMs: 3_600_000, limit: 20, keyGenerator: req => String(req.user?.id || 'anonymous'), standardHeaders: 'draft-7', legacyHeaders: false }));
   app.get('/api/session', (req, res) => res.json({ user: req.user, capabilities: { ai: process.env.HORARIA_ALLOW_AI === '1', delivery: process.env.HORARIA_ALLOW_DELIVERY === '1' } }));
   app.get('/api/integration/preview', requireEstablishmentAccess, asyncHandler(previewHandler));
+  app.get('/api/integration/collection-template', requireRole('MANAGER_GENERAL', 'MANAGER_LOCAL'), requireEstablishmentAccess, asyncHandler(collectionTemplateHandler));
+  app.get('/api/integration/collection-export', requireRole('MANAGER_GENERAL', 'MANAGER_LOCAL'), requireEstablishmentAccess, asyncHandler(collectionExportHandler));
+  app.post('/api/integration/collection-preview', requireRole('MANAGER_GENERAL', 'MANAGER_LOCAL'), requireEstablishmentAccess, asyncHandler(collectionResponseHandler));
   app.post('/api/integration/draft', requireRole('MANAGER_GENERAL', 'MANAGER_LOCAL'), requireEstablishmentAccess,
     rateLimit({ windowMs: 3_600_000, limit: 20, keyGenerator: req => String(req.user.id), standardHeaders: 'draft-7', legacyHeaders: false }), asyncHandler(draftHandler));
   app.post('/api/integration/publish', requireRole('MANAGER_GENERAL', 'MANAGER_LOCAL'), requireEstablishmentAccess, asyncHandler(publishHandler));

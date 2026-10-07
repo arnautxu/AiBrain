@@ -1,3 +1,4 @@
+import { validateAppServerRequest } from "@/runtime/transport/wire-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { loadInstallationConfig } from "@/config/installation";
@@ -404,6 +405,19 @@ describe("worker App Server client", () => {
     const reads = transport.sent.filter((item) => item.kind === "rpc-request" && item.rpc.method === "account/read");
     expect(reads).toHaveLength(1);
     expect(reads[0]).toMatchObject({ rpc: { params: { refreshToken: false } } });
+    await client.close();
+  });
+
+  it("sends parameterless usage reads through the strict JSON contract", async () => {
+    const transport = new FakeTransport();
+    const client = new WorkerAppServerClient(handle(transport));
+    await client.connection("/private/test-workspace");
+    const reads = transport.sent.filter(r => r.kind === "rpc-request" && ["account/rateLimits/read", "account/usage/read"].includes(r.rpc.method));
+    expect(reads).toHaveLength(2);
+    for (const read of reads) {
+      expect(() => validateAppServerRequest(read)).not.toThrow();
+      expect(Object.hasOwn(read.rpc, "params")).toBe(false);
+    }
     await client.close();
   });
 

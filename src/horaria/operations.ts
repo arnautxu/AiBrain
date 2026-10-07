@@ -20,6 +20,9 @@ for (const name of ["week", "balance", "municipis"]) add(`absences.${name}`, "GE
 add("absences.import-holidays", "POST", "absences/import-holidays", "write", "body: establecimientoId, year; calls official holiday data provider");
 add("preferences.list", "GET", "preferences", "read", "query: semana, establecimiento");
 add("preferences.sheets", "GET", "preferences/sheets", "read", "query: semana, establecimiento");
+add("collection.template", "GET", "integration/collection-template", "read", "query: semana, establecimiento. Attach a blank availability Excel and return a WhatsApp reply template and seven-day form schema; no messages or business writes.");
+add("collection.export", "GET", "integration/collection-export", "read", "query: semana, establecimiento. Attach the authorized shop's received preferences and pending responses as Excel; unknown days remain SIN_INDICAR.");
+add("collection.preview", "POST", "integration/collection-preview", "draft", "body: establecimientoId, semana, responses: [{employeeId, week, source: WHATSAPP|FORMULARIO, days:{LUNES..DOMINGO: MANANA|TARDE|AMBOS|NO_DISPONIBLE|SIN_INDICAR}, notes}]. Validate and attach Excel, never apply preferences or send messages. Employee identity/source require review before saving.");
 add("preferences.update", "PUT", "preferences/:id", "write", "id=empleadoId; body: semana, turnoPreferido, diasNoDisponible, maxHorasSemana, flexibilidad, notasAdicionales");
 add("preferences.upload-sheet", "POST", "preferences/sheets", "ai", "uploadPath: authorized project image; body: semana");
 add("schedules.list", "GET", "schedules", "read", "query: semana, establecimiento");

@@ -29,6 +29,7 @@ const MAX_IMAGE_BYTES_PER_TURN = 20 * 1024 * 1024;
 export interface TurnDocumentPreviewReader {
   read(threadId: string, uploadId: string): Promise<DocumentPreview>;
   readFile(threadId: string, uploadId: string, fileName: string): Promise<Buffer>;
+  renderPage?(threadId: string, uploadId: string, page: number, options?: { signal?: AbortSignal }): Promise<Buffer>;
 }
 
 export interface TurnDocumentInputResolver {
@@ -278,7 +279,7 @@ export class ServerTurnDocumentInputResolver implements TurnDocumentInputResolve
       await atomicWriteFile(pdfPath, pdf, { mode: 0o600 });
       const runner = this.options.runner ?? new SystemDocumentToolRunner();
       const extract = () => runner.run(this.options.pdftotext, [
-          "-layout", "-nopgbrk", "-enc", "UTF-8", pdfPath, "-",
+          "-layout", "-enc", "UTF-8", pdfPath, "-",
         ], {
           cwd: workRoot,
           env: { HOME: workRoot, LANG: "C.UTF-8", LC_ALL: "C.UTF-8" },
@@ -291,14 +292,33 @@ export class ServerTurnDocumentInputResolver implements TurnDocumentInputResolve
       if (Buffer.byteLength(extracted.stdout, "utf8") > MAX_EXTRACTED_TEXT_BYTES_PER_DOCUMENT) {
         throw new TurnDocumentAttachmentError("TURN_DOCUMENT_TEXT_TOO_LARGE", "Extracted document text exceeds the safe turn boundary.");
       }
-      const text = extracted.stdout.replaceAll("\0", "").trim() || "[No extractable text on the rendered pages.]";
-      return Object.freeze([
-        untrustedTextInput(document, text),
-        ...(firstPage ? [{
-          type: "image" as const,
-          url: `data:image/png;base64,${firstPage.toString("base64")}`,
-        }] : []),
-      ]);
+      const pages = extracted.stdout.replaceAll("\0", "").split("\f");
+      if (pages.length > 1 && !pages.at(-1)?.trim()) pages.pop();
+      const pageCount = preview.pages ?? pages.length;
+      if (pages.length > pageCount) throw new TurnDocumentAttachmentError("TURN_DOCUMENT_PREVIEW_INVALID", "Extracted PDF pages disagree with the attested preview.");
+      const missingPages = Array.from({ length: pageCount }, (_, index) => index + 1).filter(number => !pages[number - 1]?.trim());
+      const images: UserInput[] = [];
+      const suppliedPages: number[] = [];
+      let imageBytes = 0;
+      const appendImage = (number: number, bytes: Buffer) => {
+        imageBytes += bytes.byteLength;
+        if (imageBytes > MAX_IMAGE_BYTES_PER_TURN) throw new TurnDocumentAttachmentError("TURN_DOCUMENT_CONTENT_UNAVAILABLE", "Scanned pages exceed the safe image boundary; inspect the document in smaller groups.");
+        suppliedPages.push(number);
+        if (number !== 1) images.push({ type: "text", text: `UNTRUSTED ATTACHMENT IMAGE: ${document.fileName}, page ${number}. Read the image before using its data.`, text_elements: [] });
+        images.push({ type: "image", url: `data:image/png;base64,${bytes.toString("base64")}` });
+      };
+      if (firstPage) appendImage(1, firstPage);
+      if (this.options.previews.renderPage) {
+        for (const number of missingPages.filter(number => number !== 1 || !firstPage).slice(0, 8 - suppliedPages.length)) {
+          appendImage(number, await this.options.previews.renderPage(document.threadId, document.uploadId, number, { signal: options.signal }));
+        }
+      }
+      const unavailable = missingPages.filter(number => !suppliedPages.includes(number));
+      const coverage = missingPages.length
+        ? `PDF TEXT COVERAGE: page(s) ${missingPages.join(", ")} have no readable text and may contain scanned data. Images supplied for page(s) ${suppliedPages.join(", ") || "none"}; inspect each image. ${unavailable.length ? `INCOMPLETE PDF COVERAGE: page(s) ${unavailable.join(", ")} remain unavailable; OCR or page inspection is required. Do not claim complete invoice, line or total verification.` : "Do not infer data from blank extracted text; read the supplied page images."}\n`
+        : "";
+      const text = coverage + pages.map((page, index) => `[page ${index + 1}]\n${page.trim() || "[No extractable text; inspect page image.]"}`).join("\n\n");
+      return Object.freeze([untrustedTextInput(document, text), ...images]);
     } catch (error) {
       if (error instanceof TurnDocumentAttachmentError) throw error;
       if (error instanceof DocumentConversionBackpressureError) throw error;

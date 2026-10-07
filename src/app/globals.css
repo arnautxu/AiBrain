@@ -1012,6 +1012,13 @@ button:disabled {
   vertical-align: top;
 }
 
+.markdown-body th,
+.markdown-body td {
+  min-width: 8rem;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
 .markdown-body th {
   background: var(--surface-muted);
   color: var(--text-secondary);

@@ -1,4 +1,5 @@
 import { takeAppServerOutput } from "./app-server-output-buffer";
+import { encodeServerFrames, MAX_SERVER_MESSAGE_BYTES } from '../transport/bounded-server-frames';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { stopOwnedWorkerProcess } from "./owned-process";
@@ -46,7 +47,7 @@ import {
 } from "@/storage";
 
 const MAX_FRAME_BYTES = 8 * 1024 * 1024;
-const MAX_STDIO_LINE_BYTES = 8 * 1024 * 1024;
+const MAX_STDIO_LINE_BYTES = MAX_SERVER_MESSAGE_BYTES - 1024;
 const DEFAULT_RETAINED_COMPLETED_REQUESTS = 4_096;
 const DEFAULT_RETAINED_OBSERVATION_BYTES = 4 * 1024 * 1024;
 const CLIENT_REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -120,7 +121,7 @@ const gatewayRequestSchema = defineVersionedSchema<GatewayRequestRecord>({
     const status = expectOneOf(record.status, ["accepted", "completed"] as const, context.at("status"));
     const responseJson = record.responseJson === null
       ? null
-      : expectString(record.responseJson, context.at("responseJson"), { maxLength: MAX_FRAME_BYTES });
+      : expectString(record.responseJson, context.at("responseJson"), { maxLength: MAX_SERVER_MESSAGE_BYTES });
     if ((status === "accepted") !== (responseJson === null)) {
       context.at("responseJson").fail("accepted requests cannot contain a response and completed requests require one");
     }
@@ -276,7 +277,7 @@ class GatewayRequestLedger {
     if (!existing) throw new Error("Cannot complete an unknown gateway request.");
     if (existing.status === "completed") return existing;
     const responseJson = JSON.stringify(response);
-    if (Buffer.byteLength(responseJson, "utf8") > MAX_FRAME_BYTES) {
+    if (Buffer.byteLength(responseJson, "utf8") > MAX_STDIO_LINE_BYTES) {
       throw new Error("Codex response exceeds the gateway safety limit.");
     }
     const completed: GatewayRequestRecord = {
@@ -699,8 +700,10 @@ export class PrivateWorkerGateway {
   private send(socket: WebSocket, frame: unknown) {
     if (socket.readyState !== WebSocket.OPEN) return;
     const serialized = JSON.stringify(frame);
-    if (Buffer.byteLength(serialized, "utf8") > MAX_FRAME_BYTES) throw new Error("Gateway frame exceeds safety limit.");
-    socket.send(serialized);
+    for (const part of encodeServerFrames(serialized)) {
+      if (Buffer.byteLength(part, "utf8") > MAX_FRAME_BYTES) throw new Error("Gateway frame exceeds safety limit.");
+      socket.send(part);
+    }
   }
 
   private async resume(socket: WebSocket, afterEventId: unknown, afterSequence: unknown) {

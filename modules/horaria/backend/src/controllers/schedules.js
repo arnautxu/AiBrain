@@ -1,3 +1,4 @@
+import { ruleForDay } from '../utils/ruleForDay.js';
 import { storePublishedPdf, readPublishedPdf, saveState, loadState } from '../integration/durable-state.js';
 import { prisma } from '../services/prisma.js';
 import { shiftHours, REDUCED_DAY_FIELDS } from '../utils/shiftHours.js';
@@ -1118,10 +1119,8 @@ export async function checkEstablishmentConflicts(req, res) {
   for (const dia of dias) {
     if (closedDays.has(dia)) continue; // closed → no coverage needed
     // Find the most specific rule for this day
-    const rule = rules.find((r) => {
-      if (!r.diasAplica) return false;
-      return JSON.parse(r.diasAplica).includes(dia);
-    }) || rules.find((r) => !r.diasAplica) || rules[0];
+    const rule = ruleForDay(rules, dia);
+    if (!rule) continue;
 
     const diaShifts = schedules.filter((s) => s.dia === dia && s.turno !== 'LIBRE');
 

@@ -60,6 +60,27 @@ non-JSON payloads, sequence gaps and binary WebSocket frames fail closed.
 
 ## Authentication and network boundary
 
+### Bounded large responses (6 October 2026 candidate)
+
+The 8 MiB WebSocket frame ceiling and client-submission ceiling remain in
+place. Large server event envelopes use ordered `event-chunk` frames, each
+containing at most 512 KiB of bytes encoded as base64. Their exact keys are
+`protocolVersion`, `type`, `id`, `index`, `count`, `bytes`, `sha256`, and `data`.
+The receiver permits one assembly, at most 32 MiB and 30 seconds; it checks
+canonical encoding, lengths, order, identity, SHA-256 and UTF-8 before parsing
+the original event. Duplicate, corrupt, oversized or interrupted assemblies
+fail closed. Disconnect drops partial assembly; durable event replay starts
+again without acknowledging partial content. Queued frames from an old socket
+are ignored after reconnect. Journals retain their original complete event
+schema and contiguous delivery semantics.
+
+The private App Server stdout/response ledger allow a bounded message under
+32 MiB, reserving space for its event envelope. Larger responses still exceed
+the supported message budget. Gateway and transport must be released together.
+Local tests recover the exact 9 MiB answer and perform a subsequent RPC with
+the same live worker; this does not certify customer acceptance or arbitrary
+unbounded answers.
+
 - Credentials are supplied lazily by `WebSocketCredentialProvider` and are
   never accepted in the URL.
 - Raw Codex App Server authentication uses `Authorization: Bearer <token>`.

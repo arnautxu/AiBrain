@@ -153,6 +153,14 @@ const MANAGER_REMINDER_TEMPLATE = process.env.WHATSAPP_TEMPLATE_MANAGER_REMINDER
 const SCHEDULE_TEMPLATE = process.env.WHATSAPP_TEMPLATE_HORARIO;
 const TEMPLATE_LANG = process.env.WHATSAPP_TEMPLATE_LANG || 'es';
 
+export function requireBusinessTemplate(kind) {
+  if (MOCK_MODE || USE_TWILIO) return;
+  const templates = { broadcast: BROADCAST_TEMPLATE, reminder: REMINDER_TEMPLATE, manager: MANAGER_REMINDER_TEMPLATE, schedule: SCHEDULE_TEMPLATE };
+  const keys = { broadcast: 'WHATSAPP_TEMPLATE_BROADCAST', reminder: 'WHATSAPP_TEMPLATE_REMINDER', manager: 'WHATSAPP_TEMPLATE_MANAGER_REMINDER', schedule: 'WHATSAPP_TEMPLATE_HORARIO' };
+  if (!Object.hasOwn(templates, kind)) throw new Error('Tipo de plantilla no válido.');
+  if (!templates[kind]) throw new Error(`Falta ${keys[kind]}: configura una plantilla aprobada antes del envío automático. No se ha enviado el mensaje.`);
+}
+
 // One language for every template is one language too few.
 //
 // The first broadcast failed with "template name (recordatori_broadcast) does
@@ -264,6 +272,7 @@ export async function downloadTwilioMedia(mediaUrl) {
 // ─────────────────────────────────────────────
 export async function sendWhatsappMedia(telefono, { texto, mediaUrl, filename, bodyParams = [] }) {
   requireDelivery();
+  requireBusinessTemplate('schedule');
   if (MOCK_MODE) {
     const entry = { to: telefono, text: `${texto} [adjunto: ${filename}]`, mediaUrl, timestamp: new Date().toISOString() };
     mockMessages.push(entry);
@@ -432,6 +441,8 @@ export async function sendWhatsappTemplate(telefono, { name, language, bodyParam
 export function getMockMessages() {
   return mockMessages;
 }
+
+export function whatsappProvider() { return PROVIDER; }
 
 export function isMockMode() {
   return MOCK_MODE;
@@ -975,6 +986,7 @@ export async function sendWeeklyBroadcastReminder() {
     return { targetWeek, pendientes, problemas, avisado: false, motivo: 'sin_manager' };
   }
 
+  requireBusinessTemplate('manager');
   const limite = deadlineLabel(await computeDeadline(targetWeek));
   // Problems go first: they are the part that needs acting on today.
   const aviso = problemas.length > 0
@@ -1084,6 +1096,7 @@ async function dissabteDelFullPassa(empleadoId, establecimientoId, semana, deman
 }
 
 export async function broadcastPreferenceRequest(establecimientoId, semana, { forcar = false } = {}) {
+  requireBusinessTemplate('broadcast');
   const targetWeek = semana || getNextWeek();
   const fechaLimite = await computeDeadline(targetWeek); // el dimecres anterior a les 13h
 
@@ -3013,6 +3026,7 @@ export async function recordatorisAutomatics(semana, ara = new Date()) {
  * durant tota la finestra.
  */
 export async function sendReminders(establecimientoId, semana, { margeMs = RECORDATORI_MARGE_MS } = {}) {
+  requireBusinessTemplate('reminder');
   const targetWeek = semana || getNextWeek();
 
   const employees = await prisma.employee.findMany({
