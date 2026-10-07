@@ -27,6 +27,8 @@ import {
 } from "@/runtime/transport/websocket-types";
 import { validateAppServerRequest } from "@/runtime/transport/wire-protocol";
 
+import { ServerFrameAssembler } from './bounded-server-frames';
+
 const SOCKET_OPEN = 1;
 
 type PendingSubmission = {
@@ -195,6 +197,7 @@ export class WebSocketAppServerTransport implements AppServerTransport {
   private closeRequested = false;
   private opening = false;
   private messageChain: Promise<void> = Promise.resolve();
+  private readonly frameAssembler = new ServerFrameAssembler();
   private readonly pending = new Map<string, PendingSubmission>();
   private readonly accepted = new Map<string, string>();
   private lastConnectedAt: string | null = null;
@@ -436,12 +439,16 @@ export class WebSocketAppServerTransport implements AppServerTransport {
 
   private readonly onMessage = (event: unknown) => {
     const data = eventData(event);
+    const sourceSocket = this.socket;
     this.messageChain = this.messageChain
       .then(() => {
+        if (sourceSocket !== this.socket) return;
         if (typeof data === "string" && Buffer.byteLength(data, "utf8") > this.options.maxFrameBytes) {
           throw new TransportProtocolError("WebSocket frame exceeds the configured safety limit.");
         }
-        return this.handleFrame(parseServerFrame(data));
+        if (typeof data !== 'string') return this.handleFrame(parseServerFrame(data));
+        const complete = this.frameAssembler.accept(data);
+        if (complete !== null) return this.handleFrame(parseServerFrame(complete));
       })
       .catch((error: unknown) => this.protocolFailure(error));
   };
@@ -691,6 +698,7 @@ export class WebSocketAppServerTransport implements AppServerTransport {
   }
 
   private detachSocket() {
+    this.frameAssembler.reset();
     const socket = this.socket;
     if (!socket) return;
     socket.removeEventListener("open", this.onOpen);

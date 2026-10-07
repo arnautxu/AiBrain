@@ -34,6 +34,14 @@ test('service rejects browser bearer tokens, rechecks active manager, limits sho
       'content-type': 'application/json',
       'x-aibrain-authorization': signed(draftTarget, { method: 'POST', contentType: 'application/json', bodyHash: bodyHash(Buffer.from(draftBody)) }),
     } })).status, 403, 'a draft cannot read or generate another manager’s shop');
+    for (const path of ['collection-template', 'collection-export']) {
+      assert.equal((await call(`/api/integration/${path}?semana=2026-W41&establecimiento=3`)).status, 403);
+    }
+    const collectionTarget = '/api/integration/collection-preview';
+    const collectionBody = JSON.stringify({ establecimientoId: 3, semana: '2026-W41', responses: [] });
+    assert.equal((await fetch(base + collectionTarget, { method: 'POST', body: collectionBody, headers: {
+      'content-type': 'application/json', 'x-aibrain-authorization': signed(collectionTarget, { method: 'POST', contentType: 'application/json', bodyHash: bodyHash(Buffer.from(collectionBody)) }),
+    } })).status, 403);
     assert.equal((await call('/api/whatsapp/mock/config')).status, 403);
     assert.equal((await call('/horaris')).status, 404);
     active = false; assert.equal((await call('/api/session')).status, 403);

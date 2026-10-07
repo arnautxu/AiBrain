@@ -905,6 +905,19 @@ export class FileWorkbenchStore {
     });
   }
 
+  async updateProjectPreferences(userId: string, projectId: string, expectedNotes: string, notes: string): Promise<WorkbenchProject> {
+    assertFilesystemWorkbenchId(projectId);
+    const memory = { enabled: true, notes, updatedAt: new Date().toISOString() };
+    if (!isUpdateProjectInput({ memory })) throw new WorkbenchPersistenceError("Los criterios de proyecto no son válidos.");
+    return this.mutate(userId, state => {
+      const project = state.projects.find(candidate => candidate.id === projectId);
+      if (!project || project.slug === STANDALONE_PROJECT_SLUG) throw new WorkbenchNotFoundError("Proyecto no encontrado.");
+      if (project.memory.notes !== expectedNotes && project.memory.notes !== notes) throw new WorkbenchConflictError("Los criterios han cambiado en otra conversación. Revisa la versión actual antes de guardar.");
+      if (project.memory.notes !== notes) { project.memory = memory; project.updatedAt = memory.updatedAt; }
+      return publicProject(project);
+    });
+  }
+
   async createThread(
     userId: string,
     projectId: string,

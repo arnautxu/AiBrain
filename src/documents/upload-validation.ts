@@ -254,6 +254,7 @@ async function verifyZipEntryPayload(
 async function inspectOfficeArchiveFile(
   handle: Awaited<ReturnType<typeof open>>,
   size: number,
+  passiveWorkbook = false,
 ): Promise<OfficeInspection> {
   const tailBytes = Math.min(size, 65_557);
   const tailStart = size - tailBytes;
@@ -323,12 +324,12 @@ async function inspectOfficeArchiveFile(
     }
     names.add(name);
     const lower = name.toLowerCase();
-    if (
+    if (!passiveWorkbook && (
       lower.endsWith("vbaproject.bin")
       || lower.includes("/activex/")
       || lower.startsWith("customui/")
       || lower.includes("/macrosheets/")
-    ) {
+    )) {
       throw new UploadValidationError("UPLOAD_MACROS_REJECTED", "Macro-enabled or active OOXML content is not accepted.");
     }
     if (name.startsWith("word/")) officeKinds.add("docx");
@@ -493,11 +494,11 @@ export function validateUploadedDocument(input: {
 }
 
 /** Validates a private regular file with bounded reads and streaming hashing. */
-export async function validateUploadedDocumentFile(input: {
+async function validateDocumentFile(input: {
   fileName: string;
   declaredMimeType: string;
   filePath: string;
-}): Promise<ValidatedUpload> {
+}, passiveWorkbook = false): Promise<ValidatedUpload> {
   const fileName = safeFileName(input.fileName);
   const declaredMimeType = input.declaredMimeType.trim().toLowerCase();
   const pathMetadata = await lstat(input.filePath);
@@ -538,7 +539,7 @@ export async function validateUploadedDocumentFile(input: {
       kind = "xls";
       mediaType = "application/vnd.ms-excel";
     } else if (startsWith(head, [0x50, 0x4b])) {
-      const office = await inspectOfficeArchiveFile(handle, before.size);
+      const office = await inspectOfficeArchiveFile(handle, before.size, passiveWorkbook);
       kind = office.kind;
       officeEntries = office.entries;
       mediaType = {
@@ -562,7 +563,10 @@ export async function validateUploadedDocumentFile(input: {
         mediaType = declaredMimeType === "application/json" ? "application/json" : "text/plain";
       }
     }
-    assertMimeAndExtension(fileName, declaredMimeType, kind, mediaType);
+    if (passiveWorkbook) {
+      if (kind !== "xlsx") throw new UploadValidationError("UPLOAD_OFFICE_INVALID", "Expected a spreadsheet package.");
+      mediaType = "application/vnd.ms-excel.sheet.macroenabled.12";
+    } else assertMimeAndExtension(fileName, declaredMimeType, kind, mediaType);
 
     const hash = createHash("sha256");
     const decoder = kind === "text" ? new TextDecoder("utf-8", { fatal: true }) : null;
@@ -614,4 +618,14 @@ export async function validateUploadedDocumentFile(input: {
   } finally {
     await handle.close();
   }
+}
+
+export const validateUploadedDocumentFile = (input: { fileName: string; declaredMimeType: string; filePath: string }) => validateDocumentFile(input);
+
+/** Private-original admission only. Never feed this package to a converter or worker. */
+export async function validateMacroWorkbookOriginal(input: { fileName: string; declaredMimeType: string; filePath: string }) {
+  if (extension(safeFileName(input.fileName)) !== ".xlsm" || !["application/vnd.ms-excel.sheet.macroenabled.12", "application/octet-stream"].includes(input.declaredMimeType.trim().toLowerCase())) {
+    throw new UploadValidationError("UPLOAD_TYPE_MISMATCH", "Expected XLSM filename and MIME.");
+  }
+  return validateDocumentFile(input, true);
 }

@@ -16,7 +16,7 @@ type Cell = [number, number, "text" | "number" | "date" | "boolean" | "error", s
 type Formula = [number, number, string, "missing" | "unverified"];
 type Sheet = { name: string; cells: Cell[]; formulas: Formula[] };
 type Extracted = {
-  schemaVersion: 1; reader: "xlrd-2.0.2"; date1904: boolean; sheets: Sheet[];
+  schemaVersion: 1; reader: "xlrd-2.0.2" | "ooxml-values-v1"; date1904: boolean; sheets: Sheet[];
   cellCount: number; formulaCount: number; missingFormulaCaches: number;
   undecodedFormulas: number; omittedSheets: number; linkRecords: number;
 };
@@ -38,10 +38,10 @@ function keys(value: unknown, expected: string[]): asserts value is Record<strin
 }
 export function validatePassiveExcelResult(value: unknown): Extracted {
   keys(value, ["schemaVersion", "reader", "date1904", "sheets", "cellCount", "formulaCount", "missingFormulaCaches", "undecodedFormulas", "omittedSheets", "linkRecords"]);
-  requireValue(value.schemaVersion === 1 && value.reader === "xlrd-2.0.2" && typeof value.date1904 === "boolean");
+  requireValue(value.schemaVersion === 1 && ["xlrd-2.0.2", "ooxml-values-v1"].includes(String(value.reader)) && typeof value.date1904 === "boolean");
   requireValue(Array.isArray(value.sheets) && value.sheets.length > 0 && value.sheets.length <= 100);
   for (const name of ["cellCount", "formulaCount", "missingFormulaCaches", "undecodedFormulas", "omittedSheets", "linkRecords"]) integer(value[name], 0, 1_000_000);
-  requireValue(Number(value.cellCount) > 0 && Number(value.cellCount) <= 500_000 && Number(value.formulaCount) <= 100_000);
+  requireValue(Number(value.cellCount) > 0 && Number(value.cellCount) <= 500_000 && Number(value.formulaCount) <= (value.reader === "ooxml-values-v1" ? 500_000 : 100_000));
   requireValue(Number(value.missingFormulaCaches) <= Number(value.formulaCount) && Number(value.undecodedFormulas) <= Number(value.formulaCount) && Number(value.omittedSheets) <= 100);
   let cells = 0, formulas = 0, missing = 0;
   const sheetNames = new Set<string>();
@@ -55,7 +55,7 @@ export function validatePassiveExcelResult(value: unknown): Extracted {
     const coordinates = new Map<string, Cell>();
     for (const cell of sheet.cells) {
       requireValue(Array.isArray(cell) && cell.length === 5);
-      integer(cell[0], 0, 65535); integer(cell[1], 0, 255);
+      integer(cell[0], 0, value.reader === "ooxml-values-v1" ? 1048575 : 65535); integer(cell[1], 0, value.reader === "ooxml-values-v1" ? 16383 : 255);
       requireValue(typeof cell[4] === "boolean");
       const key = `${cell[0]}:${cell[1]}`;
       requireValue(!coordinates.has(key)); coordinates.set(key, cell as Cell);
@@ -67,7 +67,7 @@ export function validatePassiveExcelResult(value: unknown): Extracted {
     const formulaCoordinates = new Set<string>();
     for (const formula of sheet.formulas) {
       requireValue(Array.isArray(formula) && formula.length === 4);
-      integer(formula[0], 0, 65535); integer(formula[1], 0, 255); text(formula[2]);
+      integer(formula[0], 0, value.reader === "ooxml-values-v1" ? 1048575 : 65535); integer(formula[1], 0, value.reader === "ooxml-values-v1" ? 16383 : 255); text(formula[2]);
       requireValue(formula[3] === "missing" || formula[3] === "unverified");
       const key = `${formula[0]}:${formula[1]}`;
       const cell = coordinates.get(key);
@@ -77,7 +77,7 @@ export function validatePassiveExcelResult(value: unknown): Extracted {
         requireValue(cell[2] === "text" && cell[3] === "#UNVERIFIED_FORMULA_NO_SAVED_VALUE");
         missing += 1;
       }
-      requireValue(++formulas <= 100_000);
+      requireValue(++formulas <= (value.reader === "ooxml-values-v1" ? 500_000 : 100_000));
     }
     requireValue([...coordinates.values()].filter(cell => cell[4]).length === formulaCoordinates.size);
   }
@@ -90,7 +90,7 @@ function xml(value: string) {
 function column(index: number): string {
   return index < 26 ? String.fromCharCode(65 + index) : column(Math.floor(index / 26) - 1) + String.fromCharCode(65 + index % 26);
 }
-function sheetXml(cells: Cell[], budget: { bytes: number }) {
+function sheetXml(cells: Cell[], budget: { bytes: number; maximum: number }) {
   const rows = new Map<number, string[]>();
   for (const [row, col, kind, value, formula] of cells) {
     const address = `${column(col)}${row + 1}`;
@@ -102,7 +102,7 @@ function sheetXml(cells: Cell[], budget: { bytes: number }) {
     const rowCells = rows.get(row) ?? [];
     const fragment = `<c r="${address}" t="${type}" s="${style}">${body}</c>`;
     budget.bytes += Buffer.byteLength(fragment) + (rows.has(row) ? 0 : 40);
-    requireValue(budget.bytes <= 45 * 1024 * 1024);
+    requireValue(budget.bytes <= budget.maximum);
     rowCells.push(fragment); rows.set(row, rowCells);
   }
   return `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${[...rows].sort(([a], [b]) => a - b).map(([row, cells]) => `<row r="${row + 1}">${cells.join("")}</row>`).join("")}</sheetData></worksheet>`;
@@ -135,16 +135,16 @@ export async function buildPassiveExcel(result: Extracted, provenance: LegacyExc
   const sheets = [{ name: noticeName, cells: report }, ...result.sheets];
   const zip = new JSZip();
   const fixedDate = new Date("1980-01-01T00:00:00.000Z");
-  const put = (name: string, contents: string) => zip.file(name, contents, { date: fixedDate });
+  const put = (name: string, contents: string) => zip.file(name, contents, { date: fixedDate, createFolders: false });
   put("[Content_Types].xml", `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`);
   put("_rels/.rels", '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
   put("xl/workbook.xml", `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><workbookPr date1904="${result.date1904 ? 1 : 0}"/><sheets>${sheets.map((sheet, i) => `<sheet name="${xml(sheet.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets></workbook>`);
   put("xl/_rels/workbook.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`);
   put("xl/styles.xml", '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy-mm-dd hh:mm:ss"/></numFmts><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFE699"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1"/><xf numFmtId="164" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>');
-  const budget = { bytes: 0 };
+  const budget = { bytes: 0, maximum: (result.reader === "ooxml-values-v1" ? 200 : 45) * 1024 * 1024 };
   sheets.forEach((sheet, i) => put(`xl/worksheets/sheet${i + 1}.xml`, sheetXml(sheet.cells, budget)));
   // STORE prevents highly repetitive but valid output from exceeding the upload ratio limit.
-  const data = await zip.generateAsync({ type: "nodebuffer", compression: "STORE" });
+  const data = await zip.generateAsync({ type: "nodebuffer", compression: result.reader === "ooxml-values-v1" ? "DEFLATE" : "STORE", compressionOptions: { level: 1 } });
   requireValue(data.length <= 50 * 1024 * 1024);
   validateUploadedDocument({ data, fileName: "passive.xlsx", declaredMimeType: XLSX_MIME });
   return data;

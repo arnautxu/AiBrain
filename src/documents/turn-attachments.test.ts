@@ -220,6 +220,24 @@ describe("turn document attachment binding", () => {
     expect(JSON.stringify(inputs)).not.toContain(stagingRoot);
   });
 
+  it("supplies a scanned middle-page image and explicitly bounds unavailable trailing pages", async () => {
+    const { stagingRoot, document } = await fixture();
+    const renderPage = vi.fn(async () => Buffer.from("scanned-page"));
+    const resolver = new ServerTurnDocumentInputResolver({ stagingRoot, pdftotext: "/tools/pdftotext",
+      runner: { run: async () => ({ stdout: "page one\f\fpage three\f", stderr: "" }) },
+      previews: { read: async () => ({ schemaVersion: 2, uploadId: document.uploadId, threadId: document.threadId,
+        sourceSha256: document.sha256, status: "ready", kind: "pdf", files: ["document.pdf", "page-1.png"],
+        artifacts: [], pages: 3, createdAt: document.createdAt }),
+        readFile: async () => Buffer.from("preview"), renderPage },
+    });
+    const inputs = await resolver.resolve({ ...document, fileName: "mixed.pdf", kind: "pdf", mediaType: "application/pdf" });
+    expect(renderPage).toHaveBeenCalledWith(document.threadId, document.uploadId, 2, { signal: undefined });
+    expect(inputs.filter(i => i.type === "image")).toHaveLength(2);
+    expect(JSON.stringify(inputs)).toContain("page(s) 2 have no readable text");
+    expect(JSON.stringify(inputs)).toContain("page 2");
+    expect(JSON.stringify(inputs)).not.toContain("INCOMPLETE PDF COVERAGE");
+  });
+
   it("maps preview and tool failures to a recoverable document error", async () => {
     const { stagingRoot, document } = await fixture();
     const resolver = new ServerTurnDocumentInputResolver({

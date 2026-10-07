@@ -1,3 +1,5 @@
+import { checkEmployeeConditions } from './conditionCheck.js';
+import { ruleForDay } from '../utils/ruleForDay.js';
 import { shiftHours } from '../utils/shiftHours.js';
 
 export const DAYS = ['LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO', 'DOMINGO'];
@@ -63,6 +65,8 @@ export function applyDraftRequests(requests, employees) {
 /** Check the FINAL grid, not the model's claims or the saved week's conflicts. */
 export function reviewDraft(schedules, employees, rules, closedDays, requests, freeRules) {
   const checks = [];
+  const unverifiedConditions = [];
+  const companys = employees.map(e => ({ empleado: e, dias: schedules.filter(s => s.empleadoId === e.id) }));
   const check = (employeeId, requirement, ok, detail) => checks.push({ employeeId, requirement, status: ok ? 'respected' : 'conflict', detail });
   for (const e of employees) {
     const shifts = schedules.filter(s => s.empleadoId === e.id);
@@ -75,6 +79,11 @@ export function reviewDraft(schedules, employees, rules, closedDays, requests, f
       const available = s.turno === 'MANANA' ? slot?.M !== false : s.turno === 'TARDE' ? slot?.T !== false : slot?.M !== false && slot?.T !== false;
       check(e.id, `Disponibilidad ${s.dia}`, available && !closedDays.includes(s.dia) && !e.diasAusente[s.dia] && !e.diasPreferenciaLibre[s.dia] && !e.diasOcupadosOtrosEstablecimientos?.[s.dia] && (!e.turnosPorDiaPreferencia[s.dia] || e.turnosPorDiaPreferencia[s.dia] === s.turno), s.turno);
     }
+    const fixed = checkEmployeeConditions({ empleado: e, dias: shifts,
+      diasHabituales: DAYS.filter(d => !closedDays.includes(d)), companys, idioma: 'es',
+      diesDemanats: Object.keys(e.turnosPorDiaPreferencia || {}) });
+    for (const problem of fixed.problemas) check(e.id, 'Condiciones fijas', false, problem);
+    for (const text of fixed.cond.noInterpretadas) unverifiedConditions.push(`Persona ${e.id}: condición no verificada: ${text}`);
     const r = requests.find(r => r.employeeId === e.id);
     if (r?.noSplit) check(e.id, 'Sin turnos partidos', !work.some(s => s.turno === 'PARTIDO'), 'Petición de la simulación');
     for (const d of r?.daysOff || []) check(e.id, `${d} libre`, shifts.some(s => s.dia === d && s.turno === 'LIBRE'), 'Petición de la simulación');
@@ -82,7 +91,7 @@ export function reviewDraft(schedules, employees, rules, closedDays, requests, f
     for (const [d, t] of Object.entries(r?.absences || {})) check(e.id, `${d} ${t}`, shifts.some(s => s.dia === d && s.turno === 'LIBRE' && s.ausencia === t), 'Ausencia simulada, sin guardar');
   }
   for (const d of DAYS.filter(d => !closedDays.includes(d))) {
-    const rule = rules.find(r => r.diasAplica && JSON.parse(r.diasAplica).includes(d)) || rules.find(r => !r.diasAplica) || rules[0];
+    const rule = ruleForDay(rules, d);
     if (!rule) continue;
     for (const [role, suffix] of [['DEPENDIENTA', 'Dependientas'], ['ELABORACION', 'Elaboracion']]) {
       for (const [shift, period] of [['MANANA', 'Manana'], ['TARDE', 'Tarde']]) {
@@ -93,7 +102,9 @@ export function reviewDraft(schedules, employees, rules, closedDays, requests, f
       }
     }
   }
-  const notVerified = ['Equidad histórica, alternancia de sábados y tiempo de descanso: no certificados por esta revisión.'];
+  const notVerified = [...unverifiedConditions, 'Equidad histórica, alternancia de sábados y tiempo de descanso: no certificados por esta revisión.'];
+  const unconfiguredDays = DAYS.filter(d => !closedDays.includes(d) && !ruleForDay(rules, d));
+  if (rules.length && unconfiguredDays.length) notVerified.push(`No hay cobertura configurada para: ${unconfiguredDays.join(', ')}.`);
   if (!rules.length) notVerified.push('No hay reglas de cobertura configuradas; no se puede certificar la cobertura.');
   if (freeRules.length || employees.some(e => e.condicionesFijas || e.condicionesEstructuradas)) notVerified.push('El motor ha recibido las condiciones fijas y reglas de texto, pero esta revisión no certifica su cumplimiento completo.');
   return { checks, conflicts: checks.filter(c => c.status === 'conflict'), notVerified,

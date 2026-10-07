@@ -1,3 +1,4 @@
+import { ruleForDay as getRuleForDay } from '../utils/ruleForDay.js';
 import { createAiClient } from '../integration/providers.js';
 import { shiftHours, jornadaReducida, entradaPara, descansoPara, REDUCED_DAY_FIELDS } from '../utils/shiftHours.js';
 import { weeklyHourTarget, normalOpenDays } from '../utils/weeklyTarget.js';
@@ -11,6 +12,7 @@ import { ocupacioAltresBotigues } from './altresBotigues.js';
 import { edicionsNetes, moviments, NOMS_DIA as DIA_CA } from './edicionsNetes.js';
 import { aplicaAUnaPersona, sincronitzaMatins } from './passadesCondicions.js';
 import { applyDraftCoverage, applyDraftRequests, reviewDraft } from './draft-scenario.js';
+import { enforceFinalScheduleBounds, remainingWeeklyHours } from './final-schedule-bounds.js';
 
 const client = createAiClient();
 
@@ -688,6 +690,9 @@ export async function generateAISchedule({ establecimientoId, semana, quality = 
     canvia: (d, turno) => setShift(d, turno),
   });
 
+  const finalAdjustments = enforceFinalScheduleBounds(scheduleData.horario, employees, rules, festivoDays,
+    (employee, day, shift) => disponiblePara(employee, day, shift) && condicionesPermiten(scheduleData.horario, employee, shift));
+
   // 5l. Last of all, stamp the start and break times. Both are decided here
   // rather than taken from the model, which gave the same week two different
   // break times and left the split shifts our own passes created without one.
@@ -713,7 +718,7 @@ export async function generateAISchedule({ establecimientoId, semana, quality = 
             horasPorTurno: e.horasPorTurno, horaEntradaManana: e.horaEntradaManana, horaEntradaTarde: e.horaEntradaTarde } });
       }
     }
-    const review = reviewDraft(schedules, employees, rules, festivoDays, requests, freeRules);
+    const review = { ...reviewDraft(schedules, employees, rules, festivoDays, requests, freeRules), adjustments: finalAdjustments };
     return { schedules, establishment: { ...establishment, id: establecimientoId },
       roster: employees.map(e => schedules.find(s => s.empleadoId === e.id).empleado), review,
       // Model commentary is separate from checks on the final grid.
@@ -1831,16 +1836,7 @@ function effectiveMaxHours(emp) {
   // Target for this week (contract × weekly intensity), minus hours already
   // worked in other establishments. Falls back to the plain contract.
   const objetivo = emp.horasObjetivoSemana ?? (emp.maxHorasSemana || 40);
-  return objetivo - (emp.horasYaTrabajadas || 0);
-}
-
-function getRuleForDay(rules, dia) {
-  if (!rules || rules.length === 0) return null;
-  const specific = rules.find((r) => {
-    if (!r.diasAplica) return false;
-    try { return JSON.parse(r.diasAplica).includes(dia); } catch { return false; }
-  });
-  return specific || rules.find((r) => !r.diasAplica) || rules[0];
+  return Math.max(0, Math.min(objetivo - (emp.horasYaTrabajadas || 0), remainingWeeklyHours(emp)));
 }
 
 // Count workers of a given function active in morning or afternoon for a day
@@ -1863,7 +1859,7 @@ function countForDay(horario, employees, dia, funcion, slot) {
 //   Pass A: trim over-max (move excess workers to opposite shift or LIBRE)
 //   Pass B: fill under-min (assign LIBRE workers to shifts with gap)
 //   Pass C: fill underutilized hours (workers below contracted hours get more shifts if room exists)
-//   Pass D: trim over-hours (workers exceeding contracted+3h lose shifts from end of week)
+//   Pass D: trim over-hours (workers exceeding contracted hours lose shifts from end of week)
 //   Pass E: variety (avoid 5+ same shift in a row)
 // Repeats A+B up to 5 times since B can cause A violations and vice versa.
 // ─────────────────────────────────────────────
@@ -1990,8 +1986,8 @@ export function repairSchedule(horario, employees, rules) {
             if (emp?.diasPreferenciaLibre?.[dia]) continue;
             const currentHours = getWeekHours(horario, cand.empleadoId, employees);
             const addedHours = shiftHours(emp, targetShift);
-            // Allow up to effective contracted + 5h to fill coverage gaps
-            if (emp && currentHours + addedHours <= effectiveMaxHours(emp) + 5) {
+            // Coverage cannot authorize hours above the weekly maximum.
+            if (emp && currentHours + addedHours <= effectiveMaxHours(emp)) {
               setShift(d, targetShift);
               filled++;
               changed = true;
@@ -2034,7 +2030,7 @@ export function repairSchedule(horario, employees, rules) {
               const emp = employees.find((e) => e.id === cand.empleadoId);
               const currentHours = getWeekHours(horario, cand.empleadoId, employees);
               const delta = shiftHours(emp, 'PARTIDO') - shiftHours(emp, d.turno);
-              if (currentHours + delta <= effectiveMaxHours(emp) + 5) {
+              if (currentHours + delta <= effectiveMaxHours(emp)) {
                 setShift(d, 'PARTIDO');
                 filled++;
                 changed = true;
@@ -2169,20 +2165,19 @@ export function repairSchedule(horario, employees, rules) {
       const puedeM = condicionesPermiten(horario, emp, 'MANANA');
       const puedeT = condicionesPermiten(horario, emp, 'TARDE');
 
-      if (soloTurno !== 'TARDE' && puedeM && countM < maxM && hours + horasM <= effMax + 5) {
+      if (soloTurno !== 'TARDE' && puedeM && countM < maxM && hours + horasM <= effMax) {
         setShift(d, 'MANANA');
         hours += horasM;
-      } else if (soloTurno !== 'MANANA' && puedeT && countT < maxT && hours + horasT <= effMax + 5) {
+      } else if (soloTurno !== 'MANANA' && puedeT && countT < maxT && hours + horasT <= effMax) {
         setShift(d, 'TARDE');
         hours += horasT;
       }
     }
   }
 
-  // Pass D: trim over-hours — flexible cushion so busy seasons can run employees
-  // above their contract. This is a safety backstop for extreme cases only, not a
-  // strict cap. Effective = maxHorasSemana minus hours already worked elsewhere this week.
-  const MAX_EXCESS = 8;
+  // Pass D: trim hours within the maximum; the final pass enforces it again
+  // after the later condition and rotation passes.
+  const MAX_EXCESS = 0;
   for (const empSched of horario) {
     const emp = employees.find((e) => e.id === empSched.empleadoId);
     if (!emp) continue;
@@ -2284,7 +2279,7 @@ export function repairSchedule(horario, employees, rules) {
             if (emp.diasOcupadosOtrosEstablecimientos?.[d.dia]) continue;
             const hours = getWeekHours(horario, emp.id, employees);
             const delta = shiftHours(emp, opposite) - shiftHours(emp, shiftType);
-            if (Math.abs(hours + delta - effectiveMaxHours(emp)) <= 5) {
+            if (hours + delta <= effectiveMaxHours(emp)) {
               setShift(d, opposite);
             }
           }

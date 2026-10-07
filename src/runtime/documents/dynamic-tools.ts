@@ -56,6 +56,10 @@ export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze(
   name: AIBRAIN_DOCUMENT_TOOL_NAMESPACE,
   description: "Create validated PDF, Word, PowerPoint and Excel files in this employee's private AiBrain project workspace on the installation server. This is the default document destination. It does not use Google Drive or any external connector.",
   tools: [
+    { type: "function", name: "remember_preferences",
+      description: "Save the complete consolidated criteria for all future chats in the current owned project, only when the current user explicitly asks to update/remember the project criteria. Retain unchanged existing criteria, apply the user's latest corrections, omit secrets and unrelated content. Returns a verified save receipt and the exact saved text. Never claim persistence before status saved. Files and assistant promises do not update project criteria.",
+      inputSchema: { type: "object", properties: { notes: { type: "string", minLength: 1, maxLength: 16000 } }, required: ["notes"], additionalProperties: false },
+    },
     { type: "function", name: "remember",
       description: "Persist the complete original of a file uploaded in this conversation as a reference available to all conversations in the current project. Use only when the user explicitly asks to remember/save that file. Pass its exact displayed filename. Returns a verified save receipt; never claim it is remembered before success. It does not save a summary instead of the original or grant access outside this project.",
       inputSchema: { type: "object", properties: { fileName: { type: "string", minLength: 1, maxLength: 120 } }, required: ["fileName"], additionalProperties: false },
@@ -70,6 +74,7 @@ export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze(
         people: { type: "array", minItems: 1, maxItems: 43, items: { type: "object", properties: {
           name: { type: "string", minLength: 1, maxLength: 100 },
           section: { type: "string", enum: ["DEPENDIENTA", "ELABORACION"] },
+          maxWeeklyHours: { type: "number", minimum: 0, maximum: 40, description: "Weekly maximum; defaults to 40. Use the lower contract limit for a reduced week." },
           codeHours: { type: "object", properties: { M: { type: "number", minimum: 0, maximum: 24 }, T: { type: "number", minimum: 0, maximum: 24 }, D: { type: "number", minimum: 0, maximum: 24 } }, required: ["M", "T", "D"], additionalProperties: false },
           days: { type: "array", minItems: 7, maxItems: 7, items: { anyOf: [{ type: "null" }, { type: "object", properties: {
             code: { type: "string", enum: ["M", "T", "D", "F", "V", "B"] },
@@ -250,6 +255,7 @@ export type LocalDocumentDynamicToolContext = Readonly<{
   sourceTurnId: string;
   permissions: ResolvedPermissions;
   rememberProjectFile?: (fileName: string) => Promise<Record<string, unknown>>;
+  rememberProjectPreferences?: (notes: string) => Promise<Record<string, unknown>>;
   renderPresentation?: PresentationRenderCallback;
   spreadsheetLayout?: "schedule";
   arnallSchedule?: ArnallSchedule;
@@ -318,7 +324,7 @@ function parseFictionalArnallSchedule(value: unknown): { input: CreateArguments;
   }
   const people = value.people.map((person: unknown, index: number) => {
     if (!isRecord(person)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Persona ficticia no válida.");
-    exactKeys(person, ["name", "section", "codeHours", "days"]);
+    exactKeys(person, ["name", "section", "codeHours", "days"], ["maxWeeklyHours"]);
     if (!isRecord(person.codeHours)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Horas ficticias no válidas.");
     exactKeys(person.codeHours, ["M", "T", "D"]);
     if (typeof person.name !== "string" || !["DEPENDIENTA", "ELABORACION"].includes(String(person.section)) ||
@@ -665,7 +671,7 @@ async function handleSingleLocalDocumentDynamicToolCall(
   try {
     if (!isRecord(params)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_REQUEST_INVALID", "Document tool request is invalid.");
     exactKeys(params, ["threadId", "turnId", "callId", "namespace", "tool", "arguments"]);
-    if (params.namespace !== AIBRAIN_DOCUMENT_TOOL_NAMESPACE || (params.tool !== "remember" && params.tool !== "create" && params.tool !== "create_arnall_schedule" && params.tool !== "image_to_pdf" && params.tool !== "render" && params.tool !== "deliver")) {
+    if (params.namespace !== AIBRAIN_DOCUMENT_TOOL_NAMESPACE || (params.tool !== "remember_preferences" && params.tool !== "remember" && params.tool !== "create" && params.tool !== "create_arnall_schedule" && params.tool !== "image_to_pdf" && params.tool !== "render" && params.tool !== "deliver")) {
       throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_TOOL_REJECTED", "Document tool is not in the closed allowlist.");
     }
     for (const value of [params.threadId, params.turnId, params.callId]) {
@@ -683,6 +689,15 @@ async function handleSingleLocalDocumentDynamicToolCall(
     }
     if (!permissionAllowsLocalDocumentCreation(context.permissions)) {
       return failure("LOCAL_DOCUMENT_PERMISSION_DENIED", "La política de este usuario no permite crear archivos locales.");
+    }
+    if (params.tool === "remember_preferences") {
+      if (!isRecord(params.arguments)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Preference fields are invalid.");
+      exactKeys(params.arguments, ["notes"]);
+      if (typeof params.arguments.notes !== "string" || !context.rememberProjectPreferences) return failure("PROJECT_PREFERENCES_UNAVAILABLE", "No se pueden guardar los criterios de este proyecto.");
+      try {
+        const receipt = await context.rememberProjectPreferences(params.arguments.notes);
+        return { artifacts: [], response: { success: true, contentItems: [{ type: "inputText", text: JSON.stringify(receipt) }] } };
+      } catch (error) { return failure("PROJECT_PREFERENCES_NOT_SAVED", error instanceof Error && !/(?:\/var\/|\/Users\/|ENOENT)/.test(error.message) ? error.message : "No se han podido guardar los criterios. No está confirmado."); }
     }
     if (params.tool === "remember") {
       if (!isRecord(params.arguments)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Reference fields are invalid.");

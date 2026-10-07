@@ -85,6 +85,15 @@ describe("horarIA chat boundary", () => {
     expect(await run("run", { operation: "preview", query: { semana: "2026-W38", establecimiento: 1 } })).toEqual(value);
     expect(context.preview).toHaveBeenCalledWith(value);
   });
+  it.each(["collection.template", "collection.export", "collection.preview"])("attaches %s data without a business-write confirmation", async operation => {
+    const { run, context } = await setup();
+    const value = { artifactPurpose: "collection", title: "Availability", rows: [["Persona", "Lunes"], ["Test", "SIN_INDICAR"]] };
+    vi.mocked(callHoraria).mockResolvedValue(value);
+    const input = operation === "collection.preview" ? { operation, body: { establecimientoId: 1, semana: "2026-W41", responses: [] } } : { operation, query: { establecimiento: 1, semana: "2026-W41" } };
+    expect(await run("run", input)).toEqual(value);
+    expect(context.preview).toHaveBeenCalledWith(value);
+    expect(callHoraria).toHaveBeenCalledOnce();
+  });
   it("freezes a change, rejects same-turn/cross-thread confirmation and executes once", async () => {
     const { run } = await setup();
     const input = { operation: "schedules.update", id: "11", body: { turno: "LIBRE" } };
