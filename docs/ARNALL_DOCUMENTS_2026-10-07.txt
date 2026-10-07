@@ -201,3 +201,12 @@ private originals, permissions and macro isolation unchanged. Binding tests
 cover real staged batches of 33/50, refusal of 51 before reads/conversion and
 unchanged aggregate budgets. A live 33-file UI acceptance remains a release gate;
 synthetic fixtures must not be described as Marta's missing 33 originals.
+
+The live Marta project-source UI then reproduced a proxy rejection of her
+4.3 MB CONTROL DE COSTOS workbook. Project-source POST fell through to the
+global 2 MB limit despite the UI/server 20 MB contract. Add an exact UUID
+project-source streaming location with a 22 MB multipart envelope; preserve
+the ordinary request limit and server-side 20 MB validation. The infrastructure
+validator now requires this route as well as the existing thread-document route.
+Apply only to Arnall's vhost after a private config backup and nginx validation.
+Preserve other client vhosts; accept only a successful repeat upload/save/reload.
