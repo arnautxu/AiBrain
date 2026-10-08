@@ -1,6 +1,8 @@
 import { prisma } from '../services/prisma.js';
 import { handlePaperImage } from '../services/whatsapp.js';
-import { botiguesDe, esGeneral } from '../utils/permisos.js';
+import { botiguesDe, esGeneral, potTocarPersona } from '../utils/permisos.js';
+import { idNumeric } from '../utils/ids.js';
+import { DIAS_SEMANA } from '../utils/weeklyTarget.js';
 
 export async function getPreferences(req, res) {
   const { semana, establecimiento } = req.query;
@@ -68,37 +70,54 @@ export async function getPaperSheetImage(req, res) {
 }
 
 export async function updatePreference(req, res) {
-  const empleadoId = parseInt(req.params.empleadoId);
-  const { semana, turnoPreferido, diasNoDisponible, maxHorasSemana, flexibilidad, notasAdicionales } = req.body;
-
-  if (!semana) return res.status(400).json({ error: 'Campo semana requerido' });
-
-  const preference = await prisma.shiftPreference.upsert({
-    where: {
-      // Unique on empleadoId + semana + activa — use findFirst + update pattern
-      id: (
-        await prisma.shiftPreference.findFirst({ where: { empleadoId, semana, activa: true } })
-      )?.id ?? -1,
-    },
-    update: {
-      turnoPreferido: turnoPreferido || null,
-      diasNoDisponible: diasNoDisponible || [],
-      maxHorasSemana: maxHorasSemana || null,
-      flexibilidad: flexibilidad || 'MEDIA',
-      notasAdicionales: notasAdicionales || null,
-      recogidoVia: 'MANUAL',
-    },
-    create: {
-      empleadoId,
-      semana,
-      turnoPreferido: turnoPreferido || null,
-      diasNoDisponible: diasNoDisponible || [],
-      maxHorasSemana: maxHorasSemana || null,
-      flexibilidad: flexibilidad || 'MEDIA',
-      notasAdicionales: notasAdicionales || null,
-      recogidoVia: 'MANUAL',
-    },
+  const empleadoId = idNumeric(req.params.empleadoId);
+  const { semana, turnoPreferido, diasNoDisponible, turnosPorDia, notasAdicionales } = req.body;
+  if (!empleadoId || typeof semana !== 'string' || !/^\d{4}-W(?:0[1-9]|[1-4]\d|5[0-3])$/.test(semana)) {
+    return res.status(400).json({ error: 'Cal un treballador i una setmana ISO vàlids' });
+  }
+  const employee = await prisma.employee.findUnique({
+    where: { id: empleadoId },
+    select: { id: true, rol: true, establecimientoId: true, establecimientosPermitidos: { select: { establishmentId: true } } },
   });
+  if (!employee || !potTocarPersona(req.user, employee)) {
+    return res.status(403).json({ error: 'No tens accés a aquest treballador' });
+  }
+  const allowed = ['semana', 'turnoPreferido', 'diasNoDisponible', 'turnosPorDia', 'notasAdicionales'];
+  if (Object.keys(req.body).some((key) => !allowed.includes(key))) {
+    return res.status(400).json({ error: 'Camp de preferència desconegut. Les hores màximes i la flexibilitat pertanyen a la fitxa del treballador.' });
+  }
+  const shifts = ['MANANA', 'TARDE', 'PARTIDO', 'LIBRE'];
+  if (turnoPreferido !== undefined && turnoPreferido !== null && !shifts.includes(turnoPreferido)) {
+    return res.status(400).json({ error: 'turnoPreferido ha de ser MANANA, TARDE, PARTIDO, LIBRE o null (sense preferència)' });
+  }
+  if (diasNoDisponible !== undefined && (!Array.isArray(diasNoDisponible) || diasNoDisponible.some((day) => !DIAS_SEMANA.includes(day)))) {
+    return res.status(400).json({ error: 'diasNoDisponible ha de ser una llista de dies LUNES..DOMINGO' });
+  }
+  if (turnosPorDia !== undefined && (!turnosPorDia || typeof turnosPorDia !== 'object' || Array.isArray(turnosPorDia)
+    || Object.entries(turnosPorDia).some(([day, shift]) => !DIAS_SEMANA.includes(day) || !shifts.includes(shift)))) {
+    return res.status(400).json({ error: 'turnosPorDia ha de ser un objecte de dies LUNES..DOMINGO amb MANANA, TARDE, PARTIDO o LIBRE' });
+  }
+  if (notasAdicionales !== undefined && notasAdicionales !== null && typeof notasAdicionales !== 'string') {
+    return res.status(400).json({ error: 'notasAdicionales ha de ser text o null' });
+  }
+  // Update the same latest active record that readers and the scheduler use.
+  // An omitted field preserves it; an explicit [] or {} clears that field.
+  const current = await prisma.shiftPreference.findFirst({ where: { empleadoId, semana, activa: true }, orderBy: { updatedAt: 'desc' } });
+  const data = {
+    ...(turnoPreferido !== undefined ? { turnoPreferido } : {}),
+    ...(diasNoDisponible !== undefined ? { diasNoDisponible: [...new Set(diasNoDisponible)] } : {}),
+    ...(turnosPorDia !== undefined ? { turnosPorDia } : {}),
+    ...(notasAdicionales !== undefined ? { notasAdicionales } : {}),
+    recogidoVia: 'MANUAL',
+  };
+  const finalDaysOff = data.diasNoDisponible ?? current?.diasNoDisponible ?? [];
+  const finalShifts = data.turnosPorDia ?? current?.turnosPorDia ?? {};
+  if (finalDaysOff.some((day) => finalShifts[day] && finalShifts[day] !== 'LIBRE')) {
+    return res.status(400).json({ error: 'Un dia no disponible no pot tenir alhora un torn. Revisa diasNoDisponible i turnosPorDia.' });
+  }
+  const preference = current
+    ? await prisma.shiftPreference.update({ where: { id: current.id }, data })
+    : await prisma.shiftPreference.create({ data: { empleadoId, semana, ...data } });
   return res.json(preference);
 }
 

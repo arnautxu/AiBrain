@@ -10,12 +10,17 @@ const DIAS_SEM = ['LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO',
 
 // Normalize the availability grid to a clean JSON string, or null for "fully available".
 // Accepts { LUNES: { M: bool, T: bool }, ... }. Missing entries default to available (true).
-function normalizeDisponibilidad(input) {
-  if (input === undefined) return undefined; // not provided → don't touch
-  if (input === null) return null;
+export function normalizeDisponibilidad(input) {
+  if (input === undefined) return { ok: true, value: undefined }; // not provided → don't touch
+  if (input === null) return { ok: true, value: null };
+  const invalid = { ok: false, error: 'Disponibilitat mal formada: cal un objecte amb dies LUNES...DOMINGO i franges M/T booleanes, no text lliure.' };
   let obj = input;
-  if (typeof input === 'string') { try { obj = JSON.parse(input); } catch { return null; } }
-  if (typeof obj !== 'object') return null;
+  if (typeof input === 'string') { try { obj = JSON.parse(input); } catch { return invalid; } }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return invalid;
+  for (const [day, shifts] of Object.entries(obj)) {
+    if (!DIAS_SEM.includes(day) || !shifts || typeof shifts !== 'object' || Array.isArray(shifts)) return invalid;
+    if (Object.entries(shifts).some(([shift, available]) => !['M', 'T'].includes(shift) || typeof available !== 'boolean')) return invalid;
+  }
   const out = {};
   let anyRestriction = false;
   for (const dia of DIAS_SEM) {
@@ -24,7 +29,7 @@ function normalizeDisponibilidad(input) {
     out[dia] = { M, T };
     if (!M || !T) anyRestriction = true;
   }
-  return anyRestriction ? JSON.stringify(out) : null; // all available → store null
+  return { ok: true, value: anyRestriction ? JSON.stringify(out) : null }; // all available → store null
 }
 
 export async function getAll(req, res) {
@@ -279,6 +284,9 @@ export async function create(req, res) {
     return res.status(403).json({ error: 'Només la responsable general pot posar contrasenyes' });
   }
 
+  const availability = normalizeDisponibilidad(disponibilidad);
+  if (!availability.ok) return res.status(400).json({ error: availability.error });
+
   let passwordHash;
   if (password) {
     passwordHash = await bcrypt.hash(password, 10);
@@ -295,7 +303,7 @@ export async function create(req, res) {
     establecimientoId: establecimientoId || null,
     flexible: flexible || false,
     maxHorasSemana: maxHorasSemana ? parseInt(maxHorasSemana) : 40,
-    disponibilidad: normalizeDisponibilidad(disponibilidad) ?? null,
+    disponibilidad: availability.value ?? null,
     condicionesFijas: condicionesFijas || null,
     horasPorTurno: horasPorTurno ? parseInt(horasPorTurno) : null,
     horaEntradaManana: horaEntradaManana || null,
@@ -447,6 +455,8 @@ export async function update(req, res) {
     return res.status(403).json({ error: 'No tens accés a aquest treballador' });
   }
 
+  const availability = normalizeDisponibilidad(disponibilidad);
+  if (!availability.ok) return res.status(400).json({ error: availability.error });
   const data = {};
   if (nombre !== undefined) data.nombre = nombre;
   if (apellidos !== undefined) data.apellidos = apellidos;
@@ -456,7 +466,7 @@ export async function update(req, res) {
   if (flexible !== undefined) data.flexible = flexible;
   if (activo !== undefined) data.activo = activo;
   if (maxHorasSemana !== undefined) data.maxHorasSemana = parseInt(maxHorasSemana);
-  if (disponibilidad !== undefined) data.disponibilidad = normalizeDisponibilidad(disponibilidad);
+  if (disponibilidad !== undefined) data.disponibilidad = availability.value;
   if (condicionesFijas !== undefined) data.condicionesFijas = condicionesFijas || null;
   if (condicionesEstructuradas !== undefined) {
     // Validat aquí i no només a la pantalla: aquest camp el fa complir el motor

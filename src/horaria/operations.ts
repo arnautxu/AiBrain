@@ -24,7 +24,7 @@ add("preferences.sheets", "GET", "preferences/sheets", "read", "query: semana, e
 add("collection.template", "GET", "integration/collection-template", "read", "query: semana, establecimiento. Attach a blank availability Excel and return a WhatsApp reply template and seven-day form schema; no messages or business writes.");
 add("collection.export", "GET", "integration/collection-export", "read", "query: semana, establecimiento. Attach the authorized shop's received preferences and pending responses as Excel; unknown days remain SIN_INDICAR.");
 add("collection.preview", "POST", "integration/collection-preview", "draft", "body: establecimientoId, semana, responses: [{employeeId, week, source: WHATSAPP|FORMULARIO, days:{LUNES..DOMINGO: MANANA|TARDE|AMBOS|NO_DISPONIBLE|SIN_INDICAR}, notes}]. Validate and attach Excel, never apply preferences or send messages. Employee identity/source require review before saving.");
-add("preferences.update", "PUT", "preferences/:id", "write", "id=empleadoId; body: semana, turnoPreferido, diasNoDisponible, maxHorasSemana, flexibilidad, notasAdicionales");
+add("preferences.update", "PUT", "preferences/:id", "write", "id=empleadoId; body: semana (YYYY-Www), turnoPreferido=MANANA|TARDE|PARTIDO|LIBRE|null (null means no preference; never FLEXIBLE), diasNoDisponible=[LUNES..DOMINGO], turnosPorDia={MIERCOLES:TARDE,...}, notasAdicionales. Put day-specific availability in turnosPorDia, never only in notes. Unavailable whole days go in diasNoDisponible; a day cannot simultaneously require a working shift. Omitted fields are preserved, explicit [] or {} clears them. maxHorasSemana and flexible belong to employees.update, never to this operation. Read preferences.list after saving to verify every day restriction.");
 add("preferences.upload-sheet", "POST", "preferences/sheets", "ai", "uploadPath: authorized project image; body: semana");
 add("schedules.list", "GET", "schedules", "read", "query: semana, establecimiento");
 for (const name of ["conflicts", "other-hours", "fairness", "edit-patterns", "correcciones", "historial", "report", "intensity", "closed-days"]) add(`schedules.${name}`, "GET", `schedules/${name}`, "read", "query: semana, establecimiento");
@@ -69,7 +69,7 @@ export function resolveOperation(input: OperationInput) {
 }
 
 // Request fields from the imported controllers (not arbitrary database columns).
-const employeeFields = "body: nombre, apellidos (required for create), email, telefonoWhatsapp, rol=EMPLEADO|MANAGER_LOCAL|MANAGER_GENERAL, funcion=DEPENDIENTA|ELABORACION, establecimientoId, flexible, activo (update), maxHorasSemana, disponibilidad, condicionesFijas, condicionesEstructuradas (update), horasPorTurno, horaEntradaManana, horaEntradaTarde. IDs are numbers in body.";
+const employeeFields = "body: nombre, apellidos (required for create), email, telefonoWhatsapp, rol=EMPLEADO|MANAGER_LOCAL|MANAGER_GENERAL, funcion=DEPENDIENTA|ELABORACION, establecimientoId, flexible, activo (update), maxHorasSemana, disponibilidad (object {LUNES:{M:true,T:true}, ... through DOMINGO}, never prose; false means unavailable, null means fully available; include all seven days when explicitly supplied), condicionesFijas, condicionesEstructuradas (update), horasPorTurno, horaEntradaManana, horaEntradaTarde. IDs are numbers in body. Read back saved fields before claiming the requested restrictions were applied.";
 OPERATIONS["employees.create"].fields = employeeFields;
 OPERATIONS["employees.update"].fields = employeeFields;
 for (const verb of ["create", "update"]) {
