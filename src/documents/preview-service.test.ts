@@ -65,6 +65,26 @@ describe("document preview service", () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it("prints the reviewed workbook using its own print area and never whole-sheet export", async () => {
+    const generated = await generateLocalDocument({ format: "xlsx", title: "Print fixture", content: "Synthetic fixture", rows: [["Test", "15:00–20:45"]] });
+    const staged = await new FileDocumentStagingStore(stagingRoot, locks).stage({ threadId: THREAD_ID, uploadId: UPLOAD_ID, data: generated.data,
+      validated: validateUploadedDocument({ fileName: "reviewed.xlsx", declaredMimeType: generated.mimeType, data: generated.data }) });
+    const filters: string[] = [];
+    const runner: DocumentToolRunner = { async run(command, args, options) {
+      if (command.endsWith("soffice")) {
+        filters.push(args[args.indexOf("--convert-to") + 1]);
+        expect(await readFile(args.at(-1)!)).toEqual(generated.data);
+        await writeFile(path.join(options.cwd, "input.pdf"), "%PDF-1.7\nprint fixture\n%%EOF");
+      }
+      if (command.endsWith("pdftoppm")) await writeFile(`${args.at(-1)}.png`, generatedPngFixture(16, 9));
+      return { stdout: "Pages: 1\nEncrypted: no\n", stderr: "" };
+    } };
+    const service = new DocumentPreviewService({ stagingRoot, previewRoot, lockManager: locks, runner, spreadsheetLayout: "print",
+      tools: { soffice: "/tools/soffice", pdfinfo: "/tools/pdfinfo", pdftoppm: "/tools/pdftoppm", qpdf: "/tools/qpdf" } });
+    expect((await service.create(staged)).pages).toBe(1); expect(filters).toEqual(["pdf:calc_pdf_Export"]);
+    expect(await readFile(path.join(stagingRoot, staged.relativePath))).toEqual(generated.data);
+  });
+
   it.each([134, 139])("uses original print layout after Calc whole-sheet crash %s without changing the workbook", async (exitCode) => {
     const generated = await generateLocalDocument({ format: "xlsx", title: "Synthetic schedule", content: "Fixture", rows: [["Person", "Hours"], ["Test", "15:00–20:45"]] });
     const staged = await new FileDocumentStagingStore(stagingRoot, locks).stage({
