@@ -6,11 +6,39 @@ import { tmpdir } from "node:os";
 import { describe, it, expect, vi } from "vitest";
 import type { AuthSession } from "@/auth/types";
 import type { InstallationConfig } from "@/config/installation-schema";
-import { callHoraria, loadHorariaConfig, type HorariaConfig } from "./client";
+import { callHoraria, loadHorariaConfig, registerHorariaReviewSource, type HorariaConfig } from "./client";
 vi.mock("server-only", () => ({}));
 const session = { provider: "local", user: { id: "user-a" }, tenant: { id: "shop-a" } } as AuthSession;
 const config: HorariaConfig = { installationId: "shop-a", baseUrl: "http://127.0.0.1:1", secret: "test-only-secret-with-at-least-32-characters", users: { "user-a": { employeeId: 42, backgroundOperations: [] } }, eventsEnabled: false };
 describe("private horarIA transport", () => {
+  it("registers only the generated artifact whose bytes match its trusted receipt", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "horaria-original-"));
+    const bytes = Buffer.from("test server-generated artifact"), sha256 = createHash("sha256").update(bytes).digest("hex");
+    const requests: string[] = [];
+    const server = createServer(async (req, res) => {
+      const chunks = []; for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      const body = Buffer.concat(chunks), contentType = String(req.headers["content-type"]);
+      requests.push(req.url!);
+      const [payload] = String(req.headers["x-aibrain-authorization"]).split(".");
+      expect(JSON.parse(Buffer.from(payload, "base64url").toString())).toMatchObject({ actorId: "user-a", employeeId: 42, bodyHash: createHash("sha256").update(body).digest("hex"), target: "/api/integration/review-source" });
+      const form = await new Response(body, { headers: { "content-type": contentType } }).formData();
+      expect(Buffer.from(await (form.get("workbook") as File).arrayBuffer())).toEqual(bytes);
+      expect(form.get("establecimientoId")).toBe("3");
+      res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ sourceId: "a".repeat(64), sha256 }));
+    });
+    server.listen(0, "127.0.0.1"); await new Promise<void>(resolve => server.once("listening", resolve));
+    try {
+      await mkdir(path.join(root, "documents")); await writeFile(path.join(root, "documents", "original.xlsx"), bytes);
+      const address = server.address(); if (!address || typeof address === "string") throw new Error("No port");
+      const actual = { ...config, baseUrl: `http://127.0.0.1:${address.port}` };
+      const input = { establecimientoId: 3, semana: "2026-W42", fileName: "original.xlsx", sha256 };
+      expect((await registerHorariaReviewSource(actual, session, input, root)).sourceId).toBe("a".repeat(64));
+      await writeFile(path.join(root, "documents", "original.xlsx"), "changed after generation");
+      await expect(registerHorariaReviewSource(actual, session, input, root)).rejects.toThrow("ha cambiado");
+      await expect(registerHorariaReviewSource(actual, { ...session, tenant: { id: "other", name: "Other" } }, input, root)).rejects.toThrow("acceso");
+      expect(requests).toEqual(["/api/integration/review-source"]);
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true }); }
+  });
   it("signs exact method, query and bytes with the server-resolved identity, and strips credentials", async () => {
     const requests: { headers: import("node:http").IncomingHttpHeaders; method?: string; url?: string; body: Buffer }[] = [];
     const server = createServer(async (req, res) => {

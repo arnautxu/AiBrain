@@ -134,19 +134,46 @@ per canviar aquest model de càlcul.
    enviament. S’Agaró rep només S’Agaró. Registrar resultat real del canal;
    preparar un fitxer no prova que s’hagi enviat o rebut.
 
-La llista real de responsables i els Excel revisats encara no s’han aportat
-en aquesta tasca. No s’ha enviat cap missatge ni document.
+Arnall configura els responsables i contactes reals. Les proves tècniques
+de repartiment utilitzen exclusivament un destinatari de prova autoritzat.
+
+## Retorn de l’Excel al xat (candidat 2026-10-08)
+
+Les noves propostes generades per horarIA registren l’original privat i
+retornen `reviewSourceId`. `schedules.review-upload` rep l’adjunt corregit,
+el compara amb aquell original i conserva els bytes exactes. Permet canviar
+els codis de torn i les dues línies d’hores de les persones ja presents.
+No substitueix l’arxiu, no torna a calcular el pla ni importa torns a la base
+de dades. El canvi retornat inclou persona, cel·la i valors abans/després.
+
+El verificador rebutja una altra botiga/setmana, canvis de noms, dades als
+auxiliars, fórmules alterades, altres fulls, macros, connexions externes,
+comentaris/objectes incrustats i cadenes compartides ocultes sense ús.
+Comprova els límits reals de descompressió i CRC de cada membre del ZIP.
+Els recursos de format, les taules auxiliars i la configuració d’impressió
+han de conservar la mateixa estructura semàntica. Reescriure el llibre
+amb un editor que elimina validacions o reorganitza aquests recursos pot
+ser rebutjat; no se’n presenta una còpia simplificada com si fos l’original.
+Una prova amb openpyxl ha detectat precisament aquesta reescriptura i s’ha
+rebutjat. La prova d’un retorn des de Microsoft Excel continua sent un gate
+separat de les proves de correcció de cel·les conservant OOXML.
+
+`schedules.reviewed-send` envia aquesta versió exacta al destinatari revisat
+després de la confirmació del xat. Si canvia el telèfon o el responsable,
+cal revisar de nou el mateix fitxer; un resultat incert no es reintenta
+automàticament. Cada fitxer i rebut estan vinculats a usuari, instal·lació
+i botiga. Vegeu `HORARIA_WHATSAPP.md` per al canal XLSX, la finestra de resposta
+i els rebuts del proveïdor. L’Excel retornat es pot desar per revisar-lo encara
+que Arnall no hagi acabat de configurar-ne la destinatària.
 
 ## Límits i gates
 
-Aquest canvi implementa la plantilla i la generació de propostes. L’operació
-existent `schedules.publish` continua generant un PDF des de la base de
-dades; **no és una importació ni un repartiment de l’Excel revisat**. El
-circuit futur no es pot declarar automatitzat fins que la recepció del
-fitxer revisat i l’enviament d’aquell fitxer hagin passat les comprovacions
-d’aïllament i l’acceptació autenticada amb responsables de botigues diferents.
-El repartiment supervisat haurà de seguir els passos anteriors amb eines
-autoritzades per al canal que indiqui l’usuari.
+L’operació `schedules.publish` continua generant un PDF des de la base de
+dades; **no és una importació ni un repartiment de l’Excel revisat**. El nou
+circuit usa les operacions `schedules.review-*` i conserva el document
+retornat. Les proves locals no acrediten l’acceptació autenticada del
+retorn d’un Excel real ni l’entrega als responsables. Aquestes comprovacions
+requereixen el candidat desplegat, l’adjunt retornat i destinataris configurats.
 
 La fidelitat estructural s’ha comparat amb el full original i s’ha revisat
 la impressió amb LibreOffice. No s’ha fet una acceptació en Microsoft Excel.

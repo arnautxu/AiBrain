@@ -8,6 +8,7 @@ import type { AuthSession } from "@/auth/types";
 import type { InstallationConfig } from "@/config/installation-schema";
 import { readRegularFileWithin } from "@/security/safe-file";
 import { resolveOperation, type OperationInput } from "./operations";
+import { validateUploadedDocument } from "@/documents/upload-validation";
 
 export type HorariaConfig = { installationId: string; baseUrl: string; secret: string; users: Record<string, { employeeId: number; backgroundOperations: string[] }>; eventsEnabled: boolean; eventActorId?: string };
 export async function loadHorariaConfig(installation: Readonly<InstallationConfig>): Promise<HorariaConfig> {
@@ -39,13 +40,15 @@ export async function callHoraria(config: HorariaConfig, session: AuthSession, i
   let body = Buffer.from(input.body ? JSON.stringify(input.body) : "");
   let contentType = body.length ? "application/json" : "";
   if (input.uploadPath) {
-    if (path.isAbsolute(input.uploadPath) || input.uploadPath.split(/[\\/]/).includes("..")) throw new Error("La imagen debe pertenecer al proyecto actual.");
+    if (path.isAbsolute(input.uploadPath) || input.uploadPath.split(/[\\/]/).includes("..")) throw new Error("El archivo debe pertenecer al proyecto actual.");
     const data = await readRegularFileWithin(projectWorkspace, input.uploadPath, 10 * 1024 * 1024);
-    const mime = data.subarray(0, 3).equals(Buffer.from([255, 216, 255])) ? "image/jpeg" : data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? "image/png" : null;
+    const workbook = input.operation === "schedules.review-upload";
+    const mime = workbook ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : data.subarray(0, 3).equals(Buffer.from([255, 216, 255])) ? "image/jpeg" : data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? "image/png" : null;
     if (!mime) throw new Error("Adjunta una imagen PNG o JPEG.");
+    if (workbook && validateUploadedDocument({ fileName: path.basename(input.uploadPath), declaredMimeType: mime, data }).kind !== "xlsx") throw new Error("Adjunta un Excel .xlsx.");
     const form = new FormData();
     for (const [key, value] of Object.entries(input.body ?? {})) form.set(key, String(value));
-    form.set("imagen", new Blob([new Uint8Array(data)], { type: mime }), path.basename(input.uploadPath));
+    form.set(workbook ? "workbook" : "imagen", new Blob([new Uint8Array(data)], { type: mime }), path.basename(input.uploadPath));
     const serialized = new Request("http://localhost", { method: "POST", body: form });
     body = Buffer.from(await serialized.arrayBuffer());
     contentType = serialized.headers.get("content-type")!;
@@ -58,4 +61,24 @@ export async function callHoraria(config: HorariaConfig, session: AuthSession, i
   if (!response.ok) throw new Error(`horarIA (${response.status}): ${text.slice(0, 1500)}`);
   // No password hashes, access tokens or provider secrets may enter the conversation.
   return JSON.parse(text, (key, value) => /password|secret|token|apikey|api_key/i.test(key) ? undefined : value) as unknown;
+}
+
+/** Internal artifact registration, deliberately absent from the model's operation catalogue. */
+export async function registerHorariaReviewSource(config: HorariaConfig, session: AuthSession, input: { establecimientoId: number; semana: string; fileName: string; sha256: string }, projectWorkspace: string) {
+  if (session.provider !== "local" || session.tenant.id !== config.installationId || !Object.hasOwn(config.users, session.user.id)) throw new Error("No tienes acceso a los horarios de esta instalación.");
+  if (input.fileName !== path.basename(input.fileName) || /[\\\u0000-\u001f]/u.test(input.fileName) || !input.fileName.endsWith(".xlsx")) throw new Error("Archivo de propuesta no válido.");
+  const bytes = await readRegularFileWithin(projectWorkspace, path.join("documents", input.fileName), 10 * 1024 * 1024);
+  if (createHash("sha256").update(bytes).digest("hex") !== input.sha256) throw new Error("La propuesta original ha cambiado.");
+  const form = new FormData();
+  form.set("establecimientoId", String(input.establecimientoId)); form.set("semana", input.semana); form.set("sha256", input.sha256);
+  form.set("workbook", new Blob([new Uint8Array(bytes)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), input.fileName);
+  const serialized = new Request("http://localhost", { method: "POST", body: form });
+  const body = Buffer.from(await serialized.arrayBuffer()), contentType = serialized.headers.get("content-type")!;
+  const target = "/api/integration/review-source";
+  const token = bridgeToken(config, { method: "POST", target, contentType, body, kind: "user", actorId: session.user.id, employeeId: config.users[session.user.id].employeeId });
+  const result = await privateHorariaRequest(config.baseUrl, target, { method: "POST", headers: { "x-aibrain-authorization": token, "content-type": contentType }, body, signal: AbortSignal.timeout(90000) });
+  if (!result.ok) throw new Error(`No se ha podido registrar el original para revisión (${result.status}).`);
+  const value = await result.json() as { sourceId: string; sha256: string };
+  if (!/^[a-f0-9]{64}$/.test(value.sourceId) || value.sha256 !== input.sha256) throw new Error("Recibo del original no válido.");
+  return value;
 }
