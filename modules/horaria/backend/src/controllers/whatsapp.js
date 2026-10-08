@@ -513,7 +513,7 @@ export async function getConversationByPhoneHandler(req, res) {
 // Managers only, and deliberately no secrets: knowing that WHATSAPP_TOKEN is
 // set tells you nothing about what it is.
 // ─────────────────────────────────────────────
-export async function configCheck(_req, res) {
+export async function readWhatsappConfiguration() {
   let providerTemplates = null, providerVerificationError = null;
   if (!isMockMode() && whatsappProvider() === 'meta') {
     try { providerTemplates = await readMetaTemplates(); }
@@ -529,7 +529,7 @@ export async function configCheck(_req, res) {
     return { posada: true, nom: name, idioma: language, variablesQueSEnvien: actual && supported.includes(actual.bodyParameters) ? actual.bodyParameters : variables, per,
       providerStatus: actual?.status || null, fieldsMatch: actual ? supported.includes(actual.bodyParameters) && (clau !== 'WHATSAPP_TEMPLATE_HORARIO' || actual.headerFormat === 'DOCUMENT') : null };
   };
-  return res.json({
+  return {
     modo: isMockMode() ? 'simulacio' : 'real',
     deliveryEnabled: process.env.HORARIA_ALLOW_DELIVERY === '1' && !isMockMode(),
     providerApprovalVerified: providerTemplates !== null,
@@ -555,7 +555,11 @@ export async function configCheck(_req, res) {
       WHATSAPP_TEMPLATE_HORARIO: descriuPlantilla('WHATSAPP_TEMPLATE_HORARIO', 3, "l'horari en PDF a l'encarregada (capçalera DOCUMENT)"),
       WHATSAPP_TEMPLATE_LANG: process.env.WHATSAPP_TEMPLATE_LANG || 'es (per defecte)',
     },
-  });
+  };
+}
+
+export async function configCheck(_req, res) {
+  return res.json(await readWhatsappConfiguration());
 }
 
 // ─────────────────────────────────────────────

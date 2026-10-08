@@ -10,6 +10,8 @@ import { requireEstablishmentAccess, requireRole } from '../middleware/roles.js'
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { previewHandler, publishHandler } from './preview.js';
 import { draftHandler } from './draft.js';
+import { createReadinessHandler } from './readiness.js';
+import { createReviewedScheduleHandlers } from './reviewed-schedules.js';
 import { collectionTemplateHandler, collectionResponseHandler, collectionExportHandler } from './collection.js';
 import { verifyInbound } from './webhook.js';
 import { createVerifier } from './signature.js';
@@ -138,6 +140,12 @@ export function createHorariaApp({ secret, installationId, database = prisma, me
   app.use('/api/schedules/generate-async', rateLimit({ windowMs: 3_600_000, limit: 20, keyGenerator: req => String(req.user?.id || 'anonymous'), standardHeaders: 'draft-7', legacyHeaders: false }));
   app.get('/api/session', (req, res) => res.json({ user: req.user, capabilities: { ai: process.env.HORARIA_ALLOW_AI === '1', delivery: process.env.HORARIA_ALLOW_DELIVERY === '1' } }));
   app.get('/api/integration/preview', requireEstablishmentAccess, asyncHandler(previewHandler));
+  app.get('/api/integration/readiness', requireRole('MANAGER_GENERAL', 'MANAGER_LOCAL'), requireEstablishmentAccess, asyncHandler(createReadinessHandler({ database })));
+  const reviewed = createReviewedScheduleHandlers({ database });
+  for (const [route, handler] of [['review-source', reviewed.source], ['reviewed-excel', reviewed.review], ['reviewed-excel-send', reviewed.send]]) {
+    app.post(`/api/integration/${route}`, requireRole('MANAGER_GENERAL', 'MANAGER_LOCAL'), requireEstablishmentAccess, asyncHandler(handler));
+  }
+  app.get('/api/integration/reviewed-excel/:id', requireRole('MANAGER_GENERAL', 'MANAGER_LOCAL'), requireEstablishmentAccess, asyncHandler(reviewed.status));
   app.get('/api/integration/collection-template', requireRole('MANAGER_GENERAL', 'MANAGER_LOCAL'), requireEstablishmentAccess, asyncHandler(collectionTemplateHandler));
   app.get('/api/integration/collection-export', requireRole('MANAGER_GENERAL', 'MANAGER_LOCAL'), requireEstablishmentAccess, asyncHandler(collectionExportHandler));
   app.post('/api/integration/collection-preview', requireRole('MANAGER_GENERAL', 'MANAGER_LOCAL'), requireEstablishmentAccess, asyncHandler(collectionResponseHandler));
