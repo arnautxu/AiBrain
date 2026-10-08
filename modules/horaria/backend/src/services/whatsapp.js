@@ -1,5 +1,5 @@
 import { createAiClient, requireDelivery } from '../integration/providers.js';
-import { readMetaTemplates, requireApprovedTemplate, selectedRecipients, verifySelectedRecipients } from '../integration/meta-templates.js';
+import { readMetaTemplates, requireApprovedTemplate, selectedRecipients, verifySelectedRecipients, templateDeadlineMatches } from '../integration/meta-templates.js';
 import { findOverlappingAbsence, describeOverlap } from '../utils/absenceOverlap.js';
 import { fusionaPaperIWhatsapp, marquesDelFull, TORN_DE_LA_MARCA } from '../utils/fusioPaper.js';
 // The long form — "del 17 al 23 d'agost". The local weekLabel below writes
@@ -3000,7 +3000,7 @@ export async function recordatorisAutomatics(semana, ara = new Date()) {
   const resultats = [];
   for (const est of botigues) {
     try {
-      const r = await sendReminders(est.id, targetWeek, { margeMs: Infinity });
+      const r = await sendReminders(est.id, targetWeek, { margeMs: Infinity, ara });
       resultats.push({ botiga: est.nombre, ...r });
     } catch (err) {
       resultats.push({ botiga: est.nombre, error: err.message });
@@ -3022,7 +3022,7 @@ export async function recordatorisAutomatics(semana, ara = new Date()) {
   let avisat = false;
   if (pendents.length > 0) {
     avisat = await informaLaResponsable(
-      `Encara no han contestat per a la setmana ${weekLabelLlarg(targetWeek)}: ${pendents.join(', ')}.\n\nSe'ls acaba d'enviar un recordatori. El termini es tanca dimecres.`
+      `Encara no han contestat per a la setmana ${weekLabelLlarg(targetWeek)}: ${pendents.join(', ')}.\n\nSe'ls acaba d'enviar un recordatori. El termini es tanca ${deadlineLabel(tanca)}.`
     );
   }
 
@@ -3045,7 +3045,7 @@ export async function recordatorisAutomatics(semana, ara = new Date()) {
  * persona — amb un batec cada hora, el marge de 12 h n'hauria enviat dos al dia
  * durant tota la finestra.
  */
-export async function sendReminders(establecimientoId, semana, { margeMs = RECORDATORI_MARGE_MS, employeeIds } = {}) {
+export async function sendReminders(establecimientoId, semana, { margeMs = RECORDATORI_MARGE_MS, employeeIds, ara = new Date() } = {}) {
   const template = await approvedBusinessTemplate('reminder');
   const targetWeek = semana || getNextWeek();
 
@@ -3065,6 +3065,7 @@ export async function sendReminders(establecimientoId, semana, { margeMs = RECOR
   const reminded = [];
   const fallits = [];
   const repetits = [];
+  const saltats = [];
   const semanaLabel = weekLabel(targetWeek);
 
   for (const emp of employees) {
@@ -3073,14 +3074,14 @@ export async function sendReminders(establecimientoId, semana, { margeMs = RECOR
 
     // Only remind if conversation exists and is NOT completed
     if (!conv || conv.estado === 'COMPLETADO') continue;
-    if (conv.fechaLimite && new Date(conv.fechaLimite).getTime() <= Date.now()) continue;
+    if (conv.fechaLimite && new Date(conv.fechaLimite).getTime() <= ara.getTime()) continue;
 
     // Ja se li ha recordat fa poc. El broadcast tenia guarda contra la doble
     // execució i això no: un cron que es dispari dues vegades li enviava dos
     // cops el mateix «encara no has contestat», que és la manera més ràpida de
     // fer que la gent deixi de llegir-los.
     if (conv.ultimoRecordatorio
-      && Date.now() - new Date(conv.ultimoRecordatorio).getTime() < margeMs) {
+      && ara.getTime() - new Date(conv.ultimoRecordatorio).getTime() < margeMs) {
       repetits.push(emp.nombre);
       continue;
     }
@@ -3097,7 +3098,12 @@ export async function sendReminders(establecimientoId, semana, { margeMs = RECOR
     // porta — i a més s'enduia la resta de l'equip.
     try {
       if (!MOCK_MODE && REMINDER_TEMPLATE) {
-        const parts = deadlineParts(conv.fechaLimite || await computeDeadline(targetWeek));
+        const deadline = conv.fechaLimite || await computeDeadline(targetWeek, ara);
+        if (!templateDeadlineMatches(template, deadline, ara)) {
+          saltats.push({ empleadoId: emp.id, nombre: emp.nombre, motiu: 'termini_no_es_dema' });
+          continue;
+        }
+        const parts = deadlineParts(deadline);
         await sendWhatsappTemplate(emp.telefonoWhatsapp, { name: REMINDER_TEMPLATE, bodyParams: template?.bodyParameters === 4 ? [emp.nombre, semanaLabel, parts.date, parts.time] : [emp.nombre, semanaLabel] });
       } else {
         await sendWhatsappMessage(emp.telefonoWhatsapp, mensaje);
@@ -3128,6 +3134,7 @@ export async function sendReminders(establecimientoId, semana, { margeMs = RECOR
     detalle: reminded,
     fallits,
     repetits,
+    saltats,
   };
 }
 
