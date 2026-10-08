@@ -34,7 +34,7 @@ export function bridgeToken(config: HorariaConfig, request: { method: string; ta
   return `${payload}.${createHmac("sha256", config.secret).update(payload).digest("base64url")}`;
 }
 
-export async function callHoraria(config: HorariaConfig, session: AuthSession, input: OperationInput, projectWorkspace: string) {
+export async function callHoraria(config: HorariaConfig, session: AuthSession, input: OperationInput, projectWorkspace: string, renderPdf?: (data: Buffer, fileName: string) => Promise<Buffer>) {
   if (session.provider !== "local" || session.tenant.id !== config.installationId || !Object.hasOwn(config.users, session.user.id)) throw new Error("No tienes acceso a los horarios de esta instalación.");
   const op = resolveOperation(input);
   let body = Buffer.from(input.body ? JSON.stringify(input.body) : "");
@@ -49,11 +49,25 @@ export async function callHoraria(config: HorariaConfig, session: AuthSession, i
     const form = new FormData();
     for (const [key, value] of Object.entries(input.body ?? {})) form.set(key, String(value));
     form.set(workbook ? "workbook" : "imagen", new Blob([new Uint8Array(data)], { type: mime }), path.basename(input.uploadPath));
+    if (workbook) {
+      const format = input.body?.deliveryFormat ?? "pdf";
+      if (format !== "pdf" && format !== "xlsx") throw new Error("Formato de reparto no válido.");
+      form.set("deliveryFormat", format);
+      if (format === "pdf") {
+        if (!renderPdf) throw new Error("No está disponible la conversión segura del Excel corregido.");
+        const pdf = await renderPdf(data, path.basename(input.uploadPath));
+        if (pdf.length > 4 * 1024 * 1024 || !pdf.subarray(0, 5).equals(Buffer.from("%PDF-"))) throw new Error("PDF revisado no válido.");
+        form.set("pdfSourceSha256", createHash("sha256").update(data).digest("hex"));
+        form.set("pdfSha256", createHash("sha256").update(pdf).digest("hex"));
+        form.set("pdfPages", "1");
+        form.set("reviewedPdf", new Blob([new Uint8Array(pdf)], { type: "application/pdf" }), "reviewed.pdf");
+      }
+    }
     const serialized = new Request("http://localhost", { method: "POST", body: form });
     body = Buffer.from(await serialized.arrayBuffer());
     contentType = serialized.headers.get("content-type")!;
   }
-  if (body.length > 12 * 1024 * 1024) throw new Error("Solicitud demasiado grande.");
+  if (body.length > 15 * 1024 * 1024) throw new Error("Solicitud demasiado grande.");
   const token = bridgeToken(config, { method: op.method, target: op.target, contentType, body, kind: "user", actorId: session.user.id, employeeId: config.users[session.user.id].employeeId });
   const response = await privateHorariaRequest(config.baseUrl, op.target, { method: op.method, headers: { "x-aibrain-authorization": token, ...(contentType ? { "content-type": contentType } : {}) }, body: body.length ? body : undefined, signal: AbortSignal.timeout(op.effect === "ai" || op.effect === "draft" ? 20 * 60_000 : 90_000) });
   const text = await response.text();

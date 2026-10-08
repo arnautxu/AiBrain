@@ -90,10 +90,27 @@ el fitxer corregit es conserva i la resposta mostra el bloqueig, sense enviar.
 
 Després de revisar, `schedules.reviewed-send` utilitza la confirmació existent
 del xat. El servei torna a validar identitat, botiga, versió i destinatari.
-Puja els bytes exactes a Meta i envia un document XLSX, sense usar la plantilla
-PDF. Requereix una entrada de WhatsApp del destinatari durant les darreres
-24 hores; si falta, cal que aquest respongui abans. No es contacta una altra
-persona ni es converteix el fitxer a PDF per superar aquest bloqueig.
+Per defecte, el nou retorn al xat prepara `deliveryFormat=pdf`: AiBrain converteix
+els bytes autoritzats de l’Excel corregit dins del sandbox documental, amb la
+seva àrea d’impressió original i una única pàgina. El model no aporta cap PDF,
+URL ni rebut de conversió. El pont intern signa conjuntament els dos fitxers,
+el hash de l’Excel origen i el hash del PDF. horarIA valida el llibre contra
+l’original i conserva l’Excel intacte i el PDF derivat en l’estat privat.
+
+La revisió vincula PDF, Excel, botiga, destinatari i plantilla; un canvi
+invalida la confirmació. Abans d’enviar es torna a consultar Meta i es requereix
+la plantilla configurada APPROVED, capçalera DOCUMENT i tres variables.
+Es puja el PDF congelat a Meta i s’envia el seu media ID dins de la plantilla,
+sense URL pública ni regeneració des dels torns desats. Aquest canal no exigeix
+cap entrada recent del destinatari. Si falta aprovació o conversió vàlida,
+es bloqueja; no recorre a un document lliure com a alternativa.
+
+El canal explícit `deliveryFormat=xlsx` i els rebuts antics continuen enviant
+l’Excel exacte amb la finestra de 24 hores. Els IDs de revisió PDF i XLSX són
+diferents: un rebut antic XLSX no acredita un PDF, ni es canvia silenciosament
+un enviament acceptat o incert. Les revisions repetides conserven els bytes
+del PDF ja desat, fins i tot si una conversió posterior varia metadades.
+El rebut d’enviament conté el hash del fitxer enviat i el de l’Excel origen.
 
 El rebut distingeix `reviewed`, `sending`, `accepted` i `uncertain`.
 `accepted` significa que Meta ha retornat un identificador de missatge,

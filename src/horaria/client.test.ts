@@ -7,10 +7,44 @@ import { describe, it, expect, vi } from "vitest";
 import type { AuthSession } from "@/auth/types";
 import type { InstallationConfig } from "@/config/installation-schema";
 import { callHoraria, loadHorariaConfig, registerHorariaReviewSource, type HorariaConfig } from "./client";
+import { generateLocalDocument } from "@/runtime/documents/local-document-generator";
 vi.mock("server-only", () => ({}));
 const session = { provider: "local", user: { id: "user-a" }, tenant: { id: "shop-a" } } as AuthSession;
 const config: HorariaConfig = { installationId: "shop-a", baseUrl: "http://127.0.0.1:1", secret: "test-only-secret-with-at-least-32-characters", users: { "user-a": { employeeId: 42, backgroundOperations: [] } }, eventsEnabled: false };
 describe("private horarIA transport", () => {
+  it("binds the server-rendered PDF to the exact authorized corrected workbook, ignoring model-supplied provenance", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "horaria-reviewed-pdf-"));
+    const workbook = await generateLocalDocument({ format: "xlsx", title: "Fixture", content: "Synthetic fixture", rows: [["Person", "Hours"], ["Test", "15:00–20:45"]] });
+    const pdf = Buffer.from("%PDF-1.7\nserver-only conversion\n%%EOF");
+    const render = vi.fn(async (bytes: Buffer, fileName: string) => { expect(bytes).toEqual(workbook.data); expect(fileName).toBe("corrected.xlsx"); return pdf; });
+    let calls = 0;
+    const server = createServer(async (req, res) => {
+      calls++; const chunks = []; for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      const bytes = Buffer.concat(chunks), type = String(req.headers["content-type"]);
+      const [payload] = String(req.headers["x-aibrain-authorization"]).split(".");
+      expect(JSON.parse(Buffer.from(payload, "base64url").toString())).toMatchObject({ actorId: "user-a", bodyHash: createHash("sha256").update(bytes).digest("hex") });
+      const form = await new Response(bytes, { headers: { "content-type": type } }).formData();
+      expect(form.get("deliveryFormat")).toBe("pdf"); expect(form.get("pdfPages")).toBe("1");
+      expect(form.get("pdfSourceSha256")).toBe(createHash("sha256").update(workbook.data).digest("hex"));
+      expect(form.get("pdfSha256")).toBe(createHash("sha256").update(pdf).digest("hex"));
+      expect(Buffer.from(await (form.get("workbook") as File).arrayBuffer())).toEqual(workbook.data);
+      expect(Buffer.from(await (form.get("reviewedPdf") as File).arrayBuffer())).toEqual(pdf);
+      res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ deliveryFormat: "pdf", status: "reviewed" }));
+    });
+    server.listen(0, "127.0.0.1"); await new Promise<void>(resolve => server.once("listening", resolve));
+    try {
+      await writeFile(path.join(root, "corrected.xlsx"), workbook.data);
+      const address = server.address(); if (!address || typeof address === "string") throw new Error("No port");
+      const actual = { ...config, baseUrl: `http://127.0.0.1:${address.port}` };
+      const input = { operation: "schedules.review-upload", uploadPath: "corrected.xlsx", body: { establecimientoId: 3, sourceId: "a".repeat(64), pdfSha256: "forged", pdfSourceSha256: "forged", pdfPages: 99 } };
+      await expect(callHoraria(actual, session, input, root, render)).resolves.toMatchObject({ deliveryFormat: "pdf" });
+      await expect(callHoraria(actual, session, input, root)).rejects.toThrow("conversión segura");
+      await expect(callHoraria(actual, session, input, root, async () => Buffer.from("not PDF"))).rejects.toThrow("PDF revisado");
+      await expect(callHoraria(actual, session, { ...input, uploadPath: "../corrected.xlsx" }, root, render)).rejects.toThrow("proyecto");
+      await expect(callHoraria(actual, { ...session, tenant: { id: "other", name: "Other" } }, input, root, render)).rejects.toThrow("acceso");
+      expect(calls).toBe(1); expect(render).toHaveBeenCalledTimes(1);
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true }); }
+  });
   it("registers only the generated artifact whose bytes match its trusted receipt", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "horaria-original-"));
     const bytes = Buffer.from("test server-generated artifact"), sha256 = createHash("sha256").update(bytes).digest("hex");
