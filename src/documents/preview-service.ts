@@ -117,6 +117,12 @@ export interface DocumentToolRunner {
   run(command: string, args: readonly string[], options: ToolRunOptions): Promise<{ stdout: string; stderr: string }>;
 }
 
+export class DocumentToolProcessError extends StorageError {
+  constructor(readonly exitCode: number | null, readonly spawnCode: string | null = null) {
+    super("DOCUMENT_TOOL_FAILED", `Document tool failed with code ${spawnCode ?? exitCode ?? "unknown"}.`);
+  }
+}
+
 const MAXIMUM_TOOL_OUTPUT_BYTES = 4 * 1024 * 1024;
 const TOOL_TERMINATION_GRACE_MS = 250;
 
@@ -213,8 +219,8 @@ export class SystemDocumentToolRunner implements DocumentToolRunner {
         } else if (terminationReason === "output") {
           reject(new StorageError("DOCUMENT_TOOL_OUTPUT_TOO_LARGE", "Document tool output exceeded its safety limit."));
         } else if (spawnError || code !== 0) {
-          const failureCode = spawnError && "code" in spawnError ? String(spawnError.code) : String(code ?? "unknown");
-          reject(new StorageError("DOCUMENT_TOOL_FAILED", `Document tool failed with code ${failureCode}.`));
+          const spawnCode = spawnError && "code" in spawnError ? String(spawnError.code) : null;
+          reject(new DocumentToolProcessError(code, spawnCode));
         } else {
           resolve({
             stdout: Buffer.concat(stdout).toString("utf8"),
@@ -429,11 +435,26 @@ export class DocumentPreviewService {
             const pdfFilter = document.kind === "xlsx"
               ? 'pdf:calc_pdf_Export:{"SinglePageSheets":{"type":"boolean","value":"true"}}'
               : "pdf";
-            await this.runner.run(this.tools.soffice, [
+            const conversionStarted = performance.now();
+            const convert = (filter: string) => this.runner.run(this.tools.soffice, [
               `-env:UserInstallation=file://${path.join(work, "lo-profile")}`,
               "--headless", "--invisible", "--nologo", "--nodefault", "--nofirststartwizard",
-              "--norestore", "--safe-mode", "--convert-to", pdfFilter, "--outdir", work, inputPath,
-            ], { cwd: work, env: environment, timeoutMs: 60_000, signal: options.signal });
+              "--norestore", "--safe-mode", "--convert-to", filter, "--outdir", work, inputPath,
+            ], { cwd: work, env: environment,
+              timeoutMs: Math.max(1, 60_000 - (performance.now() - conversionStarted)), signal: options.signal });
+            try {
+              await convert(pdfFilter);
+            } catch (error) {
+              // Calc can crash drawing SinglePageSheets for an otherwise valid
+              // workbook. Retry once using its original print layout, retaining
+              // the same sandbox, source bytes and total conversion deadline.
+              if (document.kind !== "xlsx" || !(error instanceof DocumentToolProcessError) ||
+                  error.spawnCode !== null || ![134, 139].includes(error.exitCode ?? 0) ||
+                  options.signal?.aborted || performance.now() - conversionStarted >= 60_000) throw error;
+              await rm(path.join(work, "input.pdf"), { force: true });
+              await rm(path.join(work, "lo-profile"), { recursive: true, force: true });
+              await convert("pdf:calc_pdf_Export");
+            }
             pdfPath = path.join(work, "input.pdf");
           }
           if (this.tools.qpdf) {

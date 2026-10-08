@@ -166,6 +166,35 @@ i botiga. Vegeu `HORARIA_WHATSAPP.md` per al canal XLSX, la finestra de resposta
 i els rebuts del proveïdor. L’Excel retornat es pot desar per revisar-lo encara
 que Arnall no hagi acabat de configurar-ne la destinatària.
 
+## Acceptació i incidència de previsualització — 2026-10-08
+
+El candidat `a000342a4748737781bd01587e1ba9a5d2da2a78` ha passat
+Backend CI `37769762810`, publicació GHCR `37770359026` i desplegament
+`37770712285`, amb imatges i revisió verificades al servidor. El compte
+onboarding ha generat un esborrany real de Girona/2026-W42 amb el rebut de
+l’original. La disponibilitat de prova de dimecres només tarda s’ha respectat.
+El pla continua sent un esborrany: hi ha conflictes i condicions textuals que
+requereixen revisió humana abans d’un repartiment operatiu.
+
+El retorn del fitxer al xat ha exposat dues incidències del visor. Primer,
+el perfil seccomp del host era anterior al perfil ja provat i versionat:
+faltaven `close_range` i la resposta ENOSYS de `clone3`. S’ha conservat una
+còpia privada de l’estat anterior i s’ha promogut transaccionalment la mateixa
+imatge amb el perfil del candidat. A les 11:44 UTC, estat durable, app i worker
+confirmen SHA-256 del perfil
+`549dbde61695d3e4344e63270c1ffaace4d82a5a80bddf3ec411fead97e33eda`;
+live/ready són correctes. La ruta d’operacions també conserva aquest perfil
+per als desplegaments següents. No s’ha exposat `/proc` ni canviat dades o
+contactes d’horarIA.
+
+Després, Calc ha avortat en dibuixar `SinglePageSheets` per aquest llibre.
+La conversió del mateix XLSX amb la impressió original ha produït una pàgina
+A4 vàlida, comprovada amb qpdf i renderitzada amb Poppler dins del mateix
+contenidor restringit. El visor incorpora un únic reintent en aquest cas,
+conservant l’Excel original; vegeu `GENERATED_DOCUMENT_ARTIFACTS.md`.
+La prova autenticada de retorn i enviament s’ha de repetir amb aquesta
+correcció desplegada. Això no acredita una edició des de Microsoft Excel.
+
 ## Límits i gates
 
 L’operació `schedules.publish` continua generant un PDF des de la base de
@@ -179,7 +208,8 @@ La fidelitat estructural s’ha comparat amb el full original i s’ha revisat
 la impressió amb LibreOffice. No s’ha fet una acceptació en Microsoft Excel.
 L’exportació i les comprovacions locals no impliquen Backend CI remot,
 publicació GHCR, desplegament ni acceptació al xat d’Arnall. Cap d’aquests
-gates remots s’ha executat en aquesta tasca.
+gates remots s’havia executat en la validació original de setembre; l’estat
+del candidat d’octubre consta a la secció d’acceptació anterior.
 
 Validació de fórmules de 2026-09-21: comparació de les 2.500 fórmules amb
 l’original, sense diferències. S’han recalculat amb LibreOffice dos llibres
