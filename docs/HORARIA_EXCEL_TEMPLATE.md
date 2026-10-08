@@ -199,6 +199,13 @@ correcció desplegada. Això no acredita una edició des de Microsoft Excel.
 
 ## PDF de la versió corregida — candidat 2026-10-08
 
+La conversió utilitza `state/document-previews`, l’arrel privada admesa pel
+conversor de producció. Un identificador derivat de `horaria-print-v1`, el
+xat i el SHA de l’Excel separa el PDF d’impressió de les previsualitzacions
+de full complet. No ampliar les arrels del sandbox per afegir un canal.
+La primera acceptació real va detectar el rebuig de l’arrel alternativa
+amb codi 78; cal provar també aquesta frontera a la imatge de producció.
+
 El servidor converteix el fitxer retornat, no les files de `schedules.publish`.
 La conversió utilitza el mateix sandbox, cua de conversió, control d’espai,
 qpdf i comprovacions d’integritat que els documents d’AiBrain. Un espai privat

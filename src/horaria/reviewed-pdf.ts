@@ -11,14 +11,15 @@ export async function renderReviewedSchedulePdf(installation: Readonly<Installat
   const validated = validateUploadedDocument({ fileName, declaredMimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", data });
   if (validated.kind !== "xlsx") throw new Error("Cal un Excel .xlsx per preparar el PDF revisat.");
   const services = await documentServicesForUser(installation, userId);
-  // Dedicated identities/root keep print-layout PDFs separate from whole-sheet chat previews.
+  // Dedicated identities keep print PDFs separate from whole-sheet previews,
+  // inside the conversion root already allowed by the production sandbox.
   const key = createHash("sha256").update(`horaria-print-v1:${threadId}:${validated.sha256}`).digest("hex");
   const uploadId = `${key.slice(0, 8)}-${key.slice(8, 12)}-5${key.slice(13, 16)}-a${key.slice(17, 20)}-${key.slice(20, 32)}`;
   return services.storageGate.run(async () => {
     const staged = await services.staging.stage({ threadId, uploadId, validated: { ...validated, fileName: "reviewed.xlsx" }, data });
     const previews = new DocumentPreviewService({
       stagingRoot: services.manifest.roots.staging,
-      previewRoot: path.join(services.manifest.roots.userRoot, "state", "horaria-reviewed-pdf"),
+      previewRoot: path.join(services.manifest.roots.userRoot, "state", "document-previews"),
       lockManager: services.locks, tools: services.toolchain, conversionGate: services.conversionGate,
       spreadsheetLayout: "print",
     });
