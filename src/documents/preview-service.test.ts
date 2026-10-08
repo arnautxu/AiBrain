@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DocumentPreviewService,
+  DocumentToolProcessError,
   SystemDocumentToolRunner,
   type DocumentToolRunner,
 } from "@/documents/preview-service";
@@ -11,6 +12,8 @@ import { FileDocumentStagingStore } from "@/documents/staging-store";
 import { validateUploadedDocument } from "@/documents/upload-validation";
 import { generatedPngFixture } from "../../tests/helpers/png-fixture";
 import { ResourceLockManager } from "@/storage/resource-lock";
+import { StorageError } from "@/storage/errors";
+import { generateLocalDocument } from "@/runtime/documents/local-document-generator";
 
 const THREAD_ID = "11111111-1111-4111-8111-111111111111";
 const UPLOAD_ID = "22222222-2222-4222-8222-222222222222";
@@ -60,6 +63,71 @@ describe("document preview service", () => {
 
   afterEach(async () => {
     await rm(root, { recursive: true, force: true });
+  });
+
+  it.each([134, 139])("uses original print layout after Calc whole-sheet crash %s without changing the workbook", async (exitCode) => {
+    const generated = await generateLocalDocument({ format: "xlsx", title: "Synthetic schedule", content: "Fixture", rows: [["Person", "Hours"], ["Test", "15:00–20:45"]] });
+    const staged = await new FileDocumentStagingStore(stagingRoot, locks).stage({
+      threadId: THREAD_ID, uploadId: UPLOAD_ID, data: generated.data,
+      validated: validateUploadedDocument({ fileName: "schedule.xlsx", declaredMimeType: generated.mimeType, data: generated.data }),
+    });
+    const filters: string[] = [], budgets: number[] = [], commands: string[] = [];
+    const runner: DocumentToolRunner = {
+      async run(command, args, options) {
+        commands.push(command);
+        if (command.endsWith("soffice")) {
+          filters.push(args[args.indexOf("--convert-to") + 1]); budgets.push(options.timeoutMs);
+          expect(args).toEqual(expect.arrayContaining(["--safe-mode", "--norestore", "--headless"]));
+          expect(await readFile(args.at(-1)!)).toEqual(generated.data);
+          const pdf = path.join(options.cwd, "input.pdf");
+          if (filters.length === 1) {
+            await writeFile(pdf, "incomplete crash output");
+            throw new DocumentToolProcessError(exitCode);
+          }
+          await expect(readFile(pdf)).rejects.toMatchObject({ code: "ENOENT" });
+          await writeFile(pdf, "%PDF-1.7\noriginal print layout fixture\n%%EOF");
+        }
+        if (command.endsWith("pdftoppm")) await writeFile(`${args.at(-1)}.png`, generatedPngFixture(16, 9));
+        return { stdout: "Pages: 1\nEncrypted: no\n", stderr: "" };
+      },
+    };
+    const service = new DocumentPreviewService({ stagingRoot, previewRoot, lockManager: locks, runner,
+      tools: { soffice: "/tools/soffice", pdfinfo: "/tools/pdfinfo", pdftoppm: "/tools/pdftoppm", qpdf: "/tools/qpdf" } });
+    const preview = await service.create(staged);
+    expect(preview).toMatchObject({ status: "ready", pages: 1, sourceSha256: staged.sha256 });
+    expect(filters).toEqual(['pdf:calc_pdf_Export:{"SinglePageSheets":{"type":"boolean","value":"true"}}', "pdf:calc_pdf_Export"]);
+    expect(budgets[1]).toBeLessThanOrEqual(budgets[0]);
+    expect(commands).toEqual(["/tools/soffice", "/tools/soffice", "/tools/qpdf", "/tools/pdfinfo", "/tools/pdftoppm"]);
+    expect(await readFile(path.join(stagingRoot, staged.relativePath))).toEqual(generated.data);
+    await expect(service.create(staged)).resolves.toEqual(preview);
+    expect(filters).toHaveLength(2);
+  });
+
+  it.each([
+    ["sandbox refusal", new DocumentToolProcessError(78)],
+    ["missing executable", new DocumentToolProcessError(null, "ENOENT")],
+    ["timeout", new StorageError("DOCUMENT_TOOL_TIMEOUT", "timeout")],
+    ["cancellation", new StorageError("DOCUMENT_OPERATION_ABORTED", "cancelled")],
+    ["unsafe PDF", new StorageError("DOCUMENT_PDF_UNSAFE", "unsafe")],
+  ] as const)("does not retry %s as a print-layout fallback", async (_reason, failure) => {
+    const generated = await generateLocalDocument({ format: "xlsx", title: "Fixture", content: "Fixture", rows: [["Test", 1]] });
+    const staged = await new FileDocumentStagingStore(stagingRoot, locks).stage({
+      threadId: THREAD_ID, uploadId: UPLOAD_ID, data: generated.data,
+      validated: validateUploadedDocument({ fileName: "fixture.xlsx", declaredMimeType: generated.mimeType, data: generated.data }),
+    });
+    let calls = 0;
+    const service = new DocumentPreviewService({ stagingRoot, previewRoot, lockManager: locks,
+      runner: { async run() { calls++; throw failure; } },
+      tools: { soffice: "/tools/soffice", pdfinfo: "/tools/pdfinfo", pdftoppm: "/tools/pdftoppm" }, requireQpdf: false });
+    await expect(service.create(staged)).rejects.toBe(failure);
+    expect(calls).toBe(1);
+    expect(await readdir(path.join(previewRoot, THREAD_ID, UPLOAD_ID))).toEqual([]);
+  });
+
+  it("records the converter exit status without exposing its output", async () => {
+    await expect(new SystemDocumentToolRunner().run(process.execPath, ["-e", "process.exit(134)"], {
+      cwd: root, env: {}, timeoutMs: 5_000,
+    })).rejects.toMatchObject({ code: "DOCUMENT_TOOL_FAILED", exitCode: 134, spawnCode: null });
   });
 
   it("creates an idempotent text preview without invoking external tools", async () => {
