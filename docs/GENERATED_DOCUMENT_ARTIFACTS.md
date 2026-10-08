@@ -51,6 +51,13 @@ lee valores guardados del OOXML verificado, no ejecuta fórmulas ni conexiones,
 y señala cuando el límite de celdas hace parcial la vista. La descarga sigue
 entregando los bytes originales del XLSX. La representación PDF es una lectura
 local con LibreOffice, no una sesión editable de Microsoft Excel.
+Si Calc aborta o sufre una violación de segmento al dibujar el modo
+`SinglePageSheets` (salida 134/139), el visor reintenta una sola vez usando
+la configuración de impresión original del libro. Conserva los mismos bytes,
+aislamiento, validación PDF y presupuesto total de 60 segundos; elimina antes
+el PDF incompleto y el perfil temporal. No reintenta rechazos del sandbox,
+errores de validación, cancelaciones ni límites de tiempo. Esta representación
+puede tener varias páginas, que se muestran con la navegación existente.
 Los libros XLSM de la red documental siguen el extractor OOXML de solo datos:
 no se carga ni ejecuta `vbaProject.bin`, no se recalculan fórmulas y la UI
 muestra valores guardados en una superficie de libro protegida.
