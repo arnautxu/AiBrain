@@ -102,10 +102,11 @@ export function inspectWorkbook(bytes) {
     const target = relationship?.attrs.Target;
     check(target === `worksheets/sheet${index + 1}.xml` || target === `/xl/worksheets/sheet${index + 1}.xml`);
     const tree = trees.get(`xl/worksheets/sheet${index + 1}.xml`); check(tree?.uri === SS && tree.name === 'worksheet');
-    const cells = new Map();
+    const cells = new Map(), styles = new Map();
     for (const cell of descendants(child(tree, 'sheetData'), 'c')) {
       check(cell.uri === SS && Object.keys(cell.attrs).every(k => ['r', 's', 't'].includes(k)) && cell.children.every(c => c.uri === SS && ['f', 'v', 'is'].includes(c.name)));
       const address = cell.attrs.r; check(/^[A-Z]{1,3}[1-9]\d{0,5}$/.test(address) && !cells.has(address));
+      check(!styles.has(address)); styles.set(address, cell.attrs.s || '0');
       const formula = child(cell, 'f');
       let value = text(child(cell, 'v'));
       if (cell.attrs.t === 's') { const key = Number(value); check(Number.isSafeInteger(key) && key >= 0 && key < strings.length); usedStrings.add(key); value = strings[key]; }
@@ -114,7 +115,7 @@ export function inspectWorkbook(bytes) {
       if (formula) value = ''; // Formula caches may be recalculated by Excel.
       if (value !== '' || formula) cells.set(address, { value, ...(formula ? { formula: { text: text(formula), type: formula.attrs.t || '', si: formula.attrs.si || '', ref: formula.attrs.ref || '' } } : {}) });
     }
-    return { name: sheet.attrs.name, cells, tree };
+    return { name: sheet.attrs.name, cells, styles, tree };
   });
   check(strings.every((value, i) => !value || usedStrings.has(i)), 'L’Excel conserva textos ocults sense ús. Cal un fitxer d’una sola botiga.');
   return { grid, trees };
@@ -138,6 +139,14 @@ export function compareReviewedWorkbook(sourceBytes, returnedBytes) {
   }
   for (const [index, sheet] of returned.grid.entries()) {
     const original = source.grid[index]; check(sheet.name === original.name, 'Els noms dels fulls han canviat.');
+    const rowLayout = tree => descendants(child(tree, 'sheetData'), 'row').map(row => {
+      const attrs = { ...row.attrs }; delete attrs.spans; // Excel may recompute occupied-column hints.
+      return { attrs };
+    });
+    check(stable(rowLayout(sheet.tree)) === stable(rowLayout(original.tree)), 'S’han canviat les files, alçades o visibilitat del full.');
+    for (const address of new Set([...original.styles.keys(), ...sheet.styles.keys()])) {
+      check((original.styles.get(address) || '0') === (sheet.styles.get(address) || '0'), `S’ha canviat el format de ${sheet.name}!${address}.`);
+    }
     const fixedSheet = tree => ({ ...tree, children: tree.children.filter(n => !['sheetData', 'sheetViews', 'dimension'].includes(n.name)) });
     check(stable(fixedSheet(sheet.tree)) === stable(fixedSheet(original.tree)), 'S’ha canviat l’estructura, les fórmules de format o la impressió del full.');
     const addresses = new Set([...original.cells.keys(), ...sheet.cells.keys()]);

@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { crc32, deflateRawSync } from 'node:zlib';
 import { inspectWorkbook, compareReviewedWorkbook } from '../src/integration/reviewed-workbook.js';
-import { createReviewedScheduleHandlers } from '../src/integration/reviewed-schedules.js';
+import { createReviewedScheduleHandlers, sendReviewedExcel } from '../src/integration/reviewed-schedules.js';
 
 const template = JSON.parse(await readFile(new URL('../../../../src/runtime/documents/templates/arnall-schedule.json', import.meta.url), 'utf8'));
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -73,6 +73,8 @@ test('foreign shop/person, hidden auxiliary changes, formulas, extra sheets, ext
   bad.push({ ...files.corrected, 'xl/worksheets/sheet5.xml': '<worksheet/>' });
   bad.push({ ...files.corrected, 'xl/_rels/workbook.xml.rels': files.corrected['xl/_rels/workbook.xml.rels'].replace('Target="worksheets/sheet1.xml"', 'Target="https://example.test/private" TargetMode="External"') });
   bad.push({ ...files.corrected, 'xl/sharedStrings.xml': '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>Other shop hidden data</t></si></sst>' });
+  bad.push({ ...files.corrected, 'xl/worksheets/sheet1.xml': files.corrected['xl/worksheets/sheet1.xml'].replace(/(<c r="E6"[^>]*s=")[^"]+/, '$19999') });
+  bad.push({ ...files.corrected, 'xl/worksheets/sheet1.xml': files.corrected['xl/worksheets/sheet1.xml'].replace(/(<row r="6"[^>]*ht=")[^"]+/, '$1999') });
   for (const parts of bad) assert.throws(() => compareReviewedWorkbook(files.sourceBytes, zip(parts)));
   const corrupt = Buffer.from(files.correctedBytes); corrupt[100] ^= 1;
   assert.throws(() => inspectWorkbook(corrupt));
@@ -111,4 +113,33 @@ test('unknown provider outcome survives re-reading and never automatically retri
   const f = fixture(), { sendBody } = await f.prepare(); f.input.failSend = true;
   assert.equal((await f.call('send', sendBody)).body.status, 'uncertain');
   assert.equal((await f.call('send', sendBody)).code, 409); assert.equal(f.calls.length, 1);
+});
+test('Meta transport uploads the exact XLSX then sends only that media to the selected phone', async t => {
+  const values = { HORARIA_ALLOW_DELIVERY: '1', WHATSAPP_MOCK: 'false', WHATSAPP_PROVIDER: 'meta', WHATSAPP_TOKEN: 'synthetic-test-token', WHATSAPP_PHONE_NUMBER_ID: '1000' };
+  const before = Object.fromEntries(Object.keys(values).map(key => [key, process.env[key]]));
+  Object.assign(process.env, values);
+  t.after(() => { for (const [key, value] of Object.entries(before)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    requests.push(url);
+    assert.equal(options.method, 'POST');
+    if (requests.length === 1) {
+      assert.equal(url, 'https://graph.facebook.com/v23.0/1000/media');
+      const file = options.body.get('file');
+      assert.equal(file.name, 'reviewed.xlsx');
+      assert.equal(file.type, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      assert.ok(Buffer.from(await file.arrayBuffer()).equals(files.correctedBytes));
+      return Response.json({ id: '2000' });
+    }
+    assert.equal(url, 'https://graph.facebook.com/v23.0/1000/messages');
+    const message = JSON.parse(options.body);
+    assert.equal(message.to, '+34600000000');
+    assert.equal(message.type, 'document');
+    assert.equal(message.document.id, '2000');
+    assert.equal(message.document.filename, 'reviewed.xlsx');
+    assert.equal(message.template, undefined);
+    return Response.json({ messages: [{ id: 'wamid.synthetic' }] });
+  });
+  assert.deepEqual(await sendReviewedExcel('+34600000000', files.correctedBytes, 'reviewed.xlsx'), { providerMessageId: 'wamid.synthetic', providerMediaId: '2000' });
+  assert.equal(requests.length, 2);
 });

@@ -2,6 +2,7 @@ import { prisma } from '../services/prisma.js';
 import { ajustos } from '../utils/ajustos.js';
 import { properaFinestra, quiRepLaPeticio } from '../services/whatsapp.js';
 import { readWhatsappConfiguration } from '../controllers/whatsapp.js';
+import { zonaHoraria } from '../utils/zonaHoraria.js';
 
 // Configuration evidence only. Provider acceptance and a real reply need their own receipts.
 export function createReadinessHandler({ database = prisma, readSettings = ajustos, readConfiguration = readWhatsappConfiguration, now = () => new Date() } = {}) {
@@ -55,7 +56,7 @@ export function createReadinessHandler({ database = prisma, readSettings = ajust
       employees: { active: employees.length, withPhone: employees.length - missing.length, missingPhone: missing },
       manager: shop.managerLocal ? { ...identity(shop.managerLocal), active: shop.managerLocal.activo, hasPhone: hasPhone(shop.managerLocal) } : null,
       collection: stage(collection), automaticCollection: stage(automatic), pdfDelivery: stage(pdf),
-      collectionWindow: window ? { week: window.semana, opensAt: window.obre.toISOString(), closesAt: window.tanca.toISOString(), timeZone: 'Europe/Madrid' } : null,
+      collectionWindow: window ? { week: window.semana, opensAt: window.obre.toISOString(), closesAt: window.tanca.toISOString(), timeZone: zonaHoraria() } : null,
       templates: config.plantilles,
       acceptance: { outboundReceipt: 'not_checked', inboundReply: 'not_checked', reviewedExcelRedistribution: 'requires_reviewed_workbook' },
     });
