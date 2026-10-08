@@ -4,6 +4,110 @@ Estat del candidat: implementat i verificat localment. Aquest document no prova
 publicació, desplegament, canvi a Meta ni recepció real. La configuració de
 credencials és independent de l’activació del canal.
 
+## Diagnòstic per botiga i recordatoris amb termini relatiu
+
+`workflow.readiness` consulta `GET /api/integration/readiness` amb
+`establecimiento` obligatori. Aplica la mateixa identitat signada i permisos
+de botiga que la resta del servei. Retorna bloquejos separats de recollida,
+automatització i PDF, persones sense telèfon, responsable assignat i la
+finestra activa o següent a Europe/Madrid. No retorna números de telèfon,
+no activa ajustos, no envia missatges i no modifica dades.
+
+`configurationReady` només acredita configuració comprovada en aquella
+consulta. Els rebuts d’enviament i la resposta real continuen pendents de
+comprovació específica. La consulta identifica que repartir l’Excel corregit
+requereix un fitxer retornat i revisat. Vegeu
+`HORARIA_EXCEL_TEMPLATE.md`, apartat «Revisió i repartiment».
+
+La plantilla real de recordatori pot dir «El termini finalitza demà».
+El servei detecta aquesta expressió en el catàleg de Meta i només envia
+la plantilla quan el termini cau l’endemà segons el calendari de Madrid,
+també durant els canvis d’hora. En cas contrari retorna
+`saltats[].motiu = termini_no_es_dema`, sense enviar ni marcar recordatori.
+Les plantilles que només indiquen data i hora conserven el comportament
+anterior. L’avís opcional a la responsable mostra el termini real, sense
+fixar-lo a dimecres. Es renova la revisió del catàleg d’eines perquè els
+xats existents puguin consultar el nou diagnòstic.
+
+### Acceptació limitada, 2026-10-08
+
+Sobre la revisió desplegada `7789a4b72fbd0572e5d18b5d00aefdde3c57d1eb`,
+Meta retorna APPROVED per a `solicitud_preferencies:ca`,
+`recordatori_broadcast:ca` i `enviament_horari_pdf_document:ca`.
+L’última conserva capçalera DOCUMENT i tres variables de cos, i les tres
+coincideixen amb les vinculacions del servei. L’usuari confirma que el PDF
+amb document funciona; aquesta sessió no ha fet un nou enviament de PDF.
+
+Amb autorització explícita de l’usuari s’ha enviat un sol recordatori al
+contacte de prova seleccionat (employeeId 123, Girona), sense reiniciar
+la conversa ni contactar altres persones. El proveïdor l’ha acceptat a
+les 10:34:43 UTC. L’usuari ha confirmat la recepció i resposta; la lectura
+del servidor acredita entrada a les 10:35:10, preferència activa de la
+setmana 2026-W42 desada a les 10:35:21 amb `MIERCOLES: TARDE`, i resposta
+de confirmació a les 10:35:22. La conversa queda COMPLETADO. Aquesta prova
+afecta el registre de prova, no acredita un desplegament dels canvis nous.
+
+L’usuari ha indicat que Arnall configurarà els contactes i responsables
+reals. En la lectura d’aquesta sessió faltava responsable a S’Agaró i Torre
+Valentina i telèfon de la responsable de Palamós; hi havia també telèfons
+de treballadors pendents. L’automatisme global i el de totes les botigues
+continuaven apagats. No s’han modificat aquests ajustos ni destinatàries.
+La finestra configurada és dimarts 09:00 a dijous 13:00, Europe/Madrid;
+Arnall ha de validar-la abans d’activar cada botiga. El termini de la
+conversa de prova era divendres 09/10 a les 13:00 perquè una petició manual
+fora del marge habitual concedeix almenys 24 hores.
+
+Les proves locals inclouen el rebuig de consultes a botigues alienes,
+bloquejos de preparació i zero enviaments/escriptures quan «demà» seria
+incorrecte. El circuit de retorn d’Excel té proves específiques de conservació
+exacta, aïllament, destinatari i no repetició.
+Backend CI, publicació GHCR, desplegament i acceptació del nou candidat
+s’han de comprovar separadament; aquesta prova en viu correspon només a
+la revisió desplegada indicada a dalt.
+
+## Excel corregit retornat al xat
+
+La generació i preview d’Arnall registren l’Excel original en el volum privat
+d’horarIA, a través d’un endpoint intern que no s’exposa al catàleg del model.
+El worker comprova el hash del rebut documental abans de registrar-lo.
+El resultat del draft inclou `reviewSourceId`, conservat en el rebut durable
+del torn. Les propostes antigues sense aquest rebut no s’importen silenciosament
+ni es regeneren per simular una revisió.
+
+L’usuari adjunta la versió corregida al mateix entorn privat d’AiBrain i
+executa `schedules.review-upload` amb la botiga i `sourceId` originals.
+La validació compara els torns i les dues línies d’hores amb l’original.
+Es conserven tots dos fitxers byte per byte, amb hashes diferents si hi ha
+canvis. No s’escriuen torns a la base de dades ni es recalcula el planificador.
+El retorn mostra cel·la, persona, valor anterior i nou, destinatari, hash del
+fitxer i `previewHash` que vincula aquella versió amb aquell telèfon.
+
+La destinatària habitual es resol des de la configuració de responsable
+de la botiga. Una responsable general pot indicar explícitament un altre
+`recipientEmployeeId` actiu de la mateixa botiga, incloent una prova limitada;
+els noms o números escrits al llibre no trien el receptor. Si falta contacte,
+el fitxer corregit es conserva i la resposta mostra el bloqueig, sense enviar.
+
+Després de revisar, `schedules.reviewed-send` utilitza la confirmació existent
+del xat. El servei torna a validar identitat, botiga, versió i destinatari.
+Puja els bytes exactes a Meta i envia un document XLSX, sense usar la plantilla
+PDF. Requereix una entrada de WhatsApp del destinatari durant les darreres
+24 hores; si falta, cal que aquest respongui abans. No es contacta una altra
+persona ni es converteix el fitxer a PDF per superar aquest bloqueig.
+
+El rebut distingeix `reviewed`, `sending`, `accepted` i `uncertain`.
+`accepted` significa que Meta ha retornat un identificador de missatge,
+no recepció al dispositiu. Es desa l’intent abans de contactar el proveïdor;
+si el procés cau o el resultat és incert, un reinici o repetició no reenvia.
+`schedules.reviewed-status` recupera el resultat. Un operador ha de resoldre
+els enviaments incerts amb evidència de Meta abans de plantejar-ne un altre.
+
+Els fitxers `review-source-*.json` i `reviewed-*.json` formen part del volum
+privat d’estat i les seves còpies de seguretat. Contenen els originals i
+rebuts; no són una memòria cau per purgar després d’enviar. L’accés exigeix
+la mateixa instal·lació, usuari i botiga que va crear l’original, i permisos
+vigents. Cap URL pública del llibre ni credencial de Meta entra al xat.
+
 ## Frontera d’execució
 
 Meta envia els missatges a `/api/horaria-events/webhook`. AiBrain només els

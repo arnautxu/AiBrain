@@ -26,6 +26,30 @@ async function setup() {
   return { context, config, run };
 }
 describe("horarIA chat boundary", () => {
+  it("retains the registered original receipt across draft retries and keeps reviewed delivery behind confirmation", async () => {
+    const { run, context } = await setup();
+    const draft: Record<string, unknown> = { draftOnly: true };
+    context.preview.mockImplementation(async value => { Object.assign(value, { reviewSourceId: "a".repeat(64) }); });
+    vi.mocked(callHoraria).mockResolvedValue(draft);
+    const input = { operation: "schedules.draft", body: { establecimientoId: 3, semana: "2026-W42" } };
+    expect((await run("run", input)).reviewSourceId).toBe("a".repeat(64));
+    expect((await run("run", input)).reviewSourceId).toBe("a".repeat(64));
+    expect(callHoraria).toHaveBeenCalledTimes(1);
+    const pending = await run("run", { operation: "schedules.reviewed-send", body: { establecimientoId: 3, reviewId: "b".repeat(64), sha256: "c".repeat(64), previewHash: "d".repeat(64) } });
+    expect(pending.confirmationRequired).toBe(true);
+    expect(callHoraria).toHaveBeenCalledTimes(1);
+    expect(() => resolveOperation({ operation: "schedules.review-source" })).toThrow();
+    expect(() => resolveOperation({ operation: "schedules.review-upload" })).toThrow("Excel");
+  });
+  it("queries workflow readiness without preparing a business change", async () => {
+    const { run } = await setup();
+    const input = { operation: "workflow.readiness", query: { establecimiento: 3 } };
+    vi.mocked(callHoraria).mockResolvedValue({ collection: { configurationReady: false, blockers: ["EMPLOYEE_PHONES_MISSING"] } });
+    const result = await run("run", input);
+    expect(result.collection.configurationReady).toBe(false);
+    expect(result.confirmationRequired).toBeUndefined();
+    expect(resolveOperation(input)).toMatchObject({ effect: "read", method: "GET", target: "/api/integration/readiness?establecimiento=3" });
+  });
   it("completes the draft and review with six pending prerequisite proposals, without confirmation or writes", async () => {
     const { run, context } = await setup();
     const requests = [1, 2, 3, 4].map(employeeId => ({ employeeId, maxHours: 40 }));

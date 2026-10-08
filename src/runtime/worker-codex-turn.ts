@@ -7,6 +7,7 @@ import { FileModelTurnQueue, type ModelTurnAdmission } from "@/runtime/model-tur
 import { HORARIA_NAMESPACE, HORARIA_TOOLS, handleHorariaToolCall, horariaInstructions } from "@/horaria/chat-tools";
 import { requiresFictionalScheduleArtifact } from "@/horaria/fictional-schedule-delivery";
 import { arnallScheduleForPreview } from "@/horaria/schedule-template";
+import { loadHorariaConfig, registerHorariaReviewSource } from "@/horaria/client";
 import { documentServicesForUser } from "@/documents/server-service";
 import { prepareWorkspaceDocumentPreview } from "@/documents/workspace-preview";
 import { serverReferenceInputs } from "@/documents/server-reference-inputs";
@@ -1878,6 +1879,7 @@ async function runWorkerCodexTurnAttempt(
               sourceMessage: chatRequest.message, runtimeThreadId: threadId, runtimeTurnId: horariaTurnId,
               projectWorkspace, background: Boolean(backgroundExecution),
               preview: async (data) => {
+                if (isRecord(data) && data.artifactPurpose === "reviewed-excel") return; // The attached original is the preview; never regenerate it.
                 if (!isRecord(data) || !Array.isArray(data.rows) || typeof data.title !== "string" || typeof data.previewHash !== "string") throw new Error("Previsualització d’horaris invàlida.");
                 const collection = data.artifactPurpose === "collection";
                 const arnallSchedule = collection ? undefined : arnallScheduleForPreview(runtime.config, data);
@@ -1895,6 +1897,16 @@ async function runWorkerCodexTurnAttempt(
                   sourceTurnId: chatRequest.assistantMessageId, permissions,
                 });
                 if (!result.response.success) throw new Error("No s’ha pogut crear la previsualització de l’horari.");
+                if (arnallSchedule) {
+                  const item = result.response.contentItems.find(item => item.type === "inputText");
+                  const document = item && "text" in item ? JSON.parse(String(item.text)) as { fileName: string; sha256: string } : null;
+                  if (!document) throw new Error("Falta el rebut de l’Excel original.");
+                  const source = await registerHorariaReviewSource(await loadHorariaConfig(runtime.config), horariaSession, {
+                    establecimientoId: arnallSchedule.establishmentId, semana: arnallSchedule.week, fileName: document.fileName, sha256: document.sha256,
+                  }, projectWorkspace);
+                  data.reviewSourceId = source.sourceId;
+                  data.reviewSourceSha256 = source.sha256;
+                }
                 for (const artifact of result.artifacts) {
                   if (projectedDocumentArtifactIds.has(artifact.id)) continue;
                   await emit({ type: "artifact", item: artifact }, { envelope, key: `artifact:horaria:${artifact.id}` });

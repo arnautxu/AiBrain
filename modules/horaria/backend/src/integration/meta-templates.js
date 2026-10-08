@@ -16,9 +16,24 @@ export async function readMetaTemplates() {
     const parameters = [...String(body?.text || '').matchAll(/\{\{(\d+)\}\}/g)].map(m => Number(m[1]));
     const count = parameters.length ? Math.max(...parameters) : 0;
     if (count > 50 || new Set(parameters).size !== count) throw new Error('Variables de plantilla no admeses.');
+    const tomorrow = /\b(?:finalitza|finaliza|vence|acaba|ends|expires)\s+(?:demà|mañana|tomorrow)(?=[\s,.;:!?]|$)/iu.test(String(body?.text || ''));
     return { name: template.name, language: template.language, status: template.status,
+      ...(tomorrow ? { relativeDeadline: 'tomorrow' } : {}),
       bodyParameters: count, headerFormat: template.components?.find(c => c.type === 'HEADER')?.format || null };
   });
+}
+
+// Compare calendar days in the shop's timezone: a DST day need not last 24 hours.
+export function templateDeadlineMatches(template, deadline, now = new Date()) {
+  if (template?.relativeDeadline !== 'tomorrow') return true;
+  const day = value => {
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return NaN;
+    const parts = new Intl.DateTimeFormat('en', { timeZone: 'Europe/Madrid', year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(date);
+    const part = type => Number(parts.find(p => p.type === type)?.value);
+    return Date.UTC(part('year'), part('month') - 1, part('day')) / 86400000;
+  };
+  return day(deadline) - day(now) === 1;
 }
 
 export function requireApprovedTemplate(templates, name, language, counts, documentHeader = false) {
