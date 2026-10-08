@@ -293,6 +293,7 @@ export class DocumentPreviewService {
     tools: DocumentToolchain;
     conversionGate?: DocumentConversionAdmission;
     requireQpdf?: boolean;
+    spreadsheetLayout?: "whole-sheet" | "print";
     now?: () => number;
   }) {
     if (!path.isAbsolute(options.stagingRoot) || !path.isAbsolute(options.previewRoot)) {
@@ -310,6 +311,7 @@ export class DocumentPreviewService {
       );
     }
     this.now = options.now ?? Date.now;
+    this.spreadsheetLayout = options.spreadsheetLayout ?? "whole-sheet";
     this.tools = {
       soffice: validateToolPath("soffice", options.tools.soffice, true)!,
       pdfinfo: validateToolPath("pdfinfo", options.tools.pdfinfo, true)!,
@@ -323,6 +325,7 @@ export class DocumentPreviewService {
   private readonly runner: DocumentToolRunner;
   private readonly conversionGate: DocumentConversionAdmission | null;
   private readonly now: () => number;
+  private readonly spreadsheetLayout: "whole-sheet" | "print";
 
   private previewLocations(threadId: string, uploadId: string) {
     if (!UUID.test(threadId) || !UUID.test(uploadId)) {
@@ -433,7 +436,7 @@ export class DocumentPreviewService {
             // strips. Whole-sheet export keeps cell styles, merges, drawings
             // and charts together on one vector PDF page per sheet.
             const pdfFilter = document.kind === "xlsx"
-              ? 'pdf:calc_pdf_Export:{"SinglePageSheets":{"type":"boolean","value":"true"}}'
+              ? this.spreadsheetLayout === "print" ? "pdf:calc_pdf_Export" : 'pdf:calc_pdf_Export:{"SinglePageSheets":{"type":"boolean","value":"true"}}'
               : "pdf";
             const conversionStarted = performance.now();
             const convert = (filter: string) => this.runner.run(this.tools.soffice, [
@@ -448,7 +451,7 @@ export class DocumentPreviewService {
               // Calc can crash drawing SinglePageSheets for an otherwise valid
               // workbook. Retry once using its original print layout, retaining
               // the same sandbox, source bytes and total conversion deadline.
-              if (document.kind !== "xlsx" || !(error instanceof DocumentToolProcessError) ||
+              if (document.kind !== "xlsx" || this.spreadsheetLayout === "print" || !(error instanceof DocumentToolProcessError) ||
                   error.spawnCode !== null || ![134, 139].includes(error.exitCode ?? 0) ||
                   options.signal?.aborted || performance.now() - conversionStarted >= 60_000) throw error;
               await rm(path.join(work, "input.pdf"), { force: true });

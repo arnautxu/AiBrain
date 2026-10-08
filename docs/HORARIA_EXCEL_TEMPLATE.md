@@ -158,12 +158,14 @@ Una prova amb openpyxl ha detectat precisament aquesta reescriptura i s’ha
 rebutjat. La prova d’un retorn des de Microsoft Excel continua sent un gate
 separat de les proves de correcció de cel·les conservant OOXML.
 
-`schedules.reviewed-send` envia aquesta versió exacta al destinatari revisat
-després de la confirmació del xat. Si canvia el telèfon o el responsable,
+`schedules.reviewed-send` envia per defecte el PDF congelat de la impressió
+d’aquest Excel corregit, amb la plantilla Meta aprovada, després de la
+confirmació del xat. L’Excel original i el retornat es conserven byte per byte.
+Només una petició explícita `deliveryFormat=xlsx` reparteix l’Excel directament. Si canvia el telèfon o el responsable,
 cal revisar de nou el mateix fitxer; un resultat incert no es reintenta
 automàticament. Cada fitxer i rebut estan vinculats a usuari, instal·lació
-i botiga. Vegeu `HORARIA_WHATSAPP.md` per al canal XLSX, la finestra de resposta
-i els rebuts del proveïdor. L’Excel retornat es pot desar per revisar-lo encara
+i botiga. Vegeu `HORARIA_WHATSAPP.md` per al PDF amb plantilla, el canal XLSX
+opcional i els rebuts del proveïdor. L’Excel retornat es pot desar per revisar-lo encara
 que Arnall no hagi acabat de configurar-ne la destinatària.
 
 ## Acceptació i incidència de previsualització — 2026-10-08
@@ -194,6 +196,26 @@ contenidor restringit. El visor incorpora un únic reintent en aquest cas,
 conservant l’Excel original; vegeu `GENERATED_DOCUMENT_ARTIFACTS.md`.
 La prova autenticada de retorn i enviament s’ha de repetir amb aquesta
 correcció desplegada. Això no acredita una edició des de Microsoft Excel.
+
+## PDF de la versió corregida — candidat 2026-10-08
+
+El servidor converteix el fitxer retornat, no les files de `schedules.publish`.
+La conversió utilitza el mateix sandbox, cua de conversió, control d’espai,
+qpdf i comprovacions d’integritat que els documents d’AiBrain. Un espai privat
+de previews i IDs específics evita reutilitzar una preview de full complet:
+s’utilitza `pdf:calc_pdf_Export` amb l’àrea i format d’impressió del llibre.
+El resultat ha de tenir una pàgina i com a màxim 4 MiB; qualsevol error atura
+la preparació. El PDF i els originals entren al backup del volum horarIA.
+No s’importen torns ni s’activen automatismes o nous contactes.
+
+La prova anterior sobre `4d43ad3da5e4f6551f0a90f74e10d631efc6f1fc` acredita
+retorn d’Excel corregit al xat onboarding i enviament XLSX a l’únic contacte
+de prova autoritzat (123): Meta l’ha acceptat a les 12:09 UTC i el document
+s’ha observat rebut al WhatsApp. S’ha conservat el canvi de dimecres
+14:45–20:45 a 15:00–20:45, sense torns desats ni automatismes activats.
+Aquesta evidència correspon al canal XLSX; el nou canal PDF requereix els
+seus propis gates de CI, GHCR, desplegament i prova autenticada amb plantilla.
+No acredita una edició des de Microsoft Excel ni el repartiment real d’Arnall.
 
 ## Límits i gates
 
