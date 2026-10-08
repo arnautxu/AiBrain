@@ -135,3 +135,27 @@ explícitamente esfuerzo `medium`, conserva el modelo conectado, los límites,
 la ausencia de herramientas y la validación determinista posterior. Esto no
 certifica que el problema esté resuelto: requiere repetir el borrador real tras
 el despliegue y verificar su Excel, conflictos y ausencia de escrituras.
+
+## Acceptació de la guia des del xat, 2026-10-08
+
+La prova autenticada amb Onboarding ha creat una botiga `PROVA GUIA 20261008`
+i quatre fitxes fictícies sense telèfons ni correus. Ha verificat al xat i a les
+dades guardades l'alta de botiga, l'alta individual, la importació de tres
+treballadors, el canvi d'hores màximes, la regla de cobertura i una absència
+pendent. La recollida automàtica continua desactivada.
+
+La prova ha detectat tres defectes: una petició administrativa que esmentava
+una guia d'horaris ficticis activava erròniament l'exigència d'Excel; l'alta
+acceptava disponibilitat en prosa i la convertia silenciosament en disponibilitat
+completa; i el desat manual de preferències enviava camps absents de l'esquema
+vigent i ometia els torns per dia. Les correccions distingeixen la petició de
+generar un horari, rebutgen disponibilitat mal formada abans d'escriure, i desen
+`turnosPorDia` amb validació, lectura de la preferència activa més recent,
+preservació de camps omesos i comprovació d'accés al treballador. El catàleg
+del xat descriu els formats i exigeix rellegir les restriccions desades.
+
+Les proves locals del servei inclouen el desat real dels controladors sobre
+dobles de persistència, restriccions per dia, actualitzacions parcials,
+contradiccions i denegació entre botigues; mai connecten a producció.
+Backend CI, publicació GHCR, desplegament i repetició autenticada dels casos
+fallits són gates separats. Aquest registre no acredita encara aquests gates.
