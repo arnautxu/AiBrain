@@ -62,6 +62,46 @@ afterEach(() => {
 });
 
 describe("AutomationsPanel audience", () => {
+  it("preserves an owner's private project when an administrator edits the prompt", async () => {
+    const task = { ...viewerTask, audience: { membershipPolicy: "current" as const, userIds: [ownerId], groupIds: [] }, access: { canManage: true, canViewResults: true } };
+    const changes: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        const body = JSON.parse(String(init.body));
+        changes.push(body);
+        return Response.json({ task: { ...task, ...body } });
+      }
+      return Response.json({ tasks: [task], audienceDirectory: { membershipPolicy: "current", currentUserId: memberId, users: [{ id: ownerId, name: "Owner" }], groups: [] } });
+    }));
+    render(<AutomationsPanel open projects={[]} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Editar Informe compartido" }));
+    expect(screen.getByRole("combobox", { name: "Proyecto" })).toHaveValue(projectId);
+    expect(screen.getByRole("option", { name: "Operaciones" })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Qué debe hacer" }), { target: { value: "Revisa un lote y conserva el resto pendiente." } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(changes).toHaveLength(1));
+    expect(changes[0]).not.toHaveProperty("projectId");
+    expect(changes[0]).not.toHaveProperty("projectName");
+    expect(changes[0]).toMatchObject({ prompt: "Revisa un lote y conserva el resto pendiente.", audience: task.audience, timeZone: task.timeZone, schedule: task.schedule });
+  });
+  it("still submits an actual project change for server validation", async () => {
+    const task = { ...viewerTask, audience: { membershipPolicy: "current" as const, userIds: [ownerId], groupIds: [] }, access: { canManage: true, canViewResults: true } };
+    let submitted: Record<string, unknown> | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        submitted = JSON.parse(String(init.body));
+        return Response.json({ task: { ...task, ...submitted } });
+      }
+      return Response.json({ tasks: [task], audienceDirectory: { membershipPolicy: "current", currentUserId: memberId, users: [{ id: ownerId, name: "Owner" }], groups: [] } });
+    }));
+    const other = { ...project, id: "10000000-0000-4000-8000-000000000002", name: "Otro proyecto" };
+    render(<AutomationsPanel open projects={[other]} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Editar Informe compartido" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Proyecto" }), { target: { value: other.id } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(submitted).not.toBeNull());
+    expect(submitted).toMatchObject({ projectId: other.id, projectName: other.name });
+  });
   it("waits for the current recipient identity before opening a new automation", async () => {
     let resolveDirectory!: (response: Response) => void;
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { resolveDirectory = resolve; })));
