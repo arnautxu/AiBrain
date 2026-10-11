@@ -51,6 +51,7 @@ import {
   type CodexTurnEvent,
   type LegacyServerRequest,
 } from "@/runtime/codex-app-server";
+import { optionalTurnSkills } from "@/runtime/optional-turn-skills";
 import type { RuntimeConfig } from "@/runtime/config";
 import {
   attestQuotaToolPermissions,
@@ -879,13 +880,19 @@ async function runWorkerCodexTurnAttempt(
   const catalog = chatRequest.options.skill || inheritAuthorizedSkills || hasConnectorMentions
     ? await catalogRuntimeEnforcer(installationId, authenticatedUserId)
     : null;
-  const runtimeSkills = chatRequest.options.skill || inheritAuthorizedSkills
-    ? parseSkills(await telemetry.measure("skills", () => runtime.client.request(
+  const runtimeSkills = await optionalTurnSkills({
+    explicit: Boolean(chatRequest.options.skill), inherit: inheritAuthorizedSkills,
+    recovering: submission.hasPendingModelTurn,
+    load: async () => parseSkills(await telemetry.measure("skills", () => runtime.client.request(
       "skills/list",
       { cwds: [projectWorkspace], forceReload: true },
       `skills-resolved:${chatRequest.assistantMessageId}`,
       10_000,
-    ))) : [];
+    ))),
+    unavailable: () => operationalLogger.warn("codex.optional_skill_inventory_unavailable", {
+      installationId, userId: authenticatedUserId, localTurnId: chatRequest.assistantMessageId,
+    }),
+  });
   const authorizedRuntimeSkills = runtimeSkills.filter((skill) =>
     catalog?.allowsSkill(skill.id) &&
     skill.path === synchronizedSkills.result.skills.find(({ id }) => id === skill.id)?.path);
