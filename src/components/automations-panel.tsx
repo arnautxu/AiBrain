@@ -332,8 +332,13 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
         body: JSON.stringify({
           name,
           prompt,
-          projectId,
-          projectName: projectLabel(selectedProject),
+          // An administrator can manage a task without being a member of its
+          // owner's private project. Preserve that association on ordinary
+          // edits; an actual project change still passes server validation.
+          ...(!editing || editing.projectId !== projectId ? {
+            projectId,
+            projectName: projectLabel(selectedProject),
+          } : {}),
           timeZone,
           schedule: schedule(),
           audience: { membershipPolicy: "current", userIds: audienceUserIds, groupIds: audienceGroupIds },
@@ -448,7 +453,7 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
           {error ? <p role="alert" className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[11px] text-[var(--danger)]">{t(error)}</p> : null}
           <label className="block text-[11px] font-semibold text-[var(--text)]">{t("Nombre")}<input ref={nameInputRef} value={name} maxLength={100} onChange={(event) => setName(event.target.value)} placeholder={t("Resumen diario del proyecto")} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal outline-none focus:border-[var(--brain-accent)]" /></label>
           <label className="block text-[11px] font-semibold text-[var(--text)]">{t("Qué debe hacer")}<textarea value={prompt} maxLength={20_000} rows={6} onChange={(event) => setPrompt(event.target.value)} placeholder={t("Revisa las novedades del proyecto y prepara un resumen con próximos pasos.")} className="mt-2 w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-3 text-[13px] font-normal leading-5 outline-none focus:border-[var(--brain-accent)]" /></label>
-          <label className="block text-[11px] font-semibold text-[var(--text)]">{t("Proyecto")}<select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal outline-none">{availableProjects.map((project) => <option key={project.id} value={project.id}>{projectLabel(project)}</option>)}</select></label>
+          <label className="block text-[11px] font-semibold text-[var(--text)]">{t("Proyecto")}<select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal outline-none">{editing && !availableProjects.some((project) => project.id === editing.projectId) && <option value={editing.projectId}>{taskProjectLabel(editing)}</option>}{availableProjects.map((project) => <option key={project.id} value={project.id}>{projectLabel(project)}</option>)}</select></label>
           <section className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2.5"><p className="text-[11px] font-semibold text-[var(--text)]">{t("Propietario único")}</p><p className="mt-1 text-[10px] leading-4 text-[var(--text-subtle)]">{editing?.owner.name ?? audienceDirectory.users.find((user) => user.id === audienceDirectory.currentUserId)?.name ?? t("Tu usuario")}{t(". Solo esta persona o un administrador puede editar o eliminar. El propietario no se añade automáticamente como destinatario.")}</p></section>
           <fieldset><legend className="text-[11px] font-semibold text-[var(--text)]">{t("Quién recibe el resultado")}</legend><div className="mt-2 space-y-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
             <div><p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-subtle)]">{t("Personas")}</p><div className="mt-2 grid gap-2">{audienceDirectory.users.map((user) => <label key={user.id} className="flex items-center gap-2 text-[11px] font-normal text-[var(--text)]"><input type="checkbox" checked={audienceUserIds.includes(user.id)} onChange={() => setAudienceUserIds((current) => current.includes(user.id) ? current.filter((id) => id !== user.id) : [...current, user.id])} />{user.name}</label>)}</div></div>
