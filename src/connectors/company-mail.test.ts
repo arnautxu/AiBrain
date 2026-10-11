@@ -31,12 +31,12 @@ async function pdf(number: number) {
   const doc = await PDFDocument.create(); doc.addPage().drawText(`Invoice ${number}`);
   return Buffer.from(await doc.save());
 }
-function client(messages: Array<{ uid: number; parts: Array<{ name: string; data: Buffer }> }>, epoch = 10n) {
+function client(messages: Array<{ uid: number; parts: Array<{ name: string; data: Buffer; mediaType?: string }> }>, epoch = 10n) {
   return { mailbox: { readOnly: true, uidValidity: epoch }, search: vi.fn(async () => messages.map(m => m.uid)),
     fetchOne: vi.fn(async (uid: string) => {
       const message = messages.find(m => m.uid === Number(uid)); if (!message) return false;
       return { uid: message.uid, internalDate: new Date("2026-10-06T10:00:00Z"), envelope: { subject: "=DANGEROUS()", from: [{ address: "supplier@example.com" }] },
-        bodyStructure: { type: "multipart/mixed", childNodes: message.parts.map((p, index) => ({ type: "application/pdf", disposition: "attachment", dispositionParameters: { filename: p.name }, part: String(index + 1), size: p.data.length })) } };
+        bodyStructure: { type: "multipart/mixed", childNodes: message.parts.map((p, index) => ({ type: p.mediaType ?? "application/pdf", disposition: "attachment", dispositionParameters: { filename: p.name }, part: String(index + 1), size: p.data.length })) } };
     }),
     download: vi.fn(async (uid: string, part: string) => ({ content: Readable.from([messages.find(m => m.uid === Number(uid))!.parts[Number(part) - 1].data]), meta: {} })) } as unknown as ImapFlow;
 }
@@ -112,6 +112,33 @@ describe("durable local invoice import", () => {
     const sheet = await zip.file("xl/worksheets/sheet1.xml")!.async("string");
     expect(sheet).toContain("=DANGEROUS()"); expect(sheet).not.toContain("<f>"); expect(sheet).toContain("123.45");
   });
+  it("imports a supplier x-pdf alias without changing original bytes and retries without duplicates", async () => {
+    const { ledger } = await setup();
+    const body = await pdf(53625);
+    const imap = client([{ uid: 1, parts: [{ name: "053625.pdf", data: body, mediaType: "application/x-pdf" }] }]);
+    const first = await importCompanyMailInvoices({ client: imap, credential, store: ledger });
+    expect(first.errors).toEqual([]);
+    expect(first.imported).toHaveLength(1);
+    expect(first.imported[0]).toMatchObject({ mediaType: "application/pdf", sha256: mailHash(body), size: body.length });
+    expect(await ledger.original(first.imported[0])).toEqual(body);
+    const again = await importCompanyMailInvoices({ client: imap, credential, store: ledger });
+    expect(again.imported).toHaveLength(0);
+    expect(again.ledger.entries).toHaveLength(1);
+  });
+
+  it("rejects malformed bytes and mismatched names even with the known PDF alias", async () => {
+    const { ledger } = await setup();
+    const imap = client([{ uid: 1, parts: [
+      { name: "bad.pdf", data: Buffer.from("invalid PDF"), mediaType: "application/x-pdf" },
+      { name: "wrong.xlsx", data: await pdf(1), mediaType: "application/x-pdf" },
+      { name: "unknown.pdf", data: await pdf(2), mediaType: "application/not-a-pdf" },
+    ] }]);
+    const result = await importCompanyMailInvoices({ client: imap, credential, store: ledger });
+    expect(result.imported).toHaveLength(0);
+    expect(result.errors).toHaveLength(3);
+    expect(result.ledger.entries.every(e => e.sha256 === null && e.status === "needs_attention")).toBe(true);
+  });
+
   it("continues a message in bounded batches rather than dropping attachments beyond 20", async () => {
     const { ledger } = await setup();
     const parts = await Promise.all(Array.from({ length: 23 }, async (_, i) => ({ name: `${i}.pdf`, data: await pdf(i) })));
