@@ -132,7 +132,11 @@ export async function importCompanyMailInvoices(input: { client: ImapFlow; crede
           });
           const genericMime = part.type.toLowerCase() === "application/octet-stream";
           const inferredMime: Record<string, string> = { ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".xls": "application/vnd.ms-excel", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" };
-          const declaredMimeType = genericMime ? inferredMime[path.extname(part.name).toLowerCase()] ?? part.type : part.type.toLowerCase();
+          const suppliedMimeType = part.type.toLowerCase();
+          // Some suppliers declare a PDF using the legacy x-pdf alias. Keep the
+          // strict extension/signature validator; normalize only this known alias.
+          const declaredMimeType = genericMime ? inferredMime[path.extname(part.name).toLowerCase()] ?? part.type
+            : suppliedMimeType === "application/x-pdf" ? "application/pdf" : suppliedMimeType;
           const document = validateUploadedDocument({ fileName: part.name, declaredMimeType, data: mailInvoiceReadingContents(data, declaredMimeType) });
           base.sha256 = mailHash(data);
           base.size = data.length;
