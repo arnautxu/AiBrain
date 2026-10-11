@@ -8,6 +8,7 @@ vi.mock("@/connectors/company-mail-server-service", () => ({ companyMailContext:
 vi.mock("@/workbench/store", () => ({ getWritableProject: vi.fn(async () => ({ status: "active" })) }));
 import { companyMailAccessForIdentity, companyMailContext } from "@/connectors/company-mail-server-service";
 import { getWritableProject } from "@/workbench/store";
+import { DocumentStorageBackpressureError } from "@/documents/storage-gate";
 const c = {
   config: { installationId: "company-qa" }, session: { provider: "local", tenant: { id: "company-qa" }, user: { id: "00000000-0000-4000-8000-000000000001" } },
   installationId: "company-qa", userId: "00000000-0000-4000-8000-000000000001", runtimeThreadId: "runtime-thread", runtimeTurnId: "runtime-turn",
@@ -17,6 +18,16 @@ const c = {
 const params = { namespace: COMPANY_MAIL_NAMESPACE, tool: "import_attachments", arguments: {}, threadId: "runtime-thread", turnId: "runtime-turn" } as DynamicToolCallParams;
 
 describe("company mailbox runtime authorization", () => {
+  it("reports storage admission separately from mailbox/provider failure without exposing paths", async () => {
+    vi.clearAllMocks();
+    vi.mocked(companyMailAccessForIdentity).mockRejectedValueOnce(new DocumentStorageBackpressureError(5_000, 1n, 10n));
+    const response = await handleCompanyMailTool(params, c);
+    expect(response.success).toBe(false);
+    const value = JSON.parse((response.contentItems[0] as { text: string }).text);
+    expect(value).toMatchObject({ code: "DOCUMENT_STORAGE_BACKPRESSURE", retryable: true, retryAfterMs: 5_000 });
+    expect(value.error).toContain("espacio libre");
+    expect(value.error).not.toContain("/var/");
+  });
   it.each([
     { selected: false }, { session: null }, { executeAllowed: false }, { allowLocalWrites: false }, { installationId: "foreign" }, { userId: "foreign" },
   ])("rejects unauthorized runtime contexts before reaching credentials (%j)", async override => {
