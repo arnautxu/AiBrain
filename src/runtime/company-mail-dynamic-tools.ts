@@ -12,7 +12,7 @@ import { CompanyMailError, validMailDate } from "@/connectors/company-mail-contr
 import { MAIL_HASH, privateMailDirectory } from "@/connectors/company-mail-store";
 import { importCompanyMailInvoices, invoiceLedgerForMailbox, mailboxIdentity, mailHash, mailInvoiceChangesForDay, parseMailInvoiceReview, recordMailInvoiceReview, refreshMailInvoiceWorkbook } from "@/connectors/company-mail-invoices";
 import { persistGeneratedDocumentArtifact, generatedDocumentArtifactId } from "@/runtime/generated-document-artifacts";
-import { FileDocumentStorageGate } from "@/documents/storage-gate";
+import { DocumentStorageBackpressureError, FileDocumentStorageGate } from "@/documents/storage-gate";
 import { atomicWriteFile } from "@/storage";
 import { readRegularFileWithin } from "@/security/safe-file";
 import path from "node:path";
@@ -117,6 +117,11 @@ export async function handleCompanyMailTool(params: DynamicToolCallParams, c: Co
         reviewed: ledger.entries.filter(e => e.status === "reviewed").length, duplicates: ledger.entries.filter(e => e.duplicateOf).length, excel });
     }), { signal: c.signal });
   } catch (error) {
+    if (error instanceof DocumentStorageBackpressureError) return result(false, {
+      code: error.code,
+      error: "No hay suficiente espacio libre de seguridad para procesar las facturas. Los originales y el registro se conservan. Libera espacio y vuelve a intentarlo.",
+      retryable: true, retryAfterMs: error.retryAfterMs,
+    });
     return result(false, { code: error instanceof CompanyMailError ? error.code : "MAIL_OPERATION_FAILED", error: error instanceof CompanyMailError ? error.message : "No se ha completado el trabajo de correo. Los originales y el registro previo se conservan." });
   }
 }
