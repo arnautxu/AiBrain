@@ -683,12 +683,12 @@ describe("private per-user worker gateway", () => {
     } finally { await restarted.stop(); }
   });
 
-  it("compacts oversized observations below the count threshold but preserves creation and uncertain receipts", async () => {
+  it.each(["thread-resume", "turn-completion-reconcile"])("compacts oversized %s observations but preserves creation and uncertain receipts", async (prefix) => {
     const entries = [
       ["thread-start:recoverable", "completed"],
       ["turn-start:recoverable", "completed"],
       ["thread-resume:uncertain", "accepted"],
-      ...Array.from({ length: 6 }, (_, i) => [`thread-resume:observed-${i}`, "completed"]),
+      ...Array.from({ length: 6 }, (_, i) => [`${prefix}:observed-${i}`, "completed"]),
     ];
     const ledgerPath = path.join(context.transportAudit, "gateway-requests.jsonl");
     const records = entries.map(([id, status], index) => {
@@ -710,12 +710,12 @@ describe("private per-user worker gateway", () => {
     try {
       const retained = (await readFile(ledgerPath, "utf8")).trim().split("\n").map(line => JSON.parse(line).payload);
       expect(retained.map(record => record.clientRequestId)).toEqual(expect.arrayContaining([
-        "thread-start:recoverable", "turn-start:recoverable", "thread-resume:uncertain", "thread-resume:observed-5",
+        "thread-start:recoverable", "turn-start:recoverable", "thread-resume:uncertain", `${prefix}:observed-5`,
       ]));
       expect(retained).toHaveLength(4);
       await expect(worker.recoverResponse(initializeRequest("thread-start:recoverable"))).resolves.toHaveProperty("result");
       await expect(worker.recoverResponse(initializeRequest("thread-resume:uncertain"))).resolves.toBeNull();
-      await expect(worker.recoverResponse(initializeRequest("thread-resume:observed-0"))).resolves.toBeNull();
+      await expect(worker.recoverResponse(initializeRequest(`${prefix}:observed-0`))).resolves.toBeNull();
     } finally { await worker.stop(); }
   });
 

@@ -1,5 +1,6 @@
-import { mkdir, rm, utimes } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, writeFile, rm, utimes } from "node:fs/promises";
+import { hostname, tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { mkdtemp } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -85,6 +86,36 @@ describe("resource lock manager", () => {
     const lease = await locks.acquire("abandoned", { timeoutMs: 100 });
     await lease.assertHeld();
     await lease.release();
+  });
+
+  it("recovers a legacy lock predating the current process despite the same live PID", async () => {
+    const locks = manager({ staleAfterMs: 100, heartbeatIntervalMs: 20 });
+    const stalePath = locks.lockPathFor("reused-pid");
+    await mkdir(stalePath, { recursive: true });
+    const previousProcessTime = new Date(Date.now() - process.uptime() * 1_000 - 60_000);
+    await writeFile(path.join(stalePath, "owner.json"), JSON.stringify({
+      schemaVersion: 1, token: randomUUID(), resourceHash: locks.resourceHash("reused-pid"),
+      processId: process.pid, hostname: hostname(), acquiredAt: previousProcessTime.toISOString(),
+    }));
+    await utimes(stalePath, previousProcessTime, previousProcessTime);
+    const recovered = await locks.acquire("reused-pid", { timeoutMs: 100 });
+    await recovered.assertHeld();
+    await recovered.release();
+  });
+
+  it.skipIf(process.platform !== "linux")("recovers a different kernel process identity without stealing the current identity", async () => {
+    const locks = manager({ staleAfterMs: 100, heartbeatIntervalMs: 90 });
+    const lease = await locks.acquire("kernel-generation");
+    const identityPath = path.join(lease.lockPath, "process-identity.json");
+    const identity = JSON.parse(await readFile(identityPath, "utf8"));
+    const old = new Date(Date.now() - 5_000);
+    await utimes(lease.lockPath, old, old);
+    await expect(locks.acquire("kernel-generation", { timeoutMs: 20 })).rejects.toBeInstanceOf(ResourceLockTimeoutError);
+    await writeFile(identityPath, JSON.stringify({ ...identity, startTicks: "0" }));
+    await utimes(lease.lockPath, old, old);
+    const successor = await locks.acquire("kernel-generation", { timeoutMs: 100 });
+    await successor.assertHeld();
+    await successor.release();
   });
 
   it("heartbeats a live lease so it cannot be stolen as stale", async () => {
