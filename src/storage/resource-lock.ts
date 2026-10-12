@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Stats } from "node:fs";
 import { hostname } from "node:os";
-import { mkdir, readFile, rename, rm, stat, utimes } from "node:fs/promises";
+import { mkdir, readFile, readlink, rename, rm, stat, utimes } from "node:fs/promises";
 import path from "node:path";
 import { atomicWriteJson, fsyncDirectory } from "@/storage/atomic-file";
 import {
@@ -25,6 +25,37 @@ type ResourceLockMetadata = {
   hostname: string;
   acquiredAt: string;
 };
+
+// A restarted container can reuse both its hostname and PID. Keep the v1
+// owner format compatible with running older callers and bind an optional
+// sidecar to the exact owner token instead of treating PID liveness as identity.
+const processStartedAt = Date.now() - process.uptime() * 1_000;
+async function processIdentity(processId: number) {
+  if (process.platform !== "linux") return null;
+  try {
+    const value = await readFile(`/proc/${processId}/stat`, "utf8");
+    const startTicks = value.slice(value.lastIndexOf(")") + 2).split(/\s+/u)[19];
+    const namespace = await readlink(`/proc/${processId}/ns/pid`);
+    return /^\d+$/u.test(startTicks ?? "") ? { startTicks, namespace } : null;
+  } catch { return null; } // An unavailable identity never authorizes stealing.
+}
+
+async function localOwnerStillAlive(owner: ResourceLockMetadata, lockPath: string) {
+  if (!processAppearsAlive(owner.processId)) return false;
+  try {
+    const identity = JSON.parse(await readFile(path.join(lockPath, "process-identity.json"), "utf8"));
+    if (identity.token !== owner.token || identity.processId !== owner.processId ||
+        typeof identity.startTicks !== "string" || !/^\d+$/u.test(identity.startTicks) ||
+        typeof identity.namespace !== "string") return true;
+    const current = await processIdentity(owner.processId);
+    return current === null || (current.startTicks === identity.startTicks && current.namespace === identity.namespace);
+  } catch (error) {
+    if (!isNodeError(error, "ENOENT")) return true;
+    // Legacy metadata has no kernel identity. Only our own PID has a known
+    // process start; preserve other live owners and allow a 2s clock margin.
+    return owner.processId !== process.pid || Date.parse(owner.acquiredAt) >= processStartedAt - 2_000;
+  }
+}
 
 const resourceLockMetadataSchema = defineVersionedSchema<ResourceLockMetadata>({
   name: "ResourceLockMetadata",
@@ -365,7 +396,7 @@ export class ResourceLockManager {
         "Resource lock metadata does not match its canonical lock path.",
       );
     }
-    if (owner?.hostname === hostname() && processAppearsAlive(owner.processId)) {
+    if (owner?.hostname === hostname() && await localOwnerStillAlive(owner, lockPath)) {
       return false;
     }
 
@@ -432,6 +463,12 @@ export class ResourceLockManager {
             },
             resourceLockMetadataSchema,
           );
+          const identity = await processIdentity(process.pid);
+          if (identity) {
+            await atomicWriteJson(path.join(lockPath, "process-identity.json"), {
+              ...identity, token, processId: process.pid,
+            }, { name: "ProcessIdentity", parse: (value) => value }, { mode: 0o600 });
+          }
           await fsyncDirectory(this.rootDirectory);
         } catch (error) {
           await rm(lockPath, { recursive: true, force: true });
