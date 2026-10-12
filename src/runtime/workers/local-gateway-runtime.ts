@@ -322,7 +322,7 @@ class GatewayRequestLedger {
         // These purposes only observe or reattach existing threads; replaying
         // a fresh observation cannot create a model turn. Unknown keys retain
         // their existing count policy and are never guessed to be read-only.
-        const observation = /^(?:thread-resume|thread-resume-recover|thread-resume-retry):/u.test(record.clientRequestId);
+        const observation = /^(?:thread-resume|thread-resume-recover|thread-resume-retry|turn-completion-reconcile):/u.test(record.clientRequestId);
         if (!bytePressure || !observation) return true;
         const size = Buffer.byteLength(record.responseJson ?? "", "utf8");
         if (observationBytes + size > this.maxRetainedObservationBytes) return false;
