@@ -251,3 +251,20 @@ persistir i projectar l’artefacte. El repartiment manté la confirmació poste
 el destinatari i la vinculació exacta de versió.
 
 Les confirmacions llargues poden restringir explícitament el canvi a «només la botiga 7» (també castellà/anglès). Aquesta restricció només autoritza una proposta immutable `establishments.update` amb el mateix identificador; una altra botiga, una condició o una confirmació parcial segueixen rebutjades.
+
+### Reparació de cobertura amb hores reals dels esborranys
+
+La passada final de `schedules.draft` també minimitza els minuts descoberts
+segons les entrades, durades i pauses que s’exportaran a l’Excel. Comptar només
+M/T no detectava el buit de 14:00–14:45 entre una sortida i una entrada tardana.
+S’avaluen assignacions disponibles i intercanvis atòmics sense superar màxims,
+perdre torns obligatoris ni empitjorar condicions estructurades per tapar aquest
+buit. No es canvien les hores fixes de les fitxes ni es desa cap dada de negoci.
+La generació persistent conserva el comportament anterior.
+
+La cerca és acotada: si no troba una reparació vàlida, la revisió conserva el
+conflicte amb la franja exacta i explica com resoldre’l o avisar l’equip Brain.
+Això no demostra que un horari sigui matemàticament impossible ni certifica
+condicions textuals o saldos històrics absents. La regressió reprodueix la
+setmana real de la prova amb set persones i el buit de 45 minuts, a més de
+casos on absències, límits o peticions impedeixen tapar-lo.

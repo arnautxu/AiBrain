@@ -1,6 +1,7 @@
 import { ruleForDay } from '../utils/ruleForDay.js';
-import { shiftHours } from '../utils/shiftHours.js';
+import { shiftHours, entradaPara, descansoPara } from '../utils/shiftHours.js';
 import { puntuacio } from './passadesCondicions.js';
+import { missingClockCoverageMinutes } from './clock-coverage.js';
 
 const DAYS = ['LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO', 'DOMINGO'];
 const SHIFTS = ['LIBRE', 'MANANA', 'TARDE', 'PARTIDO'];
@@ -16,7 +17,7 @@ export function remainingWeeklyHours(employee) {
 }
 
 /** Last pass after ALL heuristics. No database writes or fabricated coverage. */
-export function enforceFinalScheduleBounds(horario, employees, rules, closedDays = [], canAssign = () => true) {
+export function enforceFinalScheduleBounds(horario, employees, rules, closedDays = [], canAssign = () => true, establishment) {
   if (horario.length !== employees.length || new Set(horario.map(h => h.empleadoId)).size !== employees.length) throw new Error('La propuesta no contiene una semana única por persona.');
   for (const h of horario) {
     if (!employees.some(e => e.id === h.empleadoId) || !Array.isArray(h.dias) || h.dias.length !== 7 ||
@@ -47,10 +48,14 @@ export function enforceFinalScheduleBounds(horario, employees, rules, closedDays
     }
     const requested = employees.reduce((sum, e) => sum + Object.entries(e.turnosRequeridosBorrador || {})
       .filter(([day, shift]) => schedulesById.get(e.id).dias.find(d => d.dia === day)?.turno !== shift).length, 0);
-    return { hard, requested, missing };
+    const clockMissing = establishment ? missingClockCoverageMinutes(horario.flatMap(h => h.dias.map(d => ({
+      empleadoId: h.empleadoId, dia: d.dia, turno: d.turno,
+      horaEntrada: entradaPara(byId.get(h.empleadoId), d.turno), horaDescanso: descansoPara(d.turno, establishment),
+    }))), employees, rules, DAYS.filter(day => !closedDays.includes(day)), establishment) : 0;
+    return { hard, requested, missing, clockMissing };
   };
   const improves = (after, before) => after.hard < before.hard || (after.hard === before.hard &&
-    (after.requested < before.requested || (after.requested === before.requested && after.missing < before.missing)));
+    (after.requested < before.requested || (after.requested === before.requested && (after.missing < before.missing || (after.missing === before.missing && after.clockMissing < before.clockMissing)))));
   const personallyAllowed = (e, d, shift) => shift === 'LIBRE' || (!closedDays.includes(d.dia) && !e.diasAusente?.[d.dia] &&
     !e.diasPreferenciaLibre?.[d.dia] && !e.diasOcupadosOtrosEstablecimientos?.[d.dia] &&
     (!e.turnosPorDiaPreferencia?.[d.dia] || e.turnosPorDiaPreferencia[d.dia] === shift) &&
@@ -77,6 +82,8 @@ export function enforceFinalScheduleBounds(horario, employees, rules, closedDays
     finally { d.turno = old; }
   };
   const change = (d, shift) => { d.turno = shift; d.horaEntrada = null; d.horaDescanso = null; };
+  const conditionScore = e => puntuacio(schedulesById.get(e.id).dias.filter(d =>
+    !closedDays.includes(d.dia) && !e.diasAusente?.[d.dia] && !e.diasOcupadosOtrosEstablecimientos?.[d.dia]), e.condicionesEstructuradas);
   const adjustments = [];
   for (const e of employees) for (const d of schedulesById.get(e.id).dias) {
     if (!personallyAllowed(e, d, d.turno)) {
@@ -88,22 +95,25 @@ export function enforceFinalScheduleBounds(horario, employees, rules, closedDays
   // Explicit work requests remain below hard bounds and above coverage minima.
   for (let pass = 0; pass < 1000; pass++) {
     const before = score();
-    if (!before.hard && !before.requested && !before.missing) break;
+    if (!before.hard && !before.requested && !before.missing && !before.clockMissing) break;
     let best = null;
     for (const e of employees) for (const d of schedulesById.get(e.id).dias) for (const shift of SHIFTS) {
       if (shift === d.turno || !allowed(e, d, shift)) continue;
       const old = d.turno;
       const delta = shiftHours(e, shift) - shiftHours(e, old);
       if (delta > 0 && hours(e) + delta > remainingWeeklyHours(e)) continue;
+      const priorCondition = conditionScore(e);
       d.turno = shift;
       const after = score();
+      const keepsConditions = conditionScore(e) <= priorCondition && keepsMorningSync(e, old, shift);
       d.turno = old;
+      if (after.hard === before.hard && after.requested === before.requested && after.missing === before.missing && !keepsConditions) continue;
       if (!improves(after, before)) continue;
       const requestedLoss = e.turnosPorDiaPreferencia?.[d.dia] === old && shift !== old ? 1 : 0;
-      const rank = [after.hard, after.requested, after.missing, requestedLoss, Math.abs(delta)];
+      const rank = [after.hard, after.requested, after.missing, after.clockMissing, requestedLoss, Math.abs(delta)];
       if (!best || rank.some((v, i) => v < best.rank[i] && rank.slice(0, i).every((x, j) => x === best.rank[j]))) best = { e, d, shift, old, rank };
     }
-    if (!best && !before.hard && (before.requested || before.missing)) {
+    if (!best && !before.hard && (before.requested || before.missing || before.clockMissing)) {
       // A capped worker may need to move hours between days. Evaluate both
       // edits atomically; never accept an intermediate excess or new gap.
       for (const e of employees) {
@@ -114,16 +124,42 @@ export function enforceFinalScheduleBounds(horario, employees, rules, closedDays
           for (const other of entries.filter(x => x !== d)) for (const lower of SHIFTS) {
             const otherOld = other.turno;
             if (shiftHours(e, lower) >= shiftHours(e, otherOld) || !allowed(e, other, lower)) continue;
+            const priorCondition = conditionScore(e);
             other.turno = lower;
             if (!allowed(e, d, shift)) { other.turno = otherOld; continue; }
             d.turno = shift;
             const after = score();
             const withinHours = hours(e) <= remainingWeeklyHours(e);
+            const keepsConditions = conditionScore(e) <= priorCondition && keepsMorningSync(e, old, shift) && keepsMorningSync(e, otherOld, lower);
             d.turno = old; other.turno = otherOld;
             if (!withinHours || after.hard || !improves(after, before)) continue;
+            if (after.requested === before.requested && after.missing === before.missing && !keepsConditions) continue;
             const loss = Number(e.turnosPorDiaPreferencia?.[d.dia] === old) + Number(e.turnosPorDiaPreferencia?.[other.dia] === otherOld);
-            const rank = [after.hard, after.requested, after.missing, loss, 0];
+            const rank = [after.hard, after.requested, after.missing, after.clockMissing, loss, 0];
             if (!best || rank.some((v, i) => v < best.rank[i] && rank.slice(0, i).every((x, j) => x === best.rank[j]))) best = { e, d, shift, old, rank, other, lower, otherOld };
+          }
+        }
+      }
+    }
+    if (!best && !before.hard && before.clockMissing) {
+      // Swap same-role assignments atomically when a coverage maximum blocks
+      // adding the available worker before removing the late one.
+      for (const e of employees) for (const d of schedulesById.get(e.id).dias) {
+        const old = d.turno, priorCondition = conditionScore(e);
+        for (const peer of employees.filter(p => p.id > e.id && p.funcion === e.funcion)) {
+          const other = schedulesById.get(peer.id).dias.find(x => x.dia === d.dia);
+          const shift = other.turno, peerCondition = conditionScore(peer);
+          if (shift === old || !allowed(e, d, shift) || !allowed(peer, other, old) ||
+              !keepsMorningSync(e, old, shift) || !keepsMorningSync(peer, shift, old)) continue;
+          d.turno = shift; other.turno = old;
+          const after = score();
+          const safe = hours(e) <= remainingWeeklyHours(e) && hours(peer) <= remainingWeeklyHours(peer) &&
+            conditionScore(e) <= priorCondition && conditionScore(peer) <= peerCondition;
+          d.turno = old; other.turno = shift;
+          if (!safe || after.hard || after.requested > before.requested || after.missing > before.missing || !improves(after, before)) continue;
+          const rank = [after.hard, after.requested, after.missing, after.clockMissing, 0, 0];
+          if (!best || rank.some((v, i) => v < best.rank[i] && rank.slice(0, i).every((x, j) => x === best.rank[j]))) {
+            best = { e, d, shift, old, rank, other, lower: old, otherOld: shift, partner: peer };
           }
         }
       }
@@ -131,7 +167,7 @@ export function enforceFinalScheduleBounds(horario, employees, rules, closedDays
     if (!best) break;
     if (best.other) {
       change(best.other, best.lower);
-      adjustments.push({ employeeId: best.e.id, day: best.other.dia, from: best.otherOld, to: best.lower });
+      adjustments.push({ employeeId: (best.partner || best.e).id, day: best.other.dia, from: best.otherOld, to: best.lower });
     }
     change(best.d, best.shift);
     adjustments.push({ employeeId: best.e.id, day: best.d.dia, from: best.old, to: best.shift });
@@ -141,8 +177,6 @@ export function enforceFinalScheduleBounds(horario, employees, rules, closedDays
   // Recover feasible conditions without erasing work, changing requested
   // shifts or worsening any other person's conditions. A same-day exchange
   // keeps role coverage unchanged when a one-person edit has no spare cover.
-  const conditionScore = e => puntuacio(schedulesById.get(e.id).dias.filter(d =>
-    !closedDays.includes(d.dia) && !e.diasAusente?.[d.dia] && !e.diasOcupadosOtrosEstablecimientos?.[d.dia]), e.condicionesEstructuradas);
   let examined = 0;
   for (let pass = 0; pass < 20 && examined < 20000; pass++) {
     let best = null;
@@ -160,7 +194,7 @@ export function enforceFinalScheduleBounds(horario, employees, rules, closedDays
           const after = conditionScore(e);
           if (after >= before || hours(e) > remainingWeeklyHours(e)) { d.turno = old; continue; }
           const changed = score();
-          if (!changed.hard && changed.requested <= baseline.requested && changed.missing <= baseline.missing) best = { e, d, shift, old };
+          if (!changed.hard && changed.requested <= baseline.requested && changed.missing <= baseline.missing && changed.clockMissing <= baseline.clockMissing) best = { e, d, shift, old };
           if (!best) for (const partner of employees.filter(x => x.id !== e.id && x.funcion === e.funcion)) {
             const other = schedulesById.get(partner.id).dias.find(x => x.dia === d.dia);
             if (other.turno === 'LIBRE' || partner.turnosPorDiaPreferencia?.[d.dia]) continue;
@@ -171,7 +205,9 @@ export function enforceFinalScheduleBounds(horario, employees, rules, closedDays
                 Number(slots(old).includes(period)) + Number(slots(otherOld).includes(period)) ===
                 Number(slots(shift).includes(period)) + Number(slots(lower).includes(period))) || !keepsMorningSync(partner, otherOld, lower) || !allowed(partner, other, lower)) continue;
               other.turno = lower;
-              const safe = hours(partner) <= remainingWeeklyHours(partner) && conditionScore(partner) <= partnerBefore;
+              const paired = score();
+              const safe = hours(partner) <= remainingWeeklyHours(partner) && conditionScore(partner) <= partnerBefore &&
+                !paired.hard && paired.requested <= baseline.requested && paired.missing <= baseline.missing && paired.clockMissing <= baseline.clockMissing;
               other.turno = otherOld;
               if (safe) { best = { e, d, shift, old, partner, other, lower, otherOld }; break; }
             }

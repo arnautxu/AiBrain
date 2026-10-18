@@ -691,7 +691,8 @@ export async function generateAISchedule({ establecimientoId, semana, quality = 
   });
 
   const finalAdjustments = enforceFinalScheduleBounds(scheduleData.horario, employees, rules, festivoDays,
-    (employee, day, shift) => disponiblePara(employee, day, shift) && condicionesPermiten(scheduleData.horario, employee, shift));
+    (employee, day, shift) => disponiblePara(employee, day, shift) && condicionesPermiten(scheduleData.horario, employee, shift),
+    draftOnly ? establishment : undefined);
 
   // 5l. Last of all, stamp the start and break times. Both are decided here
   // rather than taken from the model, which gave the same week two different

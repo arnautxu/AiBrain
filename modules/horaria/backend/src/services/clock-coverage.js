@@ -17,17 +17,18 @@ export function workingIntervals(schedule, employee, establishment) {
   return [[start, pause], [resume, end]];
 }
 
-export function reviewClockCoverage(schedules, employees, rules, openDays, establishment) {
+function assessClockCoverage(schedules, employees, rules, openDays, establishment, measureOnly = false) {
+  let missingMinutes = 0;
   const checks = [], notVerified = [];
   const open = aMinutos(establishment?.horarioApertura);
   const close = aMinutos(establishment?.horarioCierre);
-  if (open === null || close === null || close <= open) return { checks, notVerified: [
+  if (open === null || close === null || close <= open) return measureOnly ? 0 : { checks, notVerified: [
     'Cobertura por horas no verificada: faltan horas de apertura y cierre válidas. Indícalas en la ficha de la tienda; si no puedes, avisa al equipo Brain.' ] };
   let windows = [[open, close]];
   if (establishment.cierraMediodia) {
     const pause = aMinutos(establishment.inicioCierreMediodia);
     const resume = aMinutos(establishment.finCierreMediodia);
-    if (pause === null || resume === null || pause <= open || resume <= pause || resume >= close) return { checks, notVerified: [
+    if (pause === null || resume === null || pause <= open || resume <= pause || resume >= close) return measureOnly ? 0 : { checks, notVerified: [
       'Cobertura por horas no verificada: revisa el cierre de mediodía de la tienda; si no puedes corregirlo, avisa al equipo Brain.' ] };
     windows = [[open, pause], [resume, close]];
   }
@@ -57,6 +58,8 @@ export function reviewClockCoverage(schedules, employees, rules, openDays, estab
         for (let i = 0; i < points.length - 1; i++) {
           const start = points[i], end = points[i + 1];
           const count = [...people.values()].filter(intervals => intervals.some(([a, b]) => a <= start && b >= end)).length;
+          missingMinutes += Math.max(0, floor - count) * (end - start);
+          if (measureOnly) continue;
           checks.push({ employeeId: null, requirement: `${day} ${role} cobertura por horas`,
             status: count < floor ? 'conflict' : 'respected',
             detail: `${aHora(start)}–${aHora(end)}: ${count} personas; mínimo ${floor}.${count < floor ? ' Ajusta las horas o asigna una persona disponible para cubrir esta franja. Si no puedes resolverlo, avisa al equipo Brain.' : ''}` });
@@ -64,5 +67,15 @@ export function reviewClockCoverage(schedules, employees, rules, openDays, estab
       }
     }
   }
-  return { checks, notVerified };
+  return measureOnly ? missingMinutes : { checks, notVerified };
+}
+
+export function reviewClockCoverage(schedules, employees, rules, openDays, establishment) {
+  return assessClockCoverage(schedules, employees, rules, openDays, establishment);
+}
+
+// Same interval calculation as the final review, without formatting a report
+// for each candidate considered by the bounded repair search.
+export function missingClockCoverageMinutes(schedules, employees, rules, openDays, establishment) {
+  return assessClockCoverage(schedules, employees, rules, openDays, establishment, true);
 }
