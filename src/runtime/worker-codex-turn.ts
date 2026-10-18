@@ -1970,6 +1970,14 @@ async function runWorkerCodexTurnAttempt(
                   await emit({ type: "artifact", item: artifact }, { envelope, key: `artifact:horaria:${artifact.id}` });
                   projectedDocumentArtifactIds.add(artifact.id);
                 }
+                // A draft for an existing shop can contain fictional conditions.
+                // Its registered Arnall template satisfies the same delivery gate
+                // as create_arnall_schedule; collection spreadsheets do not.
+                if (arnallSchedule) {
+                  for (const artifact of result.artifacts) {
+                    if (projectedDocumentArtifactIds.has(artifact.id)) fictionalScheduleArtifactIds.add(artifact.id);
+                  }
+                }
               },
             });
             return await (terminalWatchdog ? terminalWatchdog.duringToolCall(runHoraria) : runHoraria()) as JsonValue;

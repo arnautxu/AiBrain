@@ -215,3 +215,14 @@ conservat; no cal recalcular-lo perquè hagi fallat l'adjunt.
 Integració sobre un clon nou del main recuperat, sense incorporar l'historial
 anterior. Aquestes són proves locals; CI, GHCR, desplegament i repetició
 completa al xat requereixen els seus gates separats.
+
+## Confirmació final de l'Excel amb condicions fictícies — 2026-10-18
+
+Una botiga existent pot rebre condicions temporals fictícies en un esborrany.
+El gate final reconeix també la plantilla Arnall creada per `schedules.draft`,
+després del registre de l'original i de la projecció efectiva de l'adjunt.
+Abans només reconeixia `create_arnall_schedule` i podia anunciar que faltava
+l'Excel malgrat haver-lo generat i adjuntat. Els fulls de recollida, els
+registres fallits i les respostes sense plantilla continuen rebutjats.
+La regressió del worker cobreix aquests casos; el nou candidat encara ha de
+superar CI, publicació, desplegament i una conversa autenticada completa.

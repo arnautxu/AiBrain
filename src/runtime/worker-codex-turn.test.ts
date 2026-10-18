@@ -3026,6 +3026,71 @@ describe("worker Codex turn", () => {
     expect(mocked.maintenanceReleases).toBe(1);
   });
 
+  it.each(["schedule", "collection", "registration-failed"] as const)("checks the final Excel gate after a horaria %s preview", async (kind) => {
+    const root = await mkdtemp(path.join(tmpdir(), "aibrain-horaria-delivery-"));
+    const horaria = await import("@/horaria/chat-tools");
+    const client = await import("@/horaria/client");
+    const documents = await import("@/runtime/documents/dynamic-tools");
+    const artifact = { id: "verified-schedule", fileName: "schedule.xlsx", kind: "document" };
+    const preview = { title: "Draft", rows: [], previewHash: "a".repeat(64), establecimientoId: 7, semana: "2026-W44",
+      ...(kind === "collection" ? { artifactPurpose: "collection" } : {}),
+      excelSchedule: { establishmentId: 7, week: "2026-W44" } };
+    const horariaSpy = vi.spyOn(horaria, "handleHorariaToolCallSafely").mockImplementation(async (_params, context) => {
+      try { await context.preview?.(preview); return { success: true, contentItems: [] }; }
+      catch { return { success: false, contentItems: [] }; }
+    });
+    const configSpy = vi.spyOn(client, "loadHorariaConfig").mockResolvedValue({} as never);
+    const registerSpy = vi.spyOn(client, "registerHorariaReviewSource").mockImplementation(async () => {
+      if (kind === "registration-failed") throw new Error("Registration unavailable");
+      return { sourceId: "verified-source", sha256: "a".repeat(64) } as never;
+    });
+    const documentSpy = vi.spyOn(documents, "handleLocalDocumentDynamicToolCall").mockResolvedValue({
+      response: { success: true, contentItems: [{ type: "inputText", text: JSON.stringify({ fileName: "schedule.xlsx", sha256: "a".repeat(64) }) }] },
+      artifacts: [artifact],
+    } as never);
+    let handlers: { onNotification(value: unknown, envelope: unknown): Promise<void>; onServerRequest(value: unknown, envelope: unknown): Promise<unknown> };
+    let sequence = 0;
+    const envelope = () => ({ eventId: `schedule-${++sequence}`, sequence, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+    mocked.runtime = {
+      config: { installationId, companySlug: "arnall", branding: { productName: "Arnall AI" }, paths: installationPaths },
+      handle: { roots: { workspace: root, staging: root, artifacts: root } },
+      client: {
+        canReuseLoadedThread: () => false, connectionSummary: async () => ({ connected: true }),
+        router: { registerTurn: (_thread: string, _local: string, value: typeof handlers) => { handlers = value; return { bindRuntimeTurn() {}, dispose() {} }; } },
+        async request(method: string, _params: unknown, _purpose: string, _timeout: number, beforeResolve?: (value: never, event: never) => Promise<void>) {
+          const result = method === "thread/start" ? { thread: { id: "schedule-thread" } } : { turn: { id: "schedule-turn" } };
+          await beforeResolve?.(result as never, envelope() as never);
+          if (method === "turn/start") queueMicrotask(() => { void (async () => {
+            await handlers.onServerRequest({ id: "draft", method: "item/tool/call", params: { threadId: "schedule-thread", turnId: "schedule-turn", callId: "draft", namespace: horaria.HORARIA_NAMESPACE, tool: "run", arguments: { operation: "schedules.draft" } } }, envelope());
+            await handlers.onNotification({ method: "turn/completed", params: { turn: { id: "schedule-turn", status: "completed", items: [{ type: "agentMessage", id: "answer", phase: "final_answer", text: "Excel adjunt verificat." }], error: null } } }, envelope());
+          })(); });
+          return result;
+        },
+      },
+    };
+    const events: WorkerCodexTurnEvent[] = [];
+    const session = { provider: "local", tenant: { id: installationId }, user: { id: userId }, expiresAt: new Date(Date.now() + 3600000).toISOString() } as AuthSession;
+    try {
+      await runWorkerCodexTurn({ ...chatRequest(), message: "Genera un horari amb condicions fictícies per a la botiga 7." }, installationId, userId, null, {
+        tenantId: installationId, mode: "codex", codexBinary: "unused", codexHome: null, workspace: root, model: null, approvalPolicy: "on-request", sandbox: "workspace-write",
+      }, permissions(), {} as never, memoryDependencies(), [], new AbortController().signal, async event => { events.push(event); }, undefined, "Arnall AI", null, undefined, undefined, undefined, session);
+      expect(documentSpy).toHaveBeenCalledOnce();
+      if (kind === "schedule") {
+        expect(registerSpy).toHaveBeenCalledOnce();
+        expect(events).toContainEqual(expect.objectContaining({ type: "artifact", item: artifact }));
+        expect(events.filter(event => event.type === "content" || event.type === "delta")
+          .map(event => event.value).join("")).toBe("Excel adjunt verificat.");
+        expect(events.some(event => event.type === "error")).toBe(false);
+      } else {
+        expect(events.some(event => event.type === "error")).toBe(true);
+        expect(events.some(event => event.type === "content" || event.type === "delta")).toBe(false);
+      }
+    } finally {
+      for (const spy of [horariaSpy, configSpy, registerSpy, documentSpy]) spy.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a fictional Arnall schedule answer that did not attach the required template", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "aibrain-fictional-schedule-"));
     let handlers: { onNotification(value: unknown, envelope: unknown): Promise<void> };
