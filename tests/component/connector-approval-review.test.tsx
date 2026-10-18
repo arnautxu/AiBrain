@@ -3,9 +3,20 @@ import { render, screen, within } from "../render-spanish";
 import { describe, expect, it, vi } from "vitest";
 import { PermissionGrant } from "@/components/assistant-ui/elements/permission-grant";
 import type { ApprovalItem } from "@/lib/chat-contract";
+import { connectorApprovalReview } from "@/ui/connector-approval-review";
 
 const base: ApprovalItem = { id: "approval", itemId: "item", threadId: "thread", turnId: "turn", kind: "command", title: "Guardar en Erp", detail: "", status: "pending", authorizationFingerprint: "a".repeat(64) };
 describe("exact business approval review", () => {
+  it("describes partial deliveries generically while preserving every frozen request field", () => {
+    expect(connectorApprovalReview(JSON.stringify({
+      operation: "erp_action",
+      input: { type: "record_order_delivery", request: { orderId: 102, body: { final_quantity: 6.5 } } },
+    }))).toEqual([
+      { label: "Acción", value: "Registrar entrega parcial", translateValue: true },
+      { label: "Pedido", value: "102" },
+      { label: "body.final_quantity", value: "6.5" },
+    ]);
+  });
   it("shows the entire frozen mail, account and recipients without activity redaction", () => {
     const body = "Inicio\n" + "Contenido extenso. ".repeat(200) + "\n```\n/opt/client/reference\n```\n51388e47-d16c-48f5-b4c8-71827ffc8020\nFin exacto";
     const detail = JSON.stringify({ operation: "mail_draft", input: { type: "create_draft", request: { message: { subject: "Consulta", toRecipients: [{ emailAddress: { address: "qa@example.com" } }], body: { contentType: "Text", content: body } } } }, prepared: { action: { mailbox: "owner@example.com" } } });

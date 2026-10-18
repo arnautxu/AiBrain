@@ -2,7 +2,7 @@ type ReviewField = { label: string; value: string; translateValue?: boolean };
 const actions: Record<string, string> = {
   create_draft: "Guardar borrador de correo", create_offer: "Crear oferta", update_offer: "Actualizar oferta",
   attach_offer_pdf: "Adjuntar PDF a oferta", convert_offer_to_order: "Convertir oferta en pedido",
-  record_order_delivery: "Registrar entrega parcial ", update_order: "Modificar pedido",
+  record_order_delivery: "Registrar entrega parcial", update_order: "Modificar pedido",
   update_order_status: "Cambiar estado de pedido", create_customer: "Crear cliente",
   create_purchase_invoice: "Crear factura de compra", update_purchase_invoice_status: "Cambiar estado de factura",
   create_company: "Crear empresa", update_company: "Actualizar empresa", update_person: "Actualizar contacto",

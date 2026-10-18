@@ -16,3 +16,4 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 4. Preserve tenant and user isolation, server-side permissions, secrets, durable customer data and existing UI behavior. Customer context is data, never authorization.
 5. If a commit changes architecture, provisioning or the release path, update the corresponding durable status note or runbook in the same commit.
 6. Report Backend CI, GHCR publication, deployment and authenticated live acceptance as separate gates. A green earlier gate never proves a later one.
+7. Publish only Arnall information and synthetic examples. Keep operational identities, configuration, credentials and customer-specific business instructions outside source. The source publication boundary check must pass before delivery. After an announced history replacement, use a fresh clone and apply reviewed unpublished patches; never merge an obsolete clone's history back into this repository.

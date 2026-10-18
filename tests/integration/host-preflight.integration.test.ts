@@ -93,42 +93,28 @@ async function run(envFile: string, installationId = "company-alpha") {
 }
 
 describe("Hetzner host preflight", () => {
-  async function hostLocalFixture(installationId = "worksitea-production") {
+  it("accepts Arnall's ordinary external replica and alert policy", async () => {
+    const input = await fixture("company-qa");
+    const result = await run(input.envFile, "company-qa");
+    expect(result.stdout).toContain("PASS (company-qa)");
+    expect(result.stderr).toBe("");
+  });
+
+  it.each(["company-qa", "synthetic-company"])("rejects file-only alerts for %s", async (installationId) => {
     const input = await fixture(installationId);
-    const decision = "AIBRAIN_WORKSITEA_RECOVERY_DECISION=host-loss-risk-accepted-20261005\n";
-    await writeFile(input.envFile, await readFile(input.envFile, "utf8") + decision);
-    await writeFile(path.join(input.configRoot, "installation.json"), JSON.stringify({
-      installationId, publicUrl: "https://worksitea.example.test",
-    }));
     await writeFile(path.join(input.configRoot, "alerts.env"),
-      decision + "AIBRAIN_ALERT_SINK=file\nAIBRAIN_ALERT_EGRESS_HEALTH_TOKEN=" + "e".repeat(96) + "\n");
-    await writeFile(path.join(input.configRoot, "replica.env"), decision);
-    return input;
-  }
-
-  it("accepts the explicit WORKSITEA host-loss decision without inventing off-host evidence", async () => {
-    const input = await hostLocalFixture();
-    const result = await run(input.envFile, "worksitea-production");
-    expect(result.stdout).toContain("PASS (worksitea-production)");
-    expect(result.stderr).toContain("host loss is NOT covered");
+      `AIBRAIN_ALERT_SINK=file\nAIBRAIN_ALERT_EGRESS_HEALTH_TOKEN=${"e".repeat(96)}\n`);
+    await expect(run(input.envFile, installationId)).rejects.toMatchObject({
+      stderr: expect.stringContaining("external alert sink must be webhook"),
+    });
   });
 
-  it("never applies WORKSITEA's recovery decision to another installation or an unacknowledged WORKSITEA", async () => {
-    const other = await hostLocalFixture("company-alpha");
-    await expect(run(other.envFile)).rejects.toThrow();
-    const unacknowledged = await hostLocalFixture();
-    await writeFile(unacknowledged.envFile, (await readFile(unacknowledged.envFile, "utf8"))
-      .replace("AIBRAIN_WORKSITEA_RECOVERY_DECISION=host-loss-risk-accepted-20261005\n", ""));
-    await expect(run(unacknowledged.envFile, "worksitea-production")).rejects.toThrow();
-  });
-
-  it("rejects mismatched WORKSITEA recovery policies and pretend replica destinations", async () => {
-    const mismatch = await hostLocalFixture();
-    await writeFile(path.join(mismatch.configRoot, "alerts.env"), "AIBRAIN_ALERT_SINK=file\n");
-    await expect(run(mismatch.envFile, "worksitea-production")).rejects.toThrow();
-    const pretend = await hostLocalFixture();
-    await writeFile(path.join(pretend.configRoot, "replica.env"), "AIBRAIN_RESTIC_REPOSITORY=/same-host\n");
-    await expect(run(pretend.envFile, "worksitea-production")).rejects.toThrow();
+  it("rejects same-host replicas even with a valid external alert policy", async () => {
+    const input = await fixture("company-qa");
+    await writeFile(path.join(input.configRoot, "replica.env"), "AIBRAIN_RESTIC_REPOSITORY=/same-host\n");
+    await expect(run(input.envFile, "company-qa")).rejects.toMatchObject({
+      stderr: expect.stringContaining("Restic repository must use an approved off-host encrypted backend"),
+    });
   });
 
   it("accepts an enabled company mailbox with its exact allowlist and encryption key without exposing the key", async () => {

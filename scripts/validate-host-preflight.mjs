@@ -244,21 +244,6 @@ if (required(runtimePolicy, "NEXT_PUBLIC_SUPABASE_URL") !== supabaseOrigin.origi
   fail("Supabase auth URL and server egress origin must match exactly");
 }
 const alertPolicy = parseEnv(readFileSync(alertsEnv, "utf8"));
-// David explicitly selected host-only recovery for WORKSITEA on 2026-10-05.
-// This is not an off-host replica and must never silently apply to a tenant.
-const recoveryDecision = env.get("AIBRAIN_WORKSITEA_RECOVERY_DECISION");
-const hostLocal = recoveryDecision === "host-loss-risk-accepted-20261005";
-if (recoveryDecision !== undefined && (!hostLocal || installationId !== "worksitea-production")) {
-  fail("host-only recovery is authorized exclusively for WORKSITEA with its explicit decision");
-}
-if (hostLocal) {
-  const config = JSON.parse(readFileSync(configFile, "utf8"));
-  if (config.installationId !== "worksitea-production" || config.publicUrl !== "https://worksitea.example.test"
-    || alertPolicy.get("AIBRAIN_WORKSITEA_RECOVERY_DECISION") !== recoveryDecision
-    || alertPolicy.get("AIBRAIN_ALERT_SINK") !== "file") {
-    fail("WORKSITEA host-local recovery and local alert policy disagree");
-  }
-}
 const healthToken = required(egressPolicy, "AIBRAIN_EGRESS_HEALTH_TOKEN");
 if (!CHANNEL_TOKEN.test(healthToken) || channelTokens.includes(healthToken)) {
   fail("egress health token must be strong and distinct from channel tokens");
@@ -266,7 +251,6 @@ if (!CHANNEL_TOKEN.test(healthToken) || channelTokens.includes(healthToken)) {
 if (required(alertPolicy, "AIBRAIN_ALERT_EGRESS_HEALTH_TOKEN") !== healthToken) {
   fail("alert dispatcher health token must match the dedicated egress health token");
 }
-if (!hostLocal) {
 if (required(alertPolicy, "AIBRAIN_ALERT_SINK") !== "webhook") fail("external alert sink must be webhook");
 let alertWebhook;
 try {
@@ -280,18 +264,10 @@ if (alertWebhook.protocol !== "https:" || alertWebhook.username || alertWebhook.
 if (!CHANNEL_TOKEN.test(required(alertPolicy, "AIBRAIN_ALERT_WEBHOOK_TOKEN"))) {
   fail("alert webhook token must be strong");
 }
-}
 const replicaPolicy = parseEnv(readFileSync(replicaEnv, "utf8"));
-if (hostLocal) {
-  if (replicaPolicy.size !== 1 || replicaPolicy.get("AIBRAIN_WORKSITEA_RECOVERY_DECISION") !== recoveryDecision) {
-    fail("WORKSITEA host-only recovery must not contain an external or pretend replica destination");
-  }
-  process.stderr.write("WORKSITEA recovery: local snapshots only; host loss is NOT covered; alerts remain local.\n");
-} else {
 const resticRepository = required(replicaPolicy, "AIBRAIN_RESTIC_REPOSITORY");
 if (!/^(?:s3:https:\/\/|rest:https:\/\/|b2:|azure:|gs:)/u.test(resticRepository)) {
   fail("Restic repository must use an approved off-host encrypted backend");
-}
 }
 
 const operatorUid = typeof process.getuid === "function" ? process.getuid() : lstatSync(configRoot).uid;

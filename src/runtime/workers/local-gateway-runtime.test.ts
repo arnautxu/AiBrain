@@ -197,19 +197,18 @@ describe("private per-user worker gateway", () => {
     await Promise.all(roots.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
   });
 
-  it("answers external token refresh privately without journaling credentials or exposing it as a tool", async () => {
-    context = { ...context, installationId: "officeexample-production" };
-    vi.stubEnv("AIBRAIN_CODEX_OWNER_AUTH_SOCKET", "/run/officeexample-owner-auth/broker.sock");
+  it("rejects installation owner refresh without invoking a broker or journaling the exchange", async () => {
+    context = { ...context, installationId: "company-qa" };
+    vi.stubEnv("AIBRAIN_CODEX_OWNER_AUTH_SOCKET", "/run/synthetic-owner-auth/broker.sock");
     vi.stubEnv("AIBRAIN_CODEX_AUTH_SCOPE", "installation-owner");
-    vi.stubEnv("AIBRAIN_INSTALLATION_OWNER_AUTH_ACK", "officeexample-production");
+    vi.stubEnv("AIBRAIN_INSTALLATION_OWNER_AUTH_ACK", "company-qa");
     const accessToken = "private-temporary-access-token-must-never-appear-in-journals";
     const ownerAccess = vi.spyOn(ownerAuthentication, "readInstallationOwnerAccess").mockResolvedValue({ accessToken, chatgptAccountId: "owner" });
     await writeFile(fakeServer, [
       'import { createInterface } from "node:readline";',
-      'let pending; const lines = createInterface({ input: process.stdin });',
+      'const lines = createInterface({ input: process.stdin });',
       'lines.on("line", (line) => { const request = JSON.parse(line);',
-      'if (request.method === "initialize") { pending=request.id; process.stdout.write(JSON.stringify({id:"owner-refresh",method:"account/chatgptAuthTokens/refresh",params:{reason:"unauthorized",previousAccountId:"owner"}})+"\\n"); }',
-      `else if(request.id === "owner-refresh" && request.result?.accessToken === ${JSON.stringify(accessToken)}) process.stdout.write(JSON.stringify({id:pending,result:{privateRefreshAnswered:true}})+"\\n");`,
+      'if (request.method === "initialize") process.stdout.write(JSON.stringify({id:"owner-refresh",method:"account/chatgptAuthTokens/refresh",params:{reason:"unauthorized",previousAccountId:"owner"}})+"\\n");',
       '});',
     ].join("\n"));
     const worker = gateway(); await worker.start();
@@ -217,10 +216,17 @@ describe("private per-user worker gateway", () => {
     try {
       await router.start();
       const request = initializeRequest();
-      expect(await router.request(request.rpc, 5_000)).toEqual({ privateRefreshAnswered: true });
-      expect(ownerAccess).toHaveBeenCalledWith("officeexample-production", "owner");
+      const rejectedRequest = expect(router.request(request.rpc, 1_000)).rejects.toThrow();
+      await vi.waitFor(async () => expect(await worker.health()).toMatchObject({
+        healthy: false, state: "failed", detail: "Installation owner authentication is not authorized.",
+      }));
+      await rejectedRequest;
+      expect(ownerAccess).not.toHaveBeenCalled();
       for (const filename of ["gateway-events.jsonl", "gateway-requests.jsonl", "test-client-events.jsonl"]) {
-        const journal = await readFile(path.join(context.transportAudit, filename), "utf8");
+        const journal = await readFile(path.join(context.transportAudit, filename), "utf8").catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return "";
+          throw error;
+        });
         expect(journal).not.toContain(accessToken); expect(journal).not.toContain("account/chatgptAuthTokens/refresh");
       }
     } finally { await router.close(); await worker.stop(); }
