@@ -162,7 +162,9 @@ COPY --chown=root:root modules/horaria/backend/src /opt/aibrain-horaria/src
 RUN /opt/aibrain-horaria/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x --version
 COPY --from=builder --chown=aibrain:aibrain /app/.next/static ./.next/static
 COPY --from=builder --chown=aibrain:aibrain /app/public ./public
-COPY --from=builder --chown=root:root /app/config/internal-agent-context /usr/local/share/aibrain/internal-agent-context
+# Installation context is excluded from the reusable image; the loader supplies
+# the shared product context unless the host mounts its own reviewed context.
+RUN install -d -m 0555 -o root -g root /usr/local/share/aibrain/internal-agent-context
 COPY --from=builder --chown=root:root /app/dist/automation-worker.mjs ./automation-worker.mjs
 COPY --from=builder --chown=root:root /app/dist/initialize-weekly-token-budget.mjs /usr/local/share/aibrain/initialize-weekly-token-budget.mjs
 COPY --from=builder --chown=root:root /app/dist/container-app-server-acceptance.mjs /usr/local/share/aibrain/container-app-server-acceptance.mjs
