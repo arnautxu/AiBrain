@@ -36,9 +36,9 @@ function workbooks() {
 }
 const files = workbooks();
 function fixture() {
-  const states = new Map(), calls = [], input = { recipient: { id: 9, nombre: 'Test', apellidos: 'Employee', telefonoWhatsapp: '+34600000000' }, managerId: 9, inbound: '2026-10-08T10:00:00Z', failSend: false, templateApproved: true, templateName: 'schedule_pdf' };
+  const states = new Map(), calls = [], input = { recipient: { id: 9, nombre: 'Test', apellidos: 'Employee', telefonoWhatsapp: '+34600000000' }, managerId: 9, active: true, inbound: '2026-10-08T10:00:00Z', failSend: false, templateApproved: true, templateName: 'schedule_pdf' };
   const handlers = createReviewedScheduleHandlers({
-    database: { establishment: { findUnique: async () => ({ id: 3, nombre: 'Shop', activo: true, managerLocalId: input.managerId }) },
+    database: { establishment: { findUnique: async () => ({ id: 3, nombre: 'Shop', activo: input.active, managerLocalId: input.managerId }) },
       employee: { findFirst: async ({ where }) => { assert.equal(where.activo, true); assert.equal(where.OR[0].establecimientoId, 3); return where.id === input.recipient.id ? input.recipient : null; } },
       whatsappMessage: { findFirst: async () => input.inbound ? { createdAt: new Date(input.inbound) } : null } },
     load: name => states.has(name) ? structuredClone(states.get(name)) : null,
@@ -229,4 +229,19 @@ test('Meta PDF transport checks approved document template and uploads frozen PD
   const template = await reviewedPdfTemplate();
   const receipt = await sendReviewedPdf('+34600000000', bytes, 'reviewed.pdf', { ...template, bodyParameters: ['Name', 'Shop', 'Week'] });
   assert.equal(receipt.providerMessageId, 'wamid.pdf'); assert.equal(calls.length, 3);
+});
+
+test('inactive test shops can register a draft original but cannot send a reviewed schedule', async () => {
+  const f = fixture();
+  f.input.active = false;
+  const source = await f.call('source', { semana: '2026-W42', sha256: digest(files.sourceBytes) }, f.upload(files.sourceBytes));
+  assert.equal(source.code, 200, JSON.stringify(source.body));
+  assert.equal(f.calls.length, 0);
+  f.input.active = true;
+  const prepared = await f.prepare('pdf');
+  f.input.active = false;
+  const sent = await f.call('send', prepared.sendBody);
+  assert.equal(sent.code, 400);
+  assert.match(sent.body.error, /no està activa/);
+  assert.equal(f.calls.length, 0);
 });

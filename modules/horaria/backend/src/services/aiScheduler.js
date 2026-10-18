@@ -718,7 +718,7 @@ export async function generateAISchedule({ establecimientoId, semana, quality = 
             horasPorTurno: e.horasPorTurno, horaEntradaManana: e.horaEntradaManana, horaEntradaTarde: e.horaEntradaTarde } });
       }
     }
-    const review = { ...reviewDraft(schedules, employees, rules, festivoDays, requests, freeRules), adjustments: finalAdjustments };
+    const review = { ...reviewDraft(schedules, employees, rules, festivoDays, requests, freeRules, establishment), adjustments: finalAdjustments };
     return { schedules, establishment: { ...establishment, id: establecimientoId },
       roster: employees.map(e => schedules.find(s => s.empleadoId === e.id).empleado), review,
       // Model commentary is separate from checks on the final grid.

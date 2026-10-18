@@ -146,7 +146,8 @@ describe("backend CI contract", () => {
     expect(uses.length).toBeGreaterThan(0);
     expect(uses.every((value) => /@[0-9a-f]{40}$/u.test(value))).toBe(true);
     expect(workflow).not.toContain("pull_request_target");
-    expect(workflow).not.toContain("secrets.");
+    expect([...workflow.matchAll(/secrets\.([A-Z0-9_]+)/gu)].map(match => match[1])).toEqual(["SOURCE_BOUNDARY_POLICY"]);
+    expect(workflow).toContain("python3 scripts/check-source-boundary.py");
     expect(workflow).not.toMatch(/contents:\s*write/u);
     expect(workflow).not.toMatch(/persist-credentials:\s*true/u);
   });

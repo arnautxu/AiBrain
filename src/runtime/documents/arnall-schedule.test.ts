@@ -1,3 +1,4 @@
+import { repairArnallScheduleCalculations } from "./arnall-schedule-calculations";
 import { describe, expect, it } from "vitest";
 import JSZip from "jszip";
 import { arnallScheduleParts, type ArnallSchedule } from "./arnall-schedule";
@@ -25,7 +26,7 @@ describe("approved Arnall schedule template", () => {
     expect(sheet).toContain("PETICIÓN APROBADA");
     expect(sheet).not.toContain("PETICIÓ APROVADA");
     expect(sheet).toContain("16:30–20:30");
-    expect(sheet).toContain('COUNTIF(E46:E91,"=M")');
+    expect(sheet).toContain('COUNTIF(E54:E91,"=M")');
   });
 
   it("exports one visible shop with its three calculation dependencies and no foreign data", async () => {
@@ -53,7 +54,7 @@ describe("approved Arnall schedule template", () => {
     expect(all).toContain("Persona obrador");
   });
 
-  it("preserves every original formula element, including shared anchors and inherited defects", () => {
+  it("preserves formula locations while repairing the authorized calculation model", () => {
     const input = data();
     const people = input.people.map(p => ({...p,days:p.days.map(d => d ? {...d,requested:true} : null)}));
     const parts = arnallScheduleParts({...input,people});
@@ -63,10 +64,10 @@ describe("approved Arnall schedule template", () => {
     for(const name of ['sheet1','sheet2','sheet3','sheet4']) {
       const part=`xl/worksheets/${name}.xml` as keyof typeof template;
       const formulas=formulaCells(parts[part]);
-      expect(formulas).toEqual(formulaCells(template[part]));
+      expect(formulas).toEqual(formulaCells(name === "sheet1" ? repairArnallScheduleCalculations(template[part]) : template[part]));
       total+=formulas.length;
     }
-    expect(total).toBe(2500);
+    expect(total).toBe(repairArnallScheduleCalculations(template["xl/worksheets/sheet1.xml"]).match(/<f\b/gu)!.length + 1);
     expect(parts['xl/worksheets/sheet1.xml']).not.toContain('D SI');
     expect(parts['xl/worksheets/sheet1.xml']).toContain('>D</t>');
     expect(parts['xl/worksheets/sheet2.xml']).toContain('Persona botiga');

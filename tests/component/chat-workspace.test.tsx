@@ -450,10 +450,10 @@ describe("chat workspace simplificado", () => {
   });
 
   it("greets the authenticated employee while keeping a shared project's owner in its context", () => {
-    renderWorkspace(null, { ...project, name: "Qualitat · Example User" }, { userName: "Example User", installationId: "worksitea-production" });
-    expect(screen.getByRole("heading", { name: "¿En qué te puedo ayudar, Jordi?" })).toBeInTheDocument();
-    expect(screen.getByTestId("project-breadcrumb")).toHaveTextContent("Qualitat · Example User");
-    expect(screen.getByLabelText("Destino de la conversación")).toHaveTextContent("Qualitat · Example User");
+    renderWorkspace(null, { ...project, name: "Qualitat · Owner Example" }, { userName: "Employee Example", installationId: "worksitea-production" });
+    expect(screen.getByRole("heading", { name: "¿En qué te puedo ayudar, Employee?" })).toBeInTheDocument();
+    expect(screen.getByTestId("project-breadcrumb")).toHaveTextContent("Qualitat · Owner Example");
+    expect(screen.getByLabelText("Destino de la conversación")).toHaveTextContent("Qualitat · Owner Example");
   });
 
   it("keeps the add menu limited to files and authorized connectors", async () => {
@@ -933,7 +933,7 @@ it("shows company-qa authorized connectors while keeping an unavailable connecti
 it("offers neutral tasks without implying department access to a WORKSITEA employee", () => {
   const send = vi.fn();
   renderWorkspace(null, null, { installationId: "worksitea-production", userName: "Example User", onSend: send });
-  expect(screen.getByRole("heading", { name: "¿En qué te puedo ayudar, Example User?" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "¿En qué te puedo ayudar, Example?" })).toBeInTheDocument();
   for (const department of ["Producció", "Qualitat", "Administració"]) expect(screen.queryByRole("button", { name: department })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Resumir documentos" }));
   expect((screen.getByRole("textbox", { name: "Mensaje" }) as HTMLTextAreaElement).value).toContain("documentos");

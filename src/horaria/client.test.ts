@@ -12,6 +12,32 @@ vi.mock("server-only", () => ({}));
 const session = { provider: "local", user: { id: "user-a" }, tenant: { id: "shop-a" } } as AuthSession;
 const config: HorariaConfig = { installationId: "shop-a", baseUrl: "http://127.0.0.1:1", secret: "test-only-secret-with-at-least-32-characters", users: { "user-a": { employeeId: 42, backgroundOperations: [] } }, eventsEnabled: false };
 describe("private horarIA transport", () => {
+  it("reports the closed-list draft failure without trusting diagnostic text", async () => {
+    const server = createServer((_req, res) => { res.statusCode = 500; res.end(JSON.stringify({ code: "DRAFT_INCOMPLETE", error: "PRIVATE SQL password=hidden" })); });
+    server.listen(0, "127.0.0.1"); await new Promise<void>(resolve => server.once("listening", resolve));
+    try {
+      const address = server.address(); if (!address || typeof address === "string") throw new Error("No port");
+      await expect(callHoraria({ ...config, baseUrl: `http://127.0.0.1:${address.port}` }, session,
+        { operation: "schedules.draft", body: { establecimientoId: 3, semana: "2026-W42" } }, tmpdir()))
+        .rejects.toMatchObject({ code: "DRAFT_INCOMPLETE", message: "El cálculo devolvió una semana incompleta. No se ha generado el Excel ni guardado turnos. Avisa al equipo Brain para revisar el cálculo." });
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+  });
+  it("preserves the exact public shop validation error", async () => {
+    const server = createServer((_req, res) => { res.statusCode = 400; res.end(JSON.stringify({ error: "El nombre es obligatorio", secret: "private" })); });
+    server.listen(0, "127.0.0.1"); await new Promise<void>(resolve => server.once("listening", resolve));
+    try {
+      const address = server.address(); if (!address || typeof address === "string") throw new Error("No port");
+      await expect(callHoraria({ ...config, baseUrl: `http://127.0.0.1:${address.port}` }, session, { operation: "establishments.create", body: {} }, tmpdir())).rejects.toMatchObject({ code: "HORARIA_HTTP_400", message: "horarIA (HTTP 400): El nombre es obligatorio." });
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+  });
+  it("surfaces the real HTTP rejection without leaking the server error body", async () => {
+    const server = createServer((_req, res) => { res.statusCode = 409; res.end(JSON.stringify({ error: "secret=must-not-reach-model", sql: "private customer row" })); });
+    server.listen(0, "127.0.0.1"); await new Promise<void>(resolve => server.once("listening", resolve));
+    try {
+      const address = server.address(); if (!address || typeof address === "string") throw new Error("No port");
+      await expect(callHoraria({ ...config, baseUrl: `http://127.0.0.1:${address.port}` }, session, { operation: "status" }, tmpdir())).rejects.toMatchObject({ code: "HORARIA_HTTP_409", message: "horarIA (HTTP 409): Conflicto con el estado actual de los datos." });
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+  });
   it("binds the server-rendered PDF to the exact authorized corrected workbook, ignoring model-supplied provenance", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "horaria-reviewed-pdf-"));
     const workbook = await generateLocalDocument({ format: "xlsx", title: "Fixture", content: "Synthetic fixture", rows: [["Person", "Hours"], ["Test", "15:00–20:45"]] });

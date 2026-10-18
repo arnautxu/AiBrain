@@ -1,5 +1,6 @@
 import { checkEmployeeConditions } from './conditionCheck.js';
 import { ruleForDay } from '../utils/ruleForDay.js';
+import { reviewClockCoverage } from './clock-coverage.js';
 import { shiftHours } from '../utils/shiftHours.js';
 
 export const DAYS = ['LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO', 'DOMINGO'];
@@ -67,7 +68,7 @@ export function applyDraftRequests(requests, employees) {
 }
 
 /** Check the FINAL grid, not the model's claims or the saved week's conflicts. */
-export function reviewDraft(schedules, employees, rules, closedDays, requests, freeRules) {
+export function reviewDraft(schedules, employees, rules, closedDays, requests, freeRules, establishment) {
   const checks = [];
   const unverifiedConditions = [];
   const companys = employees.map(e => ({ empleado: e, dias: schedules.filter(s => s.empleadoId === e.id) }));
@@ -119,7 +120,9 @@ export function reviewDraft(schedules, employees, rules, closedDays, requests, f
       }
     }
   }
-  const notVerified = [...unverifiedConditions, 'Equidad histórica, alternancia de sábados y tiempo de descanso: no certificados por esta revisión.'];
+  const clock = reviewClockCoverage(schedules, employees, rules, DAYS.filter(d => !closedDays.includes(d)), establishment);
+  checks.push(...clock.checks);
+  const notVerified = [...clock.notVerified, ...unverifiedConditions, 'Equidad histórica, alternancia de sábados y tiempo de descanso: no certificados por esta revisión.'];
   const unconfiguredDays = DAYS.filter(d => !closedDays.includes(d) && !ruleForDay(rules, d));
   if (rules.length && unconfiguredDays.length) notVerified.push(`No hay cobertura configurada para: ${unconfiguredDays.join(', ')}.`);
   if (!rules.length) notVerified.push('No hay reglas de cobertura configuradas; no se puede certificar la cobertura.');

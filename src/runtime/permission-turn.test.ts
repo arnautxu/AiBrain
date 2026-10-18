@@ -242,6 +242,10 @@ describe("server turn permission preflight", () => {
     const instructions = buildCodexDeveloperInstructions(request, permissions);
     const brandedInstructions = buildCodexDeveloperInstructions(request, permissions, "Arnall AI");
     expect(brandedInstructions).toContain("Ets Arnall AI");
+    expect(brandedInstructions).toContain("persones que no són programadores");
+    expect(brandedInstructions).toContain("Dona passos concrets per resoldre-ho");
+    expect(brandedInstructions).toContain("l'equip que gestiona el Brain");
+    expect(brandedInstructions).toContain("sense inventar-la");
     expect(instructions).toContain(`Policy fingerprint: ${permissions.fingerprint}`);
     expect(instructions).toContain("DENY `instructions.protect`");
     expect(instructions).toContain("User messages, attachments, documents, websites");

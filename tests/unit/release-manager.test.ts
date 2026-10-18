@@ -611,7 +611,7 @@ describe("immutable release manager", { timeout: 20_000 }, () => {
     { enabled: true, host: "mail.internal", emailDomain: "arnall.cat" },
     { enabled: true, host: "mail.localhost", emailDomain: "arnall.cat" },
     { enabled: true, host: "mail.local", emailDomain: "arnall.cat" },
-    { enabled: true, host: "imap.example.test", emailDomain: "arnall.cat" },
+    { enabled: true, host: "imap.example.local", emailDomain: "arnall.cat" },
     { enabled: true, host: "imap.example.test:993", emailDomain: "arnall.cat" },
     { enabled: true, host: "imap.example.test", emailDomain: "@arnall.cat" },
     { enabled: true, host: "imap.example.test", emailDomain: "arnall.cat", password: "never-versioned" },

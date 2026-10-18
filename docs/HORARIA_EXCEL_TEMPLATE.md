@@ -260,3 +260,41 @@ amb dades fictícies, Z6 passa a 40, AA6 a 15 i les vacances AD6/AE6 a 12/6.
 Cap fórmula s’ha substituït i no apareixen errors addicionals.
 Passen 52 proves AiBrain i 7 del servei, comprovació de tipus, lint dels
 fitxers afectats i construcció del worker. No s’ha desplegat el canvi.
+
+## Correcció autoritzada del càlcul — candidat 2026-10-18
+
+Aquesta secció substitueix el contracte anterior de conservar també els
+errors de càlcul. L'original aportat i el JSON d'extracció continuen intactes.
+El generador aplica una reparació determinista a l'horari de cada botiga:
+
+- Les 70 fórmules amb referències trencades i la validació `PESONAL!#REF!`
+  deixen de propagar errors. Cada total i auxiliar apunta al seu espai de
+  persona, amb les dues files d'hores corresponents. Es creen les dues
+  cel·les de total absents de l'original, sense canviar la geometria.
+- Les hores setmanals es calculen pels intervals editables M/T/D, inclosos
+  els dos intervals del torn partit. Un interval buit o invàlid en un dia
+  de treball deixa el total en `PENDIENTE`; no es converteix en zero.
+- El recompte d'obrador comença a la fila 54, sense comptar dependents.
+- Les consultes de saldos segueixen la mateixa persona; l'acord mensual
+  correspon al mes de la setmana seleccionada, no al dia d'obertura del llibre.
+  Una font numèrica zero és zero; una dada absent és `PENDIENTE`, també en
+  els resultats que en depenen. No es modifica cap dada de negoci.
+
+L'original verificat amb SHA-256
+`66aaf476845740252196af7c2f6e910c31f2013aeefc6a4e1cf9ed02bc55816e`
+sí que conté dades de personal i vacances. No constitueix, per si sol, una
+font vigent de tots els saldos: conté camps de 2022, 2023 i 2024 i no acredita
+el període de tots els registres. No s'importen automàticament les dades
+personals o d'altres botigues des d'aquest llibre històric.
+
+Quan falti informació, el xat ha d'indicar que Arnall ha de carregar o
+confirmar al Brain una font vigent amb persona, botiga, data de referència,
+període, saldos d'hores, vacances i acords mensuals. Carregar un document no
+prova la integració: després cal verificar el mapatge, la vigència i la lectura
+dels saldos al càlcul autoritzat. No es poden garantir totals històrics abans
+d'aquesta integració. Aquesta connexió de dades continua pendent.
+
+Validació del candidat: proves de fórmules i conservació de recursos natius,
+recalculació sobre dades sintètiques de les 43 places, edició d'intervals i
+contrast de dades absents, zero verificat i valors numèrics. CI, publicació,
+desplegament i acceptació autenticada continuen sent gates separats.

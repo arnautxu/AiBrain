@@ -328,7 +328,7 @@ describe("WorkerProvisioner", () => {
     });
   });
 
-  it("migrates only receipted owner credentials to external access without copying a refresh token", async () => {
+  it("rejects unsupported owner socket authentication without deleting existing credentials", async () => {
     const { config: base } = await fixture();
     const config = { ...base, installationId: "officeexample-production" };
     const sourcePath = path.join(config.paths.dataRoot, "installation-owner-auth", "auth.json");
@@ -340,15 +340,10 @@ describe("WorkerProvisioner", () => {
     vi.stubEnv("AIBRAIN_CODEX_AUTH_SCOPE", "installation-owner");
     vi.stubEnv("AIBRAIN_INSTALLATION_OWNER_AUTH_ACK", "officeexample-production");
     try {
-      await provisioner.provision(first.userId);
-      await expect(lstat(path.join(first.roots.codexHome, "auth.json"))).rejects.toMatchObject({ code: "ENOENT" });
-      await provisioner.provision(first.userId);
-      const second = await provisioner.provision(syntheticUser(2));
-      await expect(lstat(path.join(second.roots.codexHome, "auth.json"))).rejects.toMatchObject({ code: "ENOENT" });
-      await writeFile(path.join(second.roots.codexHome, "auth.json"), "{}", { mode: 0o600 });
-      await writeFile(path.join(second.roots.auditRoot, "codex-auth-scope.json"), JSON.stringify({ scope: "per-user", userId: second.userId }));
-      await expect(provisioner.provision(second.userId)).rejects.toMatchObject({ code: "WORKER_SHARED_AUTH_SOURCE_UNSAFE" });
-      expect(await readFile(path.join(second.roots.codexHome, "auth.json"), "utf8")).toBe("{}");
+      const existing = await readFile(path.join(first.roots.codexHome, "auth.json"), "utf8");
+      await expect(provisioner.provision(first.userId)).rejects.toThrow("Installation owner authentication is not authorized.");
+      expect(await readFile(path.join(first.roots.codexHome, "auth.json"), "utf8")).toBe(existing);
+      expect(await readFile(sourcePath, "utf8")).toContain("never-duplicate-me");
     } finally { vi.unstubAllEnvs(); }
   });
 

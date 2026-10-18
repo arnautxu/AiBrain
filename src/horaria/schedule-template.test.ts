@@ -1,3 +1,4 @@
+import { repairArnallScheduleCalculations } from "@/runtime/documents/arnall-schedule-calculations";
 import { describe, expect, it } from "vitest";
 import JSZip from "jszip";
 import installation from "../../config/installations/arnall.qa.example.json";
@@ -27,8 +28,8 @@ describe("Arnall preview template selection", () => {
     const sheet = await zip.file("xl/worksheets/sheet1.xml")!.async("text");
     expect(sheet).toContain("Persona fictícia");
     expect(sheet.match(/<f\b[^>]*?(?:\/>|>[\s\S]*?<\/f>)/gu))
-      .toEqual(template["xl/worksheets/sheet1.xml"].match(/<f\b[^>]*?(?:\/>|>[\s\S]*?<\/f>)/gu));
-    expect(sheet.match(/<f\b/gu)).toHaveLength(2499);
+      .toEqual(repairArnallScheduleCalculations(template["xl/worksheets/sheet1.xml"]).match(/<f\b[^>]*?(?:\/>|>[\s\S]*?<\/f>)/gu));
+    expect(sheet.match(/<f\b/gu)).toHaveLength(repairArnallScheduleCalculations(template["xl/worksheets/sheet1.xml"]).match(/<f\b/gu)!.length);
     for (const node of ["cols", "mergeCells", "pageMargins", "pageSetup"]) {
       const re = new RegExp(`<${node}\\b[^>]*(?:/>|>[\\s\\S]*?</${node}>)`, "u");
       expect(sheet.match(re)?.[0]).toBe(template["xl/worksheets/sheet1.xml"].match(re)?.[0]);

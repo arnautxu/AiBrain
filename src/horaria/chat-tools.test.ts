@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InstallationConfig } from "@/config/installation-schema";
 import type { ResolvedPermissions } from "@/permissions";
 import type { AuthSession } from "@/auth/types";
-import { handleHorariaToolCall, HORARIA_NAMESPACE } from "./chat-tools";
+import { confirmsHoraria, handleHorariaToolCall, handleHorariaToolCallSafely, HORARIA_NAMESPACE } from "./chat-tools";
 import { resolveOperation } from "./operations";
 import { callHoraria, loadHorariaConfig } from "./client";
 vi.mock("server-only", () => ({}));
@@ -25,7 +25,49 @@ async function setup() {
   };
   return { context, config, run };
 }
+it("accepts confirmation explicitly limited to the already reviewed change", () => {
+  expect(confirmsHoraria("Sí, confirmo la reactivació de la botiga de proves i només aquest canvi.")).toBe(true);
+  expect(confirmsHoraria("Confirmo, solo esta propuesta.")).toBe(true);
+  expect(confirmsHoraria("Confirmo només si canvies el destinatari.")).toBe(false);
+});
+
 describe("horarIA chat boundary", () => {
+  it.each(["Sí", "Confirmo", "Si! Tienes que añadir al trabajador prova, que además es el encargado", "Sí, adelante con la propuesta.", "Confirmo la creación de la tienda.", "Sí! A més afegeix el treballador de prova."])("accepts explicit confirmation with extra text: %s", message => {
+    expect(confirmsHoraria(message)).toBe(true);
+  });
+  it.each(["Si, por que no has creado la nueva tienda?", "Sí, pero cambia el nombre", "Sí, si tiene permiso", "Si puedes crearla", "Sí, antes revisa los datos", "Sí, no la crees todavía", "Confirmo solo la primera", "El documento dice: sí", "No confirmo", "Sí, espera", "Si us plau explica què faràs"])("rejects questions, conditions and indirect consent: %s", message => {
+    expect(confirmsHoraria(message)).toBe(false);
+  });
+  it("executes only the frozen change when confirmation also requests a new employee", async () => {
+    const { run } = await setup();
+    const input = { operation: "establishments.create", body: { nombre: "Prueba" } };
+    const pending = await run("run", input);
+    await run("confirm", { proposalId: pending.proposalId }, { sourceTurnId: "turn-2", sourceMessage: "Si! Tienes que añadir al trabajador prova" });
+    expect(callHoraria).toHaveBeenCalledOnce();
+    expect(vi.mocked(callHoraria).mock.calls[0][2]).toEqual(input);
+  });
+  it("returns the actual confirmation failure as structured output without executing", async () => {
+    const { context } = await setup();
+    const result = await handleHorariaToolCallSafely({ namespace: HORARIA_NAMESPACE, tool: "confirm", arguments: { proposalId: "a".repeat(64) }, threadId: "runtime-a", turnId: "runtime-1", callId: "test" }, { ...context, sourceMessage: "Sí, por qué falla?" });
+    expect(result.success).toBe(false);
+    expect(JSON.parse((result.contentItems[0] as { text: string }).text)).toMatchObject({ code: "HORARIA_CONFIRMATION_REQUIRED", message: expect.stringContaining("confirmación explícita"), retryable: false, resolutionOwner: "user", nextStep: expect.stringContaining("equipo que gestiona vuestro Brain") });
+    expect(callHoraria).not.toHaveBeenCalled();
+  });
+  it("does not expose internal exception details or replay an uncertain write", async () => {
+    const { context, run } = await setup();
+    const pending = await run("run", { operation: "establishments.create", body: { nombre: "Prueba" } });
+    vi.mocked(callHoraria).mockRejectedValue(new Error("secret=private-password /private/customer-data"));
+    const params = { namespace: HORARIA_NAMESPACE, tool: "confirm", arguments: { proposalId: pending.proposalId }, threadId: "runtime-a", turnId: "runtime-1", callId: "test" };
+    const confirmed = { ...context, sourceTurnId: "turn-2", sourceMessage: "Confirmo la propuesta" };
+    const failed = await handleHorariaToolCallSafely(params, confirmed);
+    expect(failed.success).toBe(false);
+    expect(JSON.stringify(failed)).not.toContain("private-password");
+    expect(JSON.stringify(failed)).toContain("brain_team");
+    expect(JSON.stringify(failed)).toContain("Avisa al equipo");
+    const retry = await handleHorariaToolCallSafely(params, confirmed);
+    expect(JSON.stringify(retry)).toContain("puede haberse aplicado");
+    expect(callHoraria).toHaveBeenCalledOnce();
+  });
   it("retains the registered original receipt across draft retries and keeps reviewed delivery behind confirmation", async () => {
     const { run, context } = await setup();
     const draft: Record<string, unknown> = { draftOnly: true };

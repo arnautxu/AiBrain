@@ -1,4 +1,5 @@
 import "server-only";
+import { HorariaToolError } from "./errors";
 import { privateHorariaRequest } from "./private-transport";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
@@ -15,15 +16,15 @@ export async function loadHorariaConfig(installation: Readonly<InstallationConfi
   const file = await open(path.join(installation.paths.dataRoot, "horaria", "integration.json"), constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = await file.stat();
-    if (!stat.isFile() || stat.size > 64_000 || (stat.mode & 0o077)) throw new Error("La configuración de horarios debe ser privada.");
+    if (!stat.isFile() || stat.size > 64_000 || (stat.mode & 0o077)) throw new HorariaToolError("La configuración de horarios debe ser privada.");
     const c = JSON.parse(await file.readFile("utf8")) as HorariaConfig;
     const url = new URL(c.baseUrl);
     if (c.installationId !== installation.installationId || typeof c.secret !== "string" || c.secret.length < 32 ||
-      !["http:", "https:"].includes(url.protocol) || url.username || url.password || url.pathname !== "/" || url.search || url.hash || typeof c.eventsEnabled !== "boolean" || !c.users || typeof c.users !== "object" || Array.isArray(c.users)) throw new Error("Configuración de horarios no válida.");
+      !["http:", "https:"].includes(url.protocol) || url.username || url.password || url.pathname !== "/" || url.search || url.hash || typeof c.eventsEnabled !== "boolean" || !c.users || typeof c.users !== "object" || Array.isArray(c.users)) throw new HorariaToolError("Configuración de horarios no válida.");
     for (const user of Object.values(c.users)) {
-      if (!Number.isSafeInteger(user.employeeId) || user.employeeId < 1 || !Array.isArray(user.backgroundOperations) || user.backgroundOperations.some(op => typeof op !== "string")) throw new Error("Asignación de horarios no válida.");
+      if (!Number.isSafeInteger(user.employeeId) || user.employeeId < 1 || !Array.isArray(user.backgroundOperations) || user.backgroundOperations.some(op => typeof op !== "string")) throw new HorariaToolError("Asignación de horarios no válida.");
     }
-    if (c.eventActorId !== undefined && (typeof c.eventActorId !== "string" || !Object.hasOwn(c.users, c.eventActorId))) throw new Error("Responsable de WhatsApp no válido.");
+    if (c.eventActorId !== undefined && (typeof c.eventActorId !== "string" || !Object.hasOwn(c.users, c.eventActorId))) throw new HorariaToolError("Responsable de WhatsApp no válido.");
     return c;
   } finally { await file.close(); }
 }
@@ -35,28 +36,28 @@ export function bridgeToken(config: HorariaConfig, request: { method: string; ta
 }
 
 export async function callHoraria(config: HorariaConfig, session: AuthSession, input: OperationInput, projectWorkspace: string, renderPdf?: (data: Buffer, fileName: string) => Promise<Buffer>) {
-  if (session.provider !== "local" || session.tenant.id !== config.installationId || !Object.hasOwn(config.users, session.user.id)) throw new Error("No tienes acceso a los horarios de esta instalación.");
+  if (session.provider !== "local" || session.tenant.id !== config.installationId || !Object.hasOwn(config.users, session.user.id)) throw new HorariaToolError("No tienes acceso a los horarios de esta instalación.");
   const op = resolveOperation(input);
   let body = Buffer.from(input.body ? JSON.stringify(input.body) : "");
   let contentType = body.length ? "application/json" : "";
   if (input.uploadPath) {
-    if (path.isAbsolute(input.uploadPath) || input.uploadPath.split(/[\\/]/).includes("..")) throw new Error("El archivo debe pertenecer al proyecto actual.");
+    if (path.isAbsolute(input.uploadPath) || input.uploadPath.split(/[\\/]/).includes("..")) throw new HorariaToolError("El archivo debe pertenecer al proyecto actual.");
     const data = await readRegularFileWithin(projectWorkspace, input.uploadPath, 10 * 1024 * 1024);
     const workbook = input.operation === "schedules.review-upload";
     const mime = workbook ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : data.subarray(0, 3).equals(Buffer.from([255, 216, 255])) ? "image/jpeg" : data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? "image/png" : null;
-    if (!mime) throw new Error("Adjunta una imagen PNG o JPEG.");
-    if (workbook && validateUploadedDocument({ fileName: path.basename(input.uploadPath), declaredMimeType: mime, data }).kind !== "xlsx") throw new Error("Adjunta un Excel .xlsx.");
+    if (!mime) throw new HorariaToolError("Adjunta una imagen PNG o JPEG.");
+    if (workbook && validateUploadedDocument({ fileName: path.basename(input.uploadPath), declaredMimeType: mime, data }).kind !== "xlsx") throw new HorariaToolError("Adjunta un Excel .xlsx.");
     const form = new FormData();
     for (const [key, value] of Object.entries(input.body ?? {})) form.set(key, String(value));
     form.set(workbook ? "workbook" : "imagen", new Blob([new Uint8Array(data)], { type: mime }), path.basename(input.uploadPath));
     if (workbook) {
       const format = input.body?.deliveryFormat ?? "pdf";
-      if (format !== "pdf" && format !== "xlsx") throw new Error("Formato de reparto no válido.");
+      if (format !== "pdf" && format !== "xlsx") throw new HorariaToolError("Formato de reparto no válido.");
       form.set("deliveryFormat", format);
       if (format === "pdf") {
-        if (!renderPdf) throw new Error("No está disponible la conversión segura del Excel corregido.");
+        if (!renderPdf) throw new HorariaToolError("No está disponible la conversión segura del Excel corregido.");
         const pdf = await renderPdf(data, path.basename(input.uploadPath));
-        if (pdf.length > 4 * 1024 * 1024 || !pdf.subarray(0, 5).equals(Buffer.from("%PDF-"))) throw new Error("PDF revisado no válido.");
+        if (pdf.length > 4 * 1024 * 1024 || !pdf.subarray(0, 5).equals(Buffer.from("%PDF-"))) throw new HorariaToolError("PDF revisado no válido.");
         form.set("pdfSourceSha256", createHash("sha256").update(data).digest("hex"));
         form.set("pdfSha256", createHash("sha256").update(pdf).digest("hex"));
         form.set("pdfPages", "1");
@@ -67,22 +68,51 @@ export async function callHoraria(config: HorariaConfig, session: AuthSession, i
     body = Buffer.from(await serialized.arrayBuffer());
     contentType = serialized.headers.get("content-type")!;
   }
-  if (body.length > 15 * 1024 * 1024) throw new Error("Solicitud demasiado grande.");
+  if (body.length > 15 * 1024 * 1024) throw new HorariaToolError("Solicitud demasiado grande.");
   const token = bridgeToken(config, { method: op.method, target: op.target, contentType, body, kind: "user", actorId: session.user.id, employeeId: config.users[session.user.id].employeeId });
   const response = await privateHorariaRequest(config.baseUrl, op.target, { method: op.method, headers: { "x-aibrain-authorization": token, ...(contentType ? { "content-type": contentType } : {}) }, body: body.length ? body : undefined, signal: AbortSignal.timeout(op.effect === "ai" || op.effect === "draft" ? 20 * 60_000 : 90_000) });
   const text = await response.text();
-  if (text.length > 2_000_000) throw new Error("Respuesta demasiado grande; filtra por tienda y semana.");
-  if (!response.ok) throw new Error(`horarIA (${response.status}): ${text.slice(0, 1500)}`);
+  if (text.length > 2_000_000) throw new HorariaToolError("Respuesta demasiado grande; filtra por tienda y semana.");
+  if (!response.ok) {
+    // Error bodies can contain SQL, credentials or customer records. Surface
+    // the actual HTTP cause without copying untrusted server diagnostics.
+    const causes: Record<number, string> = { 400: "Datos de la operación no válidos", 401: "Autenticación del servicio rechazada", 403: "Permiso denegado por el servicio", 404: "Registro u operación no encontrados", 409: "Conflicto con el estado actual de los datos", 422: "Los datos no cumplen las reglas de validación", 429: "Límite de solicitudes alcanzado", 500: "Error interno del servicio de horarios", 502: "El servicio de horarios no está disponible", 503: "El servicio de horarios no está disponible", 504: "Tiempo de espera del servicio agotado" };
+    const publicMessages = new Set([
+      "El nombre es obligatorio",
+      "diasApertura debe ser una lista de días válidos (LUNES...DOMINGO) con al menos un día",
+      "Establecimiento no encontrado",
+    ]);
+    if (input.operation === "schedules.draft") {
+      const draftMessages: Record<string, string> = {
+        DRAFT_INCOMPLETE: "El cálculo devolvió una semana incompleta. No se ha generado el Excel ni guardado turnos. Avisa al equipo Brain para revisar el cálculo.",
+        DRAFT_INVALID_SHIFT: "El cálculo devolvió un turno no válido. No se ha generado el Excel ni guardado turnos. Avisa al equipo Brain.",
+        DRAFT_INVALID_OUTPUT: "No se ha podido interpretar la propuesta devuelta por el cálculo. No se han guardado turnos. Avisa al equipo Brain.",
+        DRAFT_CALCULATION_UNAVAILABLE: "El servicio de cálculo no ha completado la propuesta. No se han guardado turnos. Avisa al equipo Brain para revisar la conexión y el cálculo.",
+        DRAFT_INTERNAL: "Un error interno ha impedido completar el horario. No se han guardado turnos. Avisa al equipo Brain e indica la tienda y la semana.",
+      };
+      let code: unknown;
+      try { code = (JSON.parse(text) as { code?: unknown }).code; } catch { /* Closed-list codes only. */ }
+      if (typeof code === "string" && Object.hasOwn(draftMessages, code)) throw new HorariaToolError(draftMessages[code], code);
+    }
+    let detail: string | undefined;
+    if (response.status >= 400 && response.status < 500) {
+      try {
+        const body: unknown = JSON.parse(text);
+        if (body && typeof body === "object" && "error" in body && typeof body.error === "string" && publicMessages.has(body.error)) detail = body.error;
+      } catch { /* Non-JSON diagnostics are never public. */ }
+    }
+    throw new HorariaToolError(`horarIA (HTTP ${response.status}): ${detail ?? causes[response.status] ?? "Solicitud rechazada por el servicio"}.`, `HORARIA_HTTP_${response.status}`);
+  }
   // No password hashes, access tokens or provider secrets may enter the conversation.
   return JSON.parse(text, (key, value) => /password|secret|token|apikey|api_key/i.test(key) ? undefined : value) as unknown;
 }
 
 /** Internal artifact registration, deliberately absent from the model's operation catalogue. */
 export async function registerHorariaReviewSource(config: HorariaConfig, session: AuthSession, input: { establecimientoId: number; semana: string; fileName: string; sha256: string }, projectWorkspace: string) {
-  if (session.provider !== "local" || session.tenant.id !== config.installationId || !Object.hasOwn(config.users, session.user.id)) throw new Error("No tienes acceso a los horarios de esta instalación.");
-  if (input.fileName !== path.basename(input.fileName) || /[\\\u0000-\u001f]/u.test(input.fileName) || !input.fileName.endsWith(".xlsx")) throw new Error("Archivo de propuesta no válido.");
+  if (session.provider !== "local" || session.tenant.id !== config.installationId || !Object.hasOwn(config.users, session.user.id)) throw new HorariaToolError("No tienes acceso a los horarios de esta instalación.");
+  if (input.fileName !== path.basename(input.fileName) || /[\\\u0000-\u001f]/u.test(input.fileName) || !input.fileName.endsWith(".xlsx")) throw new HorariaToolError("Archivo de propuesta no válido.");
   const bytes = await readRegularFileWithin(projectWorkspace, path.join("documents", input.fileName), 10 * 1024 * 1024);
-  if (createHash("sha256").update(bytes).digest("hex") !== input.sha256) throw new Error("La propuesta original ha cambiado.");
+  if (createHash("sha256").update(bytes).digest("hex") !== input.sha256) throw new HorariaToolError("La propuesta original ha cambiado.");
   const form = new FormData();
   form.set("establecimientoId", String(input.establecimientoId)); form.set("semana", input.semana); form.set("sha256", input.sha256);
   form.set("workbook", new Blob([new Uint8Array(bytes)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), input.fileName);
@@ -91,8 +121,8 @@ export async function registerHorariaReviewSource(config: HorariaConfig, session
   const target = "/api/integration/review-source";
   const token = bridgeToken(config, { method: "POST", target, contentType, body, kind: "user", actorId: session.user.id, employeeId: config.users[session.user.id].employeeId });
   const result = await privateHorariaRequest(config.baseUrl, target, { method: "POST", headers: { "x-aibrain-authorization": token, "content-type": contentType }, body, signal: AbortSignal.timeout(90000) });
-  if (!result.ok) throw new Error(`No se ha podido registrar el original para revisión (${result.status}).`);
+  if (!result.ok) throw new HorariaToolError(`No se ha podido registrar el original para revisión (${result.status}).`);
   const value = await result.json() as { sourceId: string; sha256: string };
-  if (!/^[a-f0-9]{64}$/.test(value.sourceId) || value.sha256 !== input.sha256) throw new Error("Recibo del original no válido.");
+  if (!/^[a-f0-9]{64}$/.test(value.sourceId) || value.sha256 !== input.sha256) throw new HorariaToolError("Recibo del original no válido.");
   return value;
 }

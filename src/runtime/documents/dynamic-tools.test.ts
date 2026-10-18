@@ -1,3 +1,4 @@
+import { repairArnallScheduleCalculations } from "./arnall-schedule-calculations";
 import { generateLocalDocument } from "@/runtime/documents/local-document-generator";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
@@ -278,7 +279,7 @@ describe("local document dynamic tool", () => {
     expect(sheet).toContain("Botiga Demo");
     expect(sheet).toContain("Aina");
     expect(sheet).toContain("09:00–14:00");
-    expect(sheet.match(/<f\b/gu)).toHaveLength(2499);
+    expect(sheet.match(/<f\b/gu)).toHaveLength(repairArnallScheduleCalculations(template["xl/worksheets/sheet1.xml"]).match(/<f\b/gu)!.length);
     expect((await zip.file("xl/workbook.xml")!.async("text")).match(/<sheet\b/gu)).toHaveLength(4);
     for (const node of ["mergeCells", "pageMargins", "pageSetup"]) {
       const re = new RegExp(`<${node}\\b[^>]*(?:/>|>[\\s\\S]*?</${node}>)`, "u");

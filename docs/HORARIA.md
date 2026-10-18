@@ -159,3 +159,59 @@ dobles de persistència, restriccions per dia, actualitzacions parcials,
 contradiccions i denegació entre botigues; mai connecten a producció.
 Backend CI, publicació GHCR, desplegament i repetició autenticada dels casos
 fallits són gates separats. Aquest registre no acredita encara aquests gates.
+
+## Confirmació i errors del xat — candidat 2026-10-18
+
+Les confirmacions inicials explícites poden incloure text addicional, com
+«Si! Tienes que añadir al trabajador prova». Només s’aplica la proposta
+immutable revisada: els afegits necessiten una proposta pròpia. Preguntes,
+negacions, condicions i correccions no autoritzen l’execució. Es mantenen
+els límits d’usuari, conversa, torn posterior, caducitat i background.
+
+El worker retorna errors de negoci deliberadament públics amb `success: false`,
+`code`, `message` i `retryable: false`, en comptes de convertir-los en un error
+RPC opac. Els rebutjos HTTP mostren l’estat real i una causa segura; els cossos
+d’error del servidor i les excepcions internes no entren al xat. Una escriptura
+iniciada continua en estat incert si falla: cal consultar abans de repetir.
+Aquesta nota descriu el candidat local; CI, publicació, desplegament i acceptació
+autenticada continuen sent gates separats.
+
+## Cobertura per hores — correcció local 2026-10-18
+
+La revisió de l’esborrany comprova també els intervals d’entrada, sortida i
+descans exportats a l’Excel. Detecta un matí que acaba a les 14.00 i una tarda
+que comença a les 14.45 encara que el recompte per torn compleixi el mínim.
+Exclou el tancament de migdia i no compta una persona durant el descans d’un
+torn partit ni duplica persones amb files repetides.
+
+El mínim compartit de matí i tarda s’exigeix durant tota l’obertura. Amb
+mínims diferents, no s’inventa una hora de separació: la comprovació de cada
+mínim per hores queda pendent. Les obertures absents, invàlides o nocturnes
+també queden sense certificar. Els conflictes expliquen la franja i demanen
+ajustar hores o assignar algú disponible; si no és possible, cal avisar
+l’equip Brain. No es canvien disponibilitats ni torns automàticament.
+
+Proves locals: buit W44, correcció 14.00–20.00, descans partit, tancament
+de migdia, mínims superiors, persones duplicades, funcions diferents i dades
+absents. CI, GHCR, desplegament i acceptació autenticada resten pendents.
+
+## Esborranys de botigues inactives i errors — 2026-10-18
+
+El càlcul permet un esborrany privat d'una botiga inactiva. El registre de
+l'Excel original també l'ha de permetre: registrar metadades de revisió no
+concedeix permís d'enviar. Es conserven hash, botiga/setmana, propietari,
+instal·lació i autorització de la ruta. La destinació i l'enviament encara
+requereixen una botiga activa. La regressió mostra l'error abans del canvi i
+comprova registre correcte i zero enviaments amb la botiga inactiva després.
+
+Una prova amb set persones i tres conjunts de condicions temporals verifica
+límits de 20/24 h, dies lliures, disponibilitat per torn i una tarda obligatòria,
+sense escriure dades de negoci. Els errors del càlcul es classifiquen amb codis
+i missatges públics tancats; no s'hi copien excepcions ni secrets. El registre
+privat conserva només codi i ubicacions de les frames per poder diagnosticar
+fallades internes. La recuperació d'un esborrany calculat reutilitza el resultat
+conservat; no cal recalcular-lo perquè hagi fallat l'adjunt.
+
+Integració sobre un clon nou del main recuperat, sense incorporar l'historial
+anterior. Aquestes són proves locals; CI, GHCR, desplegament i repetició
+completa al xat requereixen els seus gates separats.

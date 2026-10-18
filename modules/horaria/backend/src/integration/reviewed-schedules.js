@@ -111,7 +111,9 @@ export function createReviewedScheduleHandlers({ database = prisma, load = loadS
       const workbook = inspectWorkbook(file.buffer);
       const shop = await database.establishment.findUnique({ where: { id: ctx.establishmentId }, select: { nombre: true, activo: true } });
       const cells = workbook.grid[0].cells;
-      check(shop?.activo && cells.get('G4')?.value === shop.nombre && cells.get('O4')?.value === week.slice(0, 4) && Number(cells.get('D4')?.value) === Number(week.slice(6)), 'L’Excel original no correspon a la botiga i setmana.');
+      // Registering a private draft is not permission to send it. Inactive
+      // test shops may preview; destination() still requires an active shop.
+      check(shop && cells.get('G4')?.value === shop.nombre && cells.get('O4')?.value === week.slice(0, 4) && Number(cells.get('D4')?.value) === Number(week.slice(6)), 'L’Excel original no correspon a la botiga i setmana.');
       const id = hash(JSON.stringify([ctx, week, req.body.sha256]));
       if (!load(`review-source-${id}.json`)) save(`review-source-${id}.json`, { ...ctx, id, week, sha256: req.body.sha256, filename: file.originalname, bytes: file.buffer.toString('base64'), createdAt: now().toISOString() });
       return res.json({ sourceId: id, sha256: req.body.sha256, semana: week, establecimientoId: ctx.establishmentId });

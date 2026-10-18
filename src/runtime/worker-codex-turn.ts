@@ -1,3 +1,4 @@
+import { productSafeRuntimeMessage } from "@/runtime/error-guidance";
 import { hostAnalysisConfig, hostAnalysisToolAllowed, type HostAnalysisPolicy } from "@/runtime/host-analysis-policy";
 import { INSTANTLY_DYNAMIC_TOOLS, INSTANTLY_NAMESPACE, handleInstantlyTool } from "@/runtime/instantly-dynamic-tools";
 import { CONNECTED_ACTION_DYNAMIC_TOOLS, CONNECTED_ACTION_NAMESPACE, handleConnectedActionDynamicToolCall } from "@/runtime/connected-action-dynamic-tools";
@@ -14,7 +15,7 @@ import { requestPagedThreadRecovery } from "@/runtime/paged-thread-recovery";
 import { DurableTurnSubmission, TurnSubmissionRecoveryRequired, turnSubmissionBinding } from "@/runtime/turn-submission-store";
 import { FileModelTurnQueue, type ModelTurnAdmission } from "@/runtime/model-turn-queue";
 import { loadHorariaConfig, registerHorariaReviewSource } from "@/horaria/client";
-import { HORARIA_NAMESPACE, HORARIA_TOOLS, handleHorariaToolCall, horariaInstructions } from "@/horaria/chat-tools";
+import { HORARIA_NAMESPACE, HORARIA_TOOLS, handleHorariaToolCallSafely, horariaInstructions } from "@/horaria/chat-tools";
 
 import { isWorkspaceAdmin } from "@/admin/server-service";
 
@@ -249,11 +250,6 @@ function turnTerminalTimeouts() {
     2 * 60 * 60_000,
   );
   return { idleTimeoutMs, hardTimeoutMs: Math.max(idleTimeoutMs, hardTimeoutMs) };
-}
-
-function productSafeRuntimeMessage(message: string) {
-  if (message === "Selected model is at capacity. Please try a different model.") return MODEL_CAPACITY_MESSAGE;
-  return publicActivityText(message, 2_000) ?? "El servicio no ha podido completar esta operación.";
 }
 
 async function awaitLateAppServerResponse(
@@ -1935,7 +1931,7 @@ async function runWorkerCodexTurnAttempt(
           const horariaSession = runtimeIdentitySession ?? automationSession;
           if (horariaSession && isRecord(request.params) && request.params.namespace === HORARIA_NAMESPACE) {
             const horariaTurnId = runtimeTurnId;
-            const runHoraria = () => handleHorariaToolCall(request.params as never, {
+            const runHoraria = () => handleHorariaToolCallSafely(request.params as never, {
               session: horariaSession, installation: runtime.config, permissions, projectId: chatRequest.projectId,
               sourceThreadId: chatRequest.threadId, sourceTurnId: chatRequest.assistantMessageId,
               sourceMessage: chatRequest.message, runtimeThreadId: threadId, runtimeTurnId: horariaTurnId,

@@ -1,4 +1,5 @@
 import template from "./templates/arnall-schedule.json";
+import { repairArnallScheduleCalculations } from "./arnall-schedule-calculations";
 
 export type ArnallSchedule = Readonly<{
   establishmentId: number;
@@ -219,8 +220,8 @@ export function arnallScheduleParts(input: ArnallSchedule): Record<string, strin
       if (day.requested) markRequested(`${col}${row}`);
     });
   }));
-  // All 2,499 original schedule formulas, including known defects and original
-  // overlapping total ranges, remain exactly as supplied by the user.
-  parts["xl/worksheets/sheet1.xml"] = sheet;
+  // The source is immutable; repair the authorized calculation model only
+  // after populating this shop, preserving all formatting and print resources.
+  parts["xl/worksheets/sheet1.xml"] = repairArnallScheduleCalculations(sheet);
   return parts;
 }

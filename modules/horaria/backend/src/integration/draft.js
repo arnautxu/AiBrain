@@ -1,3 +1,4 @@
+import { draftFailure } from './draft-errors.js';
 import { createHash } from 'node:crypto';
 import { generateAISchedule } from '../services/aiScheduler.js';
 import { scheduleRows } from './preview.js';
@@ -16,7 +17,15 @@ export async function draftHandler(req, res) {
   const jan4 = new Date(Date.UTC(year, 0, 4));
   const thursday = new Date(jan4.getTime() + (3 - (jan4.getUTCDay() + 6) % 7 + (week - 1) * 7) * 86400000);
   if (year < 1900 || year > 9999 || week < 1 || week > 53 || thursday.getUTCFullYear() !== year) return res.status(400).json({ error: 'Semana ISO no válida.' });
-  const result = await generateAISchedule({ ...body, draftOnly: true });
+  let result;
+  try { result = await generateAISchedule({ ...body, draftOnly: true }); }
+  catch (error) {
+    const failure = draftFailure(error);
+    // Private diagnostic: frame locations only, never the exception message.
+    console.error('[horaria.draft_failed]', JSON.stringify({ code: failure.code,
+      frames: error instanceof Error ? error.stack?.split('\n').slice(1).flatMap(line => line.match(/\/src\/[A-Za-z0-9_./-]+\.js:\d+:\d+/g) || []).slice(0, 4) : [] }));
+    return res.status(500).json(failure);
+  }
   const { schedules, establishment, roster, review } = result;
   const excel = excelSchedule(schedules, establishment, roster, body.semana);
   const rows = scheduleRows(schedules, establishment, roster);
@@ -25,6 +34,6 @@ export async function draftHandler(req, res) {
     shiftCount: schedules.length, rows, excelSchedule: excel,
     previewHash: createHash('sha256').update(JSON.stringify({ excel, review })).digest('hex'),
     conflicts: review.conflicts, review, modelSummary: result.modelSummary, modelConflicts: result.modelConflicts,
-    excelCalculationWarnings: ['La plantilla conserva errores de referencia originales; no se han importado saldos históricos.'],
+    excelCalculationWarnings: ['Los totales semanales se calculan con los intervalos del Excel. Para verificar saldos históricos de horas, acuerdos mensuales y vacaciones, Arnall debe cargar o confirmar en el Brain una fuente vigente por persona y tienda, con fecha de referencia y periodo. Hasta integrarla, esos cálculos muestran PENDIENTE; no son ceros confirmados.'],
     note: 'Propuesta sin guardar ni publicar. M: mañana; T: tarde; D: partido; F: libre; V: vacaciones; B: baja.' });
 }

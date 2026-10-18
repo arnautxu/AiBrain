@@ -203,3 +203,18 @@ assistant-reviewed invoices are separate states. Real mailbox login, invoice
 reference/OCR acceptance, backup/restore, next scheduled occurrences and the
 same-commit CI/GHCR/deploy gates remain mandatory before live acceptance. No
 customer credential or automation has been activated by this implementation.
+
+## Error communication — candidate 2026-10-18
+
+Every assistant turn receives a plain-language recovery contract: explain the
+confirmed cause (or acknowledge that it is unknown), distinguish completed,
+pending and uncertain effects, and give concrete steps the employee can take.
+Do not expose internal codes or ask nontechnical users to change technical
+configuration. System, connection and permission problems must explicitly ask
+them to notify the team managing their Brain, with task/shop/project and time;
+never invent a support channel or request secrets. horarIA failures additionally
+carry structured recovery ownership and next steps. Runtime fallback messages
+also give plain-language guidance and team escalation without copying arbitrary
+provider diagnostics. These instructions and local
+tests are implementation evidence, not authenticated acceptance or proof that
+all infrastructure failure screens have changed.

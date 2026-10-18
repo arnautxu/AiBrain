@@ -1,3 +1,4 @@
+import { HorariaToolError } from "./errors";
 /** Fixed internal endpoints; the model never chooses a host, URL or identity. */
 export type Operation = { method: "GET" | "POST" | "PUT" | "DELETE"; path: string; effect: "read" | "draft" | "write" | "ai" | "delivery"; fields?: string };
 export const OPERATIONS: Record<string, Operation> = {
@@ -51,20 +52,20 @@ OPERATIONS["whatsapp.config-check"].fields = "Read-only actual provider template
 export type OperationInput = { operation: string; id?: string; query?: Record<string, string | number | boolean>; body?: Record<string, unknown>; uploadPath?: string };
 export function resolveOperation(input: OperationInput) {
   const operation = Object.hasOwn(OPERATIONS, input.operation) ? OPERATIONS[input.operation] : null;
-  if (!operation) throw new Error("Operación de horarios desconocida.");
+  if (!operation) throw new HorariaToolError("Operación de horarios desconocida.");
   let target = operation.path;
   if (target.includes(":id")) {
-    if (!input.id || !/^[A-Za-z0-9_-]{1,100}$/.test(input.id)) throw new Error("Falta un identificador válido.");
+    if (!input.id || !/^[A-Za-z0-9_-]{1,100}$/.test(input.id)) throw new HorariaToolError("Falta un identificador válido.");
     target = target.replace(":id", encodeURIComponent(input.id));
-  } else if (input.id !== undefined) throw new Error("Esta operación no admite un identificador.");
+  } else if (input.id !== undefined) throw new HorariaToolError("Esta operación no admite un identificador.");
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(input.query ?? {})) {
-    if (!["semana", "establecimiento", "year", "empleado", "rol", "telefono", "limit", "comunidad", "q"].includes(key) || !["string", "number", "boolean"].includes(typeof value) || String(value).length > 200) throw new Error("Filtro de horarios no válido.");
+    if (!["semana", "establecimiento", "year", "empleado", "rol", "telefono", "limit", "comunidad", "q"].includes(key) || !["string", "number", "boolean"].includes(typeof value) || String(value).length > 200) throw new HorariaToolError("Filtro de horarios no válido.");
     query.set(key, String(value));
   }
-  if (operation.method === "GET" && (input.body || input.uploadPath)) throw new Error("Una consulta no admite datos de escritura.");
-  if (input.uploadPath && !["preferences.upload-sheet", "schedules.review-upload"].includes(input.operation)) throw new Error("Archivo no admitido.");
-  if (input.operation === "schedules.review-upload" && !input.uploadPath) throw new Error("Adjunta el Excel corregido.");
+  if (operation.method === "GET" && (input.body || input.uploadPath)) throw new HorariaToolError("Una consulta no admite datos de escritura.");
+  if (input.uploadPath && !["preferences.upload-sheet", "schedules.review-upload"].includes(input.operation)) throw new HorariaToolError("Archivo no admitido.");
+  if (input.operation === "schedules.review-upload" && !input.uploadPath) throw new HorariaToolError("Adjunta el Excel corregido.");
   return { ...operation, target: `${target}${query.size ? `?${query}` : ""}` };
 }
 
