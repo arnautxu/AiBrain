@@ -79,6 +79,7 @@ describe("runtime source and tool result projection", () => {
     expect(result?.title).toBe("Consultando archivos del proyecto");
     expect(activity?.detail).toBe("Consultando archivos del proyecto");
     expect(JSON.stringify({ result, activity })).not.toMatch(/\/bin\/sh|\/var\/lib|company-qa|Codex|fc71a2c4/iu);
-    expect(result?.output).toContain("Arnall");
+    expect(result?.output).toContain("entorno privado");
+    expect(result?.output).not.toContain("Arnall");
   });
 });

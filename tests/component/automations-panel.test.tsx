@@ -10,6 +10,7 @@ const ownerId = "00000000-0000-4000-8000-000000000001";
 const memberId = "00000000-0000-4000-8000-000000000002";
 const groupId = "00000000-0000-4000-8000-000000000010";
 const projectId = "10000000-0000-4000-8000-000000000001";
+const emptyAudience = { membershipPolicy: "current", currentUserId: ownerId, users: [], groups: [] };
 
 const project: WorkbenchProject = {
   id: projectId,
@@ -57,112 +58,153 @@ const viewerTask: AutomationTaskView = {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
 describe("AutomationsPanel audience", () => {
-  it("preserves an owner's private project when an administrator edits the prompt", async () => {
-    const task = { ...viewerTask, audience: { membershipPolicy: "current" as const, userIds: [ownerId], groupIds: [] }, access: { canManage: true, canViewResults: true } };
-    const changes: Record<string, unknown>[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
-      if (init?.method === "PATCH") {
-        const body = JSON.parse(String(init.body));
-        changes.push(body);
-        return Response.json({ task: { ...task, ...body } });
-      }
-      return Response.json({ tasks: [task], audienceDirectory: { membershipPolicy: "current", currentUserId: memberId, users: [{ id: ownerId, name: "Owner" }], groups: [] } });
-    }));
-    render(<AutomationsPanel open projects={[]} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Editar Informe compartido" }));
-    expect(screen.getByRole("combobox", { name: "Proyecto" })).toHaveValue(projectId);
-    expect(screen.getByRole("option", { name: "Operaciones" })).toBeInTheDocument();
-    fireEvent.change(screen.getByRole("textbox", { name: "Qué debe hacer" }), { target: { value: "Revisa un lote y conserva el resto pendiente." } });
-    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
-    await waitFor(() => expect(changes).toHaveLength(1));
-    expect(changes[0]).not.toHaveProperty("projectId");
-    expect(changes[0]).not.toHaveProperty("projectName");
-    expect(changes[0]).toMatchObject({ prompt: "Revisa un lote y conserva el resto pendiente.", audience: task.audience, timeZone: task.timeZone, schedule: task.schedule });
+  it("shows recovered attempts as interrupted beside the completed result", async () => {
+    const base = {
+      schemaVersion: 1, taskId: viewerTask.id, installationId: viewerTask.installationId, userId: ownerId,
+      runKey: "recovered-run", scheduledFor: "2030-08-30T08:00:00.000Z", threadId: projectId, error: null,
+    };
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/runs") ? {
+      runs: [
+        { ...base, status: "interrupted", attempt: 1, startedAt: "2030-08-30T08:00:00.000Z", finishedAt: null,
+          recoveredByAttempt: 2, recoveredAt: "2030-08-30T08:10:00.000Z" },
+        { ...base, status: "succeeded", attempt: 2, startedAt: "2030-08-30T08:10:00.000Z", finishedAt: "2030-08-30T08:12:00.000Z" },
+      ],
+    } : { tasks: [viewerTask], audienceDirectory: emptyAudience }), { status: 200 })));
+    const onOpenThread = vi.fn();
+    render(<AutomationsPanel open projects={[project]} onOpenThread={onOpenThread} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Historial y resultados" }));
+    expect(await screen.findByText("Interrumpida")).toBeInTheDocument();
+    expect(screen.getByText("Completada")).toBeInTheDocument();
+    expect(screen.queryByText("En curso")).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Abrir resultado" })[0]);
+    expect(onOpenThread).toHaveBeenCalledWith(projectId);
   });
-  it("still submits an actual project change for server validation", async () => {
-    const task = { ...viewerTask, audience: { membershipPolicy: "current" as const, userIds: [ownerId], groupIds: [] }, access: { canManage: true, canViewResults: true } };
-    let submitted: Record<string, unknown> | null = null;
-    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
-      if (init?.method === "PATCH") {
-        submitted = JSON.parse(String(init.body));
-        return Response.json({ task: { ...task, ...submitted } });
-      }
-      return Response.json({ tasks: [task], audienceDirectory: { membershipPolicy: "current", currentUserId: memberId, users: [{ id: ownerId, name: "Owner" }], groups: [] } });
-    }));
-    const other = { ...project, id: "10000000-0000-4000-8000-000000000002", name: "Otro proyecto" };
-    render(<AutomationsPanel open projects={[other]} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Editar Informe compartido" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Proyecto" }), { target: { value: other.id } });
-    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
-    await waitFor(() => expect(submitted).not.toBeNull());
-    expect(submitted).toMatchObject({ projectId: other.id, projectName: other.name });
-  });
-  it("waits for the current recipient identity before opening a new automation", async () => {
-    let resolveDirectory!: (response: Response) => void;
-    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { resolveDirectory = resolve; })));
+  it("clears a background list error only after a successful refresh", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    let unavailable = false;
+    let name = viewerTask.name;
+    const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      expect(init?.method ?? "GET").toBe("GET");
+      return new Response(JSON.stringify(unavailable ? { error: "Lista temporalmente no disponible" } : {
+        tasks: [{ ...viewerTask, name }], audienceDirectory: emptyAudience,
+      }), { status: unavailable ? 503 : 200, headers: { "Content-Type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetch);
     render(<AutomationsPanel open projects={[project]} />);
-    const prematureButton = screen.queryByRole("button", { name: "Nueva" });
-    if (prematureButton) expect(prematureButton).toBeDisabled();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    await waitFor(() => expect(resolveDirectory).toBeTypeOf("function"));
-    await act(async () => { resolveDirectory(Response.json({ tasks: [], audienceDirectory: { membershipPolicy: "current", currentUserId: ownerId, users: [{ id: ownerId, name: "Owner" }], groups: [] } })); });
-    const newButton = screen.getByRole("button", { name: "Nueva" });
-    expect(newButton).toBeEnabled();
-    fireEvent.click(newButton);
-    expect(screen.getByRole("checkbox", { name: "Owner" })).toBeChecked();
-  });
-  it("shows a leased automatic run as in progress and prevents duplicate manual submission", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ tasks: [{ ...viewerTask,
-      lease: { workerId: "worker", runKey: "automatic", attempt: 1, claimedAt: "2026-10-07T12:00:00.000Z", expiresAt: "2026-10-07T12:10:00.000Z" },
-      access: { canManage: true, canViewResults: true },
-    }], audienceDirectory: { membershipPolicy: "current", currentUserId: ownerId, users: [], groups: [] } })));
-    render(<AutomationsPanel open projects={[project]} />);
-    expect(await screen.findByText("En curso")).toBeInTheDocument();
-    expect(screen.queryByText("Ejecución en cola")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Ejecutar ahora" })).toBeDisabled();
-  });
-  it("updates a queued task after the worker finishes without reloading or resubmitting it", async () => {
-    let completed = false;
-    const request = vi.fn(async () => Response.json({ tasks: [{ ...viewerTask,
-      manualRun: completed ? null : { requestId: "30000000-0000-4000-8000-000000000001", scheduledFor: "2026-10-07T12:00:00.000Z" },
-      lastRunStatus: completed ? "succeeded" : null,
-      lastRunAt: completed ? "2026-10-07T12:00:00.000Z" : null,
-      access: { canManage: true, canViewResults: true },
-    }], audienceDirectory: { membershipPolicy: "current", currentUserId: ownerId, users: [], groups: [] } }));
-    vi.stubGlobal("fetch", request);
-    vi.useFakeTimers();
-    await act(async () => { render(<AutomationsPanel open projects={[project]} />); });
-    expect(screen.getByText("Ejecución en cola")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Ejecutar ahora" })).toBeDisabled();
-    completed = true;
-    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
-    expect(screen.queryByText("Ejecución en cola")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Ejecutar ahora" })).toBeEnabled();
-    expect(request.mock.calls).toHaveLength(2);
-  });
-  it("creates a durable 120-minute interval task from the UI", async () => {
-    let submitted: Record<string, unknown> | null = null;
-    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
-      if (!init?.method || init.method === "GET") return Response.json({ tasks: [], worker: null, audienceDirectory: { membershipPolicy: "current", currentUserId: ownerId, users: [{ id: ownerId, name: "Owner" }], groups: [] } });
-      submitted = JSON.parse(String(init.body));
-      return Response.json({ task: { ...viewerTask, ...submitted, access: { canManage: true, canViewResults: true } } });
-    }));
-    render(<AutomationsPanel open projects={[project]} />);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Nueva" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Nueva" }));
-    fireEvent.change(screen.getByPlaceholderText("Resumen diario del proyecto"), { target: { value: "Facturas" } });
-    fireEvent.change(screen.getByPlaceholderText("Revisa las novedades del proyecto y prepara un resumen con próximos pasos."), { target: { value: "Importa facturas del correo de empresa." } });
-    fireEvent.click(screen.getByRole("button", { name: "Por intervalo" }));
-    expect(screen.getByRole("spinbutton", { name: /Intervalo en minutos/ })).toHaveValue(120);
-    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
-    await waitFor(() => expect(submitted).toMatchObject({ schedule: { kind: "interval", minutes: 120, anchorAt: expect.any(String) } }));
+    await screen.findByText(viewerTask.name);
+
+    unavailable = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(screen.getByRole("alert")).toHaveTextContent("Lista temporalmente no disponible");
+    expect(screen.getByText(viewerTask.name)).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(screen.getByRole("alert")).toHaveTextContent("Lista temporalmente no disponible");
+
+    unavailable = false;
+    name = "Informe actualizado";
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(screen.getByText(name)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledTimes(4);
   });
 
+  it("retains a history error while it fails and clears it when the open history recovers", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    let unavailable = true;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      expect(init?.method ?? "GET").toBe("GET");
+      const history = url.endsWith("/runs");
+      return new Response(JSON.stringify(history
+        ? unavailable ? { error: "Historial temporalmente no disponible" } : { runs: [] }
+        : { tasks: [viewerTask], audienceDirectory: emptyAudience }), {
+        status: history && unavailable ? 503 : 200, headers: { "Content-Type": "application/json" },
+      });
+    }));
+    render(<AutomationsPanel open projects={[project]} />);
+    await screen.findByText(viewerTask.name);
+    fireEvent.click(screen.getByRole("button", { name: "Historial y resultados" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Historial temporalmente no disponible");
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(screen.getByRole("alert")).toHaveTextContent("Historial temporalmente no disponible");
+
+    unavailable = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(screen.getByText("Aún no hay ejecuciones registradas.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("does not clear or retry a failed task change when background reads succeed", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const requests: string[] = [];
+    const managedTask = { ...viewerTask, access: { canManage: true, canViewResults: true } };
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      requests.push(method);
+      return new Response(JSON.stringify(method === "PATCH" ? { error: "No se pudo pausar la tarea" } : {
+        tasks: [managedTask], audienceDirectory: emptyAudience,
+      }), { status: method === "PATCH" ? 503 : 200, headers: { "Content-Type": "application/json" } });
+    }));
+    render(<AutomationsPanel open projects={[project]} />);
+    fireEvent.click(await screen.findByRole("button", { name: `Pausar ${viewerTask.name}` }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("No se pudo pausar la tarea");
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(screen.getByRole("alert")).toHaveTextContent("No se pudo pausar la tarea");
+    expect(requests).toEqual(["GET", "PATCH", "GET", "GET"]);
+    expect(screen.getByRole("button", { name: `Pausar ${viewerTask.name}` })).toBeInTheDocument();
+  });
+
+  it("refreshes a completed queued run and its open history without reloading the page", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    let completed = false;
+    const queuedTask = { ...viewerTask, manualRun: { requestId: groupId, scheduledFor: "2030-08-30T08:00:00.000Z" } };
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/runs") ? {
+      runs: completed ? [{
+        schemaVersion: 1, taskId: viewerTask.id, installationId: viewerTask.installationId,
+        userId: ownerId, runKey: "accepted-run", scheduledFor: "2030-08-30T08:00:00.000Z",
+        status: "succeeded", attempt: 1, startedAt: "2030-08-30T08:00:00.000Z",
+        finishedAt: "2030-08-30T08:01:00.000Z", threadId: projectId, error: null,
+      }] : [],
+    } : {
+      tasks: [completed ? { ...queuedTask, manualRun: null, lastRunAt: "2030-08-30T08:01:00.000Z", lastRunStatus: "succeeded" } : queuedTask],
+      audienceDirectory: emptyAudience,
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    const onOpenThread = vi.fn();
+    render(<AutomationsPanel open projects={[project]} onOpenThread={onOpenThread} />);
+    expect(await screen.findByText("Ejecución en cola")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Historial y resultados" }));
+    expect(await screen.findByText("Aún no hay ejecuciones registradas.")).toBeInTheDocument();
+    completed = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(screen.queryByText("Ejecución en cola")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Abrir resultado" }));
+    expect(onOpenThread).toHaveBeenCalledWith(projectId);
+    expect(screen.queryByText("Cargando automatizaciones…")).not.toBeInTheDocument();
+  });
+
+  it("suspends background refresh while an automation draft is being edited", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const fetch = vi.fn(async () => new Response(JSON.stringify({
+      tasks: [viewerTask], audienceDirectory: emptyAudience,
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetch);
+    const view = render(<AutomationsPanel open projects={[project]} />);
+    await screen.findByText("Informe compartido");
+    fireEvent.click(screen.getByRole("button", { name: "Nueva" }));
+    fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "Borrador sin guardar" } });
+    const requests = fetch.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(fetch).toHaveBeenCalledTimes(requests);
+    expect(screen.getByLabelText("Nombre")).toHaveValue("Borrador sin guardar");
+    view.unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(fetch).toHaveBeenCalledTimes(requests);
+  });
   it("keeps the mobile sidebar control available on the automations surface", () => {
     const onToggleSidebar = vi.fn();
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
@@ -445,4 +487,133 @@ describe("AutomationsPanel audience", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => expect(onBlockingSurfaceChange).toHaveBeenLastCalledWith(false));
   });
+
+
+  it("creates a durable 120-minute interval task from the UI", async () => {
+    let submitted: Record<string, unknown> | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") return Response.json({ tasks: [], worker: null, audienceDirectory: { membershipPolicy: "current", currentUserId: ownerId, users: [{ id: ownerId, name: "Owner" }], groups: [] } });
+      submitted = JSON.parse(String(init.body));
+      return Response.json({ task: { ...viewerTask, ...submitted, access: { canManage: true, canViewResults: true } } });
+    }));
+    render(<AutomationsPanel open projects={[project]} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Nueva" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Nueva" }));
+    fireEvent.change(screen.getByPlaceholderText("Resumen diario del proyecto"), { target: { value: "Facturas" } });
+    fireEvent.change(screen.getByPlaceholderText("Revisa las novedades del proyecto y prepara un resumen con próximos pasos."), { target: { value: "Importa facturas del correo de empresa." } });
+    fireEvent.click(screen.getByRole("button", { name: "Por intervalo" }));
+    expect(screen.getByRole("spinbutton", { name: /Intervalo en minutos/ })).toHaveValue(120);
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(submitted).toMatchObject({ schedule: { kind: "interval", minutes: 120, anchorAt: expect.any(String) } }));
+  });
+
+
+  it("updates a queued task after the worker finishes without reloading or resubmitting it", async () => {
+    let completed = false;
+    const request = vi.fn(async () => Response.json({ tasks: [{ ...viewerTask,
+      manualRun: completed ? null : { requestId: "30000000-0000-4000-8000-000000000001", scheduledFor: "2026-10-07T12:00:00.000Z" },
+      lastRunStatus: completed ? "succeeded" : null,
+      lastRunAt: completed ? "2026-10-07T12:00:00.000Z" : null,
+      access: { canManage: true, canViewResults: true },
+    }], audienceDirectory: { membershipPolicy: "current", currentUserId: ownerId, users: [], groups: [] } }));
+    vi.stubGlobal("fetch", request);
+    vi.useFakeTimers();
+    await act(async () => { render(<AutomationsPanel open projects={[project]} />); });
+    expect(screen.getByText("Ejecución en cola")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ejecutar ahora" })).toBeDisabled();
+    completed = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(screen.queryByText("Ejecución en cola")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ejecutar ahora" })).toBeEnabled();
+    expect(request.mock.calls).toHaveLength(2);
+  });
+
+
+  it("shows a leased automatic run as in progress and prevents duplicate manual submission", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ tasks: [{ ...viewerTask,
+      lease: { workerId: "worker", runKey: "automatic", attempt: 1, claimedAt: "2026-10-07T12:00:00.000Z", expiresAt: "2026-10-07T12:10:00.000Z" },
+      access: { canManage: true, canViewResults: true },
+    }], audienceDirectory: { membershipPolicy: "current", currentUserId: ownerId, users: [], groups: [] } })));
+    render(<AutomationsPanel open projects={[project]} />);
+    expect(await screen.findByText("En curso")).toBeInTheDocument();
+    expect(screen.queryByText("Ejecución en cola")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ejecutar ahora" })).toBeDisabled();
+  });
+
+
+  it("waits for the current recipient identity before opening a new automation", async () => {
+    let resolveDirectory!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { resolveDirectory = resolve; })));
+    render(<AutomationsPanel open projects={[project]} />);
+    const prematureButton = screen.queryByRole("button", { name: "Nueva" });
+    if (prematureButton) expect(prematureButton).toBeDisabled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(resolveDirectory).toBeTypeOf("function"));
+    await act(async () => { resolveDirectory(Response.json({ tasks: [], audienceDirectory: { membershipPolicy: "current", currentUserId: ownerId, users: [{ id: ownerId, name: "Owner" }], groups: [] } })); });
+    const newButton = screen.getByRole("button", { name: "Nueva" });
+    expect(newButton).toBeEnabled();
+    fireEvent.click(newButton);
+    expect(screen.getByRole("checkbox", { name: "Owner" })).toBeChecked();
+  });
 });
+
+it.each([true,false])('resolves a result outside the sidebar using project permission (allowed=%s)', async allowed => {
+ const threadId='30000000-0000-4000-8000-000000000001',onOpenThread=vi.fn();
+ vi.stubGlobal('fetch',vi.fn(async(input:string|URL|Request)=>{
+  const url=String(input);
+  if(url.includes('/runs'))return Response.json({runs:[{runKey:'run',attempt:1,status:'succeeded',threadId,startedAt:'2026-10-08T00:00:00.000Z',finishedAt:'2026-10-08T00:01:00.000Z'}]});
+  if(url.includes('/api/projects/'))return allowed?Response.json({project:{...project,workspace:{...project.workspace,id:"40000000-0000-4000-8000-000000000001"}}}):Response.json({error:'Not found'},{status:404});
+  if(url.includes('/api/threads/'))return Response.json({thread:{id:threadId,projectId,title:'Resultado',status:'active',pinned:false,createdAt:'2026-10-08T00:00:00.000Z',updatedAt:'2026-10-08T00:01:00.000Z',messages:[]}});
+  return Response.json({tasks:[viewerTask],audienceDirectory:{membershipPolicy:'current',currentUserId:memberId,users:[],groups:[]}});
+ }));
+ render(<AutomationsPanel open projects={[]} onOpenThread={onOpenThread}/>);
+ fireEvent.click(await screen.findByRole('button',{name:'Historial y resultados'}));
+ fireEvent.click(await screen.findByRole('button',{name:'Abrir resultado'}));
+ if(allowed)await waitFor(()=>expect(onOpenThread).toHaveBeenCalledWith(threadId));
+ else {expect(await screen.findByRole('region',{name:'Resultado de la automatización'})).toBeInTheDocument();await waitFor(()=>expect(screen.queryByRole('status')).not.toBeInTheDocument());expect(screen.queryByRole('alert')).not.toBeInTheDocument();expect(onOpenThread).not.toHaveBeenCalled();expect(screen.queryByRole('textbox')).not.toBeInTheDocument();}
+});
+
+
+
+  it("preserves an owner's private project when an administrator edits the prompt", async () => {
+    const task = { ...viewerTask, audience: { membershipPolicy: "current" as const, userIds: [ownerId], groupIds: [] }, access: { canManage: true, canViewResults: true } };
+    const changes: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        const body = JSON.parse(String(init.body));
+        changes.push(body);
+        return Response.json({ task: { ...task, ...body } });
+      }
+      return Response.json({ tasks: [task], audienceDirectory: { membershipPolicy: "current", currentUserId: memberId, users: [{ id: ownerId, name: "Owner" }], groups: [] } });
+    }));
+    render(<AutomationsPanel open projects={[]} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Editar Informe compartido" }));
+    expect(screen.getByRole("combobox", { name: "Proyecto" })).toHaveValue(projectId);
+    expect(screen.getByRole("option", { name: "Operaciones" })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Qué debe hacer" }), { target: { value: "Revisa un lote y conserva el resto pendiente." } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(changes).toHaveLength(1));
+    expect(changes[0]).not.toHaveProperty("projectId");
+    expect(changes[0]).not.toHaveProperty("projectName");
+    expect(changes[0]).toMatchObject({ prompt: "Revisa un lote y conserva el resto pendiente.", audience: task.audience, timeZone: task.timeZone, schedule: task.schedule });
+  });
+
+
+  it("still submits an actual project change for server validation", async () => {
+    const task = { ...viewerTask, audience: { membershipPolicy: "current" as const, userIds: [ownerId], groupIds: [] }, access: { canManage: true, canViewResults: true } };
+    let submitted: Record<string, unknown> | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        submitted = JSON.parse(String(init.body));
+        return Response.json({ task: { ...task, ...submitted } });
+      }
+      return Response.json({ tasks: [task], audienceDirectory: { membershipPolicy: "current", currentUserId: memberId, users: [{ id: ownerId, name: "Owner" }], groups: [] } });
+    }));
+    const other = { ...project, id: "10000000-0000-4000-8000-000000000002", name: "Otro proyecto" };
+    render(<AutomationsPanel open projects={[other]} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Editar Informe compartido" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Proyecto" }), { target: { value: other.id } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(submitted).not.toBeNull());
+    expect(submitted).toMatchObject({ projectId: other.id, projectName: other.name });
+  });

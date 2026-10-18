@@ -13,6 +13,7 @@ import type { AuthMode, AuthSession } from "@/auth/types";
 import { getDemoAccount, getTenantDefinition } from "@/config/tenants";
 import { readSupabasePublicConfig } from "@/lib/supabase/config";
 import { profileAvatarOverride } from "@/auth/profile-avatar";
+import { bindLocalServerSession } from "@/auth/server-session-binding";
 
 const DEMO_SESSION_COOKIE = "aibrain_demo_session";
 const DEMO_SESSION_SECONDS = 12 * 60 * 60;
@@ -123,7 +124,7 @@ async function getLocalSession(sessionId: string): Promise<AuthSession | null> {
     await sessions.revokeUser(installation.installationId, resolved.record.userId);
     return null;
   }
-  return {
+  return bindLocalServerSession({
     provider: "local",
     user: {
       id: user.userId,
@@ -137,7 +138,7 @@ async function getLocalSession(sessionId: string): Promise<AuthSession | null> {
       name: installation.companyName,
     },
     expiresAt: new Date(resolved.record.idleExpiresAt).toISOString(),
-  };
+  }, resolved.record.sessionIdHash);
 }
 
 export async function getSession(): Promise<AuthSession | null> {

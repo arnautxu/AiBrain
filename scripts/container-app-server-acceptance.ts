@@ -1,12 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { AppServerRpcRouter } from "@/runtime/transport";
+import { connectedAppConfig, SERVER_APPROVALS_REVIEWER } from "@/runtime/connected-app-config";
 import { LocalGatewayWorkerRuntimeFactory } from "@/runtime/workers/local-gateway-runtime";
+import { createQuotaToolPermissions, privateCodexToolPermissionsRequired, quotaToolPermissionConfigOverrides } from "@/runtime/quota-tool-permissions";
 import type { ManagedWorkerRuntime, WorkerLaunchContext } from "@/runtime/workers/types";
 
 const ACCEPTANCE_TIMEOUT_MS = 20_000;
-const EXPECTED_CODEX_VERSION = "0.153.4";
+const EXPECTED_CODEX_VERSION = "0.162.1";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -36,7 +39,7 @@ async function installationAcceptanceConfig() {
   if (process.env.NODE_ENV === "production" && usersRoot !== "/var/lib/aibrain/data/users") {
     throw new Error("Production App Server acceptance requires the immutable users root.");
   }
-  return { usersRoot, quotaToolPrivacy: Boolean(config.usageLimits) };
+  return { usersRoot, quotaToolPrivacy: privateCodexToolPermissionsRequired(config) };
 }
 
 async function createContext(usersRoot: string) {
@@ -128,6 +131,24 @@ async function acceptOneGeneration(context: WorkerLaunchContext, generation: num
     if (!isRecord(account) || !("account" in account)) {
       throw new Error("Codex account/read returned an invalid result.");
     }
+    // Exercise the production app-config reader before readiness. No model
+    // turn is submitted, and the synthetic thread has no durable history.
+    const opened = await router.request({
+      method: "thread/start",
+      id: `acceptance-thread-start-${generation}-${randomUUID()}`,
+      params: {
+        cwd: context.workspace,
+        ephemeral: true,
+        approvalPolicy: "never",
+        approvalsReviewer: SERVER_APPROVALS_REVIEWER,
+        sandbox: "read-only",
+        config: connectedAppConfig([]),
+      },
+    }, 10_000);
+    if (!isRecord(opened) || !isRecord(opened.thread) ||
+        typeof opened.thread.id !== "string" || opened.thread.id.trim().length === 0) {
+      throw new Error("Codex thread/start returned no synthetic thread identity.");
+    }
     const health = await runtime.health();
     if (!health.healthy || health.state !== "running") {
       throw new Error("Private worker gateway was not healthy after App Server RPC acceptance.");
@@ -145,6 +166,48 @@ async function stopRuntime(runtime: ManagedWorkerRuntime) {
   await runtime.stop();
 }
 
+/** Real kernel-backed denial probes; fixtures contain no credentials or tenant data. */
+async function acceptPrivateToolFilesystem(context: WorkerLaunchContext) {
+  const codexHome = context.environment.CODEX_HOME;
+  const roots = { codexHome, workspace: context.workspace, transportAudit: context.transportAudit };
+  const policy = createQuotaToolPermissions(roots);
+  const denied = ["auth.json", "auth.json.backup", "config.toml", "sessions/probe.jsonl", "history.jsonl", "state_1.sqlite"]
+    .map((name) => path.join(codexHome, name));
+  denied.push(path.join(context.transportAudit, "probe.jsonl"));
+  const allowed = ["skills/probe.txt", "plugins/probe.txt", "tmp/arg0/probe.txt"].map((name) => path.join(codexHome, name));
+  for (const file of [...denied, ...allowed]) {
+    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+    await writeFile(file, file.endsWith("config.toml") ? "# Synthetic privacy probe\n" : "{}", { mode: 0o600 });
+  }
+  const alias = path.join(context.workspace, "private-alias");
+  await symlink(path.join(codexHome, "auth.json"), alias);
+  const checks = { denied: [...denied, alias, path.join(codexHome, "skills", "..", "auth.json"),
+    process.env.AIBRAIN_INSTALLATION_CONFIG || "/etc/aibrain/installation.json"], allowed, workspace: context.workspace };
+  for (const [profile, writable] of [[policy.readOnlyId, false], [policy.workspaceWriteId, true]] as const) {
+    const code = `const fs=require('node:fs');const c=${JSON.stringify(checks)};let ok=true;
+      for(const p of c.denied){try{fs.readFileSync(p);ok=false;}catch(e){if(!['EACCES','EPERM','ENOENT'].includes(e.code))ok=false;}}
+      for(const p of c.allowed){try{if(fs.readFileSync(p,'utf8')!=='{}')ok=false;}catch{ok=false;}}
+      let wrote=false;try{fs.writeFileSync(c.workspace+'/document-probe.txt','synthetic document');wrote=true;}catch{}
+      if(wrote!==${writable})ok=false;fs.writeSync(1,ok?'PRIVATE_FS_OK':'PRIVATE_FS_FAILED');process.exitCode=ok?0:1;`;
+    const args = quotaToolPermissionConfigOverrides(roots).flatMap((override) => ["-c", override]);
+    const result = spawnSync("/usr/local/bin/codex-real", [...args, "sandbox", "-P", profile, "-C", context.workspace,
+      "--", "node", "-e", code], { cwd: context.workspace, encoding: "utf8", timeout: 20_000, stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, CODEX_HOME: codexHome, OPENAI_API_KEY: "", CODEX_API_KEY: "", CODEX_ACCESS_TOKEN: "" } });
+    // Never include process diagnostics: a future CLI could echo sensitive config.
+    if (result.status !== 0 || result.stdout.trim() !== "PRIVATE_FS_OK") {
+      const control = spawnSync("/usr/local/bin/codex-real", [...args, "sandbox", "-P", profile, "-C", context.workspace, "--", "/usr/bin/printf", "CONTROL_OK"],
+        { cwd: context.workspace, encoding: "utf8", timeout: 20_000, env: { ...process.env, CODEX_HOME: codexHome, OPENAI_API_KEY: "", CODEX_API_KEY: "", CODEX_ACCESS_TOKEN: "" } });
+      const diagnostic = result.stderr || "";
+      const category = [/permission.*profile/i, /bwrap|bubblewrap/i, /unknown|unexpected|invalid/i, /config/i, /operation not permitted/i]
+        .map((pattern, index) => pattern.test(diagnostic) ? index : -1).filter((index) => index >= 0);
+      throw new Error(`Private filesystem acceptance failed (${writable ? "write" : "read"}; exit=${result.status}; checks=${result.stdout.trim() === "PRIVATE_FS_FAILED" ? "failed" : "not-run"}; stdoutBytes=${result.stdout.length}; control=${control.status}/${control.stdout === "CONTROL_OK"}; diagnostics=${category.join(",")}; spawn=${result.error?.name ?? "none"}).`);
+    }
+  }
+  await rm(path.join(codexHome, "auth.json"));
+  console.log(JSON.stringify({ privateFilesystemAcceptance: true, syntheticFixturesOnly: true,
+    privateReadsDenied: true, symlinkAliasDenied: true, helperReadsAllowed: true, exactWorkspaceWriteAllowed: true }));
+}
+
 export async function runContainerAppServerAcceptance() {
   if (process.env.AIBRAIN_CODEX_EXPECTED_VERSION?.trim() !== EXPECTED_CODEX_VERSION) {
     throw new Error(`App Server acceptance requires Codex ${EXPECTED_CODEX_VERSION}.`);
@@ -152,6 +215,7 @@ export async function runContainerAppServerAcceptance() {
   const { usersRoot, quotaToolPrivacy } = await installationAcceptanceConfig();
   const { context, userRoot } = await createContext(usersRoot);
   try {
+    await acceptPrivateToolFilesystem(context);
     await acceptOneGeneration(context, 1, quotaToolPrivacy);
     await acceptOneGeneration(context, 2, quotaToolPrivacy);
   } finally {

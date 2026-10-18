@@ -1,3 +1,4 @@
+import { inspectOggOpus, MAX_AUDIO_BYTES } from "./audio-validation";
 import { inspectLegacyExcel, isLegacyExcelContainer } from "./legacy-excel-validation";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
@@ -6,7 +7,7 @@ import path from "node:path";
 import type { LegacyExcelProvenance, StoredLegacyExcelReceipt } from "./legacy-excel-policy";
 import { createInflateRaw } from "node:zlib";
 
-export type SupportedUploadKind = "docx" | "xlsx" | "xls" | "pptx" | "pdf" | "text" | "image";
+export type SupportedUploadKind = "docx" | "xlsx" | "xls" | "pptx" | "pdf" | "text" | "image" | "audio";
 
 export type ValidatedUpload = {
   kind: SupportedUploadKind;
@@ -405,6 +406,7 @@ function assertMimeAndExtension(
 ) {
   const ext = extension(fileName);
   const allowedExtensions: Record<SupportedUploadKind, readonly string[]> = {
+    audio: [".ogg", ".opus"],
     docx: [".docx"],
     xlsx: [".xlsx"],
     xls: [".xls"],
@@ -419,7 +421,9 @@ function assertMimeAndExtension(
     xls: "application/vnd.ms-excel",
     pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   };
-  const mimeMatches = kind === "text"
+  const mimeMatches = kind === "audio"
+    ? ["audio/ogg", "audio/opus", "application/ogg", "application/octet-stream", ""].includes(declaredMimeType)
+    : kind === "text"
     ? declaredMimeType.startsWith("text/") || declaredMimeType === "application/json"
     : declaredMimeType === (officeMime[kind] ?? mediaType)
       // Browsers may report legacy Excel as generic binary data. Both entry
@@ -445,7 +449,11 @@ export function validateUploadedDocument(input: {
   let kind: SupportedUploadKind;
   let mediaType: string;
   let officeEntries: number | null = null;
-  if (data.subarray(0, 5).toString("ascii") === "%PDF-") {
+  if (data.subarray(0, 4).toString("ascii") === "OggS") {
+    inspectOggOpus(data);
+    kind = "audio";
+    mediaType = "audio/ogg";
+  } else if (data.subarray(0, 5).toString("ascii") === "%PDF-") {
     kind = "pdf";
     mediaType = "application/pdf";
   } else if (isLegacyExcelContainer(data)) {
@@ -530,7 +538,13 @@ async function validateDocumentFile(input: {
     let kind: SupportedUploadKind;
     let mediaType: string;
     let officeEntries: number | null = null;
-    if (head.subarray(0, 5).toString("ascii") === "%PDF-") {
+    if (head.subarray(0, 4).toString("ascii") === "OggS") {
+      if (before.size > MAX_AUDIO_BYTES) throw new UploadValidationError("UPLOAD_SIZE_INVALID", "Audio exceeds the safety limit.");
+      if (typeof process.getuid === "function" && before.uid !== process.getuid()) throw new UploadValidationError("UPLOAD_SOURCE_UNSAFE", "Audio source owner is invalid.");
+      inspectOggOpus(await readExactly(handle, 0, before.size));
+      kind = "audio";
+      mediaType = "audio/ogg";
+    } else if (head.subarray(0, 5).toString("ascii") === "%PDF-") {
       kind = "pdf";
       mediaType = "application/pdf";
     } else if (isLegacyExcelContainer(head)) {

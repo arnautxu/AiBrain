@@ -139,12 +139,13 @@ export class FileCatalogStore {
   }
 
   /** Reconciles immutable GraphikAI connector baselines with installation config. */
-  async ensureManagedResources(resources: readonly CatalogResource[], managedResourceIds: readonly string[] = resources.map(({ id }) => id)) {
+  async ensureManagedResources(resources: readonly CatalogResource[], managedResourceIds: readonly string[] = resources.map(({ id }) => id), initialWriteResourceIds: readonly string[] = []) {
     await this.prepare();
     return this.locks.withLock(`catalog:${this.installationId}`, async () => {
       const state = await this.readUnlocked();
       let changed = false;
       const configuredIds = new Set(resources.map(({ id }) => id));
+      if (initialWriteResourceIds.some(id => !configuredIds.has(id))) throw new Error("A default write grant requires a configured resource.");
       const reconciledIds = new Set(managedResourceIds);
       const removedIds = new Set(state.resources
         .filter((resource) => reconciledIds.has(resource.id) && resource.managedBy === "graphikai" && resource.kind !== "skill" && !configuredIds.has(resource.id))
@@ -170,7 +171,8 @@ export class FileCatalogStore {
         const ruleId = `installation-${candidate.id}`;
         const existingRule = state.rules.find((rule) => rule.id === ruleId);
         if (!existingRule) {
-          state.rules.push({ id: ruleId, scope: "installation", subjectId: null, resourceId: candidate.id, effect: "allow", operations: ["read"] });
+          // Initial defaults never replace a durable operator rule or denial.
+          state.rules.push({ id: ruleId, scope: "installation", subjectId: null, resourceId: candidate.id, effect: "allow", operations: initialWriteResourceIds.includes(candidate.id) ? ["read", "write"] : ["read"] });
           changed = true;
         }
       }

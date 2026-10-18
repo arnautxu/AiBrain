@@ -8,7 +8,7 @@ async function login(page: Page) {
   await expect(page.getByTestId("composer")).toBeVisible();
 }
 
-test("plan, command, diff and approval decisions consume the typed turn contract inline", async ({ page }) => {
+test("plan, command, diff and legacy approvals remain inspectable without decision buttons", async ({ page }) => {
   const decisions: unknown[] = [];
   const uuid = "fc71a2c4-0db0-4914-af82-9564038ea964";
   const internalPath = `/var/lib/aibrain/data/users/${uuid}/runtime/codex-home/skills/web/SKILL.md`;
@@ -89,16 +89,13 @@ test("plan, command, diff and approval decisions consume the typed turn contract
   await reviewPanel.getByRole("button", { name: "Cerrar cambios y resultados" }).click();
   await expect(reviewPanel).toBeHidden();
 
-  const commandApproval = page.getByRole("group", { name: "Aprobación: Ejecutar comprobación" });
-  await commandApproval.getByRole("button", { name: "Permitir", exact: true }).click();
-  await expect(commandApproval.getByText("Permitido una vez")).toBeVisible();
-  const fileApproval = page.getByRole("group", { name: "Aprobación: Aplicar cambio preparado" });
-  await fileApproval.getByRole("button", { name: "Rechazar" }).click();
-  await expect(fileApproval.getByText("Acción rechazada")).toBeVisible();
-  expect(decisions).toEqual([
-    { approvalId: "approval-command", threadId: "thread-qa", turnId: "turn-qa", itemId: "item-command-qa", decision: "accept" },
-    { approvalId: "approval-file", threadId: "thread-qa", turnId: "turn-qa", itemId: "item-file-qa", decision: "decline" },
-  ]);
+  for (const title of ["Ejecutar comprobación", "Aplicar cambio preparado"]) {
+    const approval = page.getByRole("group", { name: `Aprobación: ${title}` });
+    await expect(approval.getByRole("status")).toHaveText("Confirma la acción en el chat");
+    await expect(approval.getByRole("button")).toHaveCount(0);
+    await expect(approval.getByText("Esta tarjeta pertenece a una solicitud anterior.", { exact: false })).toBeVisible();
+  }
+  expect(decisions).toEqual([]);
 
   await expect(page.locator('button.result-action[aria-label="Copiar"]')).toBeVisible();
   await expect(page.getByRole("button", { name: "Revisar resultados" })).toHaveCount(0);

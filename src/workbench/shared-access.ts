@@ -40,6 +40,26 @@ export function threadWithAccess(thread: WorkbenchThread, role: SharedAccessRole
   return { ...thread, access: projectAccess(role) };
 }
 
+/** An index grant is necessary, but cannot undo a canonical revocation or
+ * role reduction while its owner's index synchronization is still pending. */
+function currentSharedRole(project: WorkbenchProject, principal: LocalUser, indexedRole: IndexedSharedAccessRole): IndexedSharedAccessRole | null {
+  const member = project.sharing.visibility === "shared"
+    ? project.sharing.members.find(candidate => candidate.email === principal.email && candidate.status === "active") : null;
+  if (!member) return null;
+  return indexedRole === "viewer" || member.role === "viewer" ? "viewer" : "editor";
+}
+
+function currentSharedRoles(projects: readonly WorkbenchProject[], principal: LocalUser, indexedRoles: ReadonlyMap<string, IndexedSharedAccessRole>) {
+  const roles = new Map<string, IndexedSharedAccessRole>();
+  for (const project of projects) {
+    const indexedRole = indexedRoles.get(project.id);
+    if (!indexedRole) continue;
+    const role = currentSharedRole(project, principal, indexedRole);
+    if (role) roles.set(project.id, role);
+  }
+  return roles;
+}
+
 async function installationForSession(session: AuthSession) {
   if (session.provider !== "local") throw new WorkbenchPersistenceError("La compartición requiere una cuenta local.");
   const installation = await loadInstallationConfig();
@@ -76,13 +96,14 @@ function automationAudienceStore(installation: Awaited<ReturnType<typeof loadIns
   });
 }
 
-async function ownAccessContext(session: AuthSession) {
+async function ownAccessContext(session: AuthSession, options: { fullSnapshot?: boolean; threadId?: string; includeTurnContext?: boolean } = {}) {
   const context = await users(session);
   const store = FileWorkbenchStore.fromInstallation(context.installation);
-  const own = await store.load(context.principal.userId);
+  const selected = options.fullSnapshot ? null : await store.loadAccessSnapshot(context.principal.userId, options.threadId, options);
+  const own = selected ?? await store.load(context.principal.userId);
   const index = accessIndex(context.installation);
   await index.syncOwnerSnapshot({ owner: context.principal, snapshot: own, users: context.users });
-  return { ...context, session, store, own, index };
+  return { ...context, session, store, own, index, turnContext: selected?.turnContext ?? null };
 }
 
 type OwnAccessContext = Awaited<ReturnType<typeof ownAccessContext>>;
@@ -103,14 +124,18 @@ async function loadSharedWorkbenchFromContext(
     .map((thread) => threadWithAccess(thread, "owner"));
   const byOwner = Map.groupBy(grants, (grant) => grant.ownerUserId);
   const sharedSnapshots = await Promise.all([...byOwner].map(async ([ownerUserId, ownerGrants]) => {
+    // The index lookup above precedes foreign metadata; current membership is
+    // then checked before opening any foreign conversation history.
+    const metadata = await store.loadAccessSnapshot(ownerUserId);
+    const permitted = currentSharedRoles(metadata.projects, principal, new Map(ownerGrants.map(grant => [grant.projectId, grant.role])));
+    if (permitted.size === 0) return { projects: [], threads: [] };
     const snapshot = await store.load(ownerUserId);
-    const sharedIds = new Set(ownerGrants.map((grant) => grant.projectId));
-    const roles = new Map(ownerGrants.map((grant) => [grant.projectId, grant.role]));
+    const roles = currentSharedRoles(snapshot.projects, principal, permitted);
     return {
       projects: snapshot.projects
-        .filter((project) => sharedIds.has(project.id))
+        .filter((project) => roles.has(project.id))
         .map((project) => projectWithAccess(project, roles.get(project.id) ?? "viewer")),
-      threads: snapshot.threads.filter((thread) => sharedIds.has(thread.projectId) && visibleAutomationThread(thread.id))
+      threads: snapshot.threads.filter((thread) => roles.has(thread.projectId) && visibleAutomationThread(thread.id))
         .map((thread) => threadWithAccess(thread, roles.get(thread.projectId) ?? "viewer")),
     };
   }));
@@ -185,11 +210,17 @@ export async function resolveProjectAccess(session: AuthSession, projectId: stri
   // This is deliberately the last operation before touching a foreign store.
   const grant = await index.resolve({ principal, resourceType: "project", resourceId: projectId });
   if (!grant) throw new WorkbenchNotFoundError("Projecte no trobat.");
-  const project = await store.getProject(grant.ownerUserId, projectId);
+  const project = (await store.loadAccessSnapshot(grant.ownerUserId)).projects.find(item => item.id === projectId);
+  if (!project) throw new WorkbenchNotFoundError("Projecte no trobat.");
+  // The index remains the gate before any foreign read. Current canonical
+  // sharing may further restrict that grant while its index sync is pending;
+  // neither a metadata hit nor an old editor grant can undo a revocation.
+  const role = currentSharedRole(project, principal, grant.role);
+  if (!role) throw new WorkbenchNotFoundError("Projecte no trobat.");
   return {
     store,
     ownerUserId: grant.ownerUserId,
-    role: grant.role,
+    role,
     project,
     provenance: {
       source: "shared-access-index",
@@ -200,21 +231,25 @@ export async function resolveProjectAccess(session: AuthSession, projectId: stri
   };
 }
 
-export async function resolveThreadAccess(session: AuthSession, threadId: string) {
-  const context = await ownAccessContext(session);
+export async function resolveThreadAccess(session: AuthSession, threadId: string, options: { includeTurnContext?: boolean } = {}) {
+  const context = await ownAccessContext(session, { threadId, ...options });
   const { principal, store, own, index } = context;
   const delivery = await automationAudienceStore(context.installation).findByThread(threadId);
   if (delivery) {
     const automation = await resolveAutomationThreadAccess(session, threadId);
     if (!automation) throw new WorkbenchNotFoundError("Fil no trobat.");
-    const thread = await store.getThread(delivery.ownerUserId, threadId);
-    const project = await store.getProject(delivery.ownerUserId, delivery.projectId);
+    const selected = delivery.ownerUserId === principal.userId ? null : await store.loadAccessSnapshot(delivery.ownerUserId, threadId, options);
+    const snapshot = selected ?? own;
+    const thread = snapshot.threads.find(({ id }) => id === threadId);
+    const project = snapshot.projects.find(({ id }) => id === delivery.projectId);
+    if (!thread || !project || thread.projectId !== project.id) throw new WorkbenchNotFoundError("Fil no trobat.");
     return {
       store,
       ownerUserId: delivery.ownerUserId,
       role: delivery.ownerUserId === principal.userId ? "owner" as const : "viewer" as const,
       project,
       thread,
+      turnContext: selected ? selected.turnContext : context.turnContext,
       provenance: {
         source: "automation-audience" as const,
         taskId: delivery.taskId,
@@ -234,6 +269,7 @@ export async function resolveThreadAccess(session: AuthSession, threadId: string
         role: "owner" as const,
         project: ownProject,
         thread: ownThread,
+        turnContext: context.turnContext,
         provenance: null,
         context,
       };
@@ -243,14 +279,24 @@ export async function resolveThreadAccess(session: AuthSession, threadId: string
   // The durable thread grant is resolved before either foreign thread or project is read.
   const grant = await index.resolve({ principal, resourceType: "thread", resourceId: threadId });
   if (!grant) throw new WorkbenchNotFoundError("Fil no trobat.");
-  const thread = await store.getThread(grant.ownerUserId, threadId);
-  const project = await store.getProject(grant.ownerUserId, grant.projectId);
+  const metadata = await store.loadAccessSnapshot(grant.ownerUserId);
+  const indexedThread = metadata.threads.find(({ id }) => id === threadId);
+  const indexedProject = metadata.projects.find(({ id }) => id === grant.projectId);
+  const permittedRole = indexedProject ? currentSharedRole(indexedProject, principal, grant.role) : null;
+  if (!indexedThread || !indexedProject || indexedThread.projectId !== indexedProject.id || !permittedRole) throw new WorkbenchNotFoundError("Fil no trobat.");
+  const snapshot = await store.loadAccessSnapshot(grant.ownerUserId, threadId, options);
+  const thread = snapshot.threads.find(({ id }) => id === threadId);
+  const project = snapshot.projects.find(({ id }) => id === grant.projectId);
+  if (!thread || !project || thread.projectId !== project.id) throw new WorkbenchNotFoundError("Fil no trobat.");
+  const role = currentSharedRole(project, principal, permittedRole);
+  if (!role) throw new WorkbenchNotFoundError("Fil no trobat.");
   return {
     store,
     ownerUserId: grant.ownerUserId,
-    role: grant.role,
+    role,
     project,
     thread,
+    turnContext: snapshot.turnContext,
     provenance: {
       source: "shared-access-index",
       grantFingerprint: grant.grantFingerprint,
@@ -261,14 +307,25 @@ export async function resolveThreadAccess(session: AuthSession, threadId: string
   };
 }
 
-export function loadSharedWorkbenchForResolvedThread(
+export async function loadVisibleProjectsForResolvedThread(
   access: Awaited<ReturnType<typeof resolveThreadAccess>>,
 ) {
-  return loadSharedWorkbenchFromContext(access.context);
+  const { principal, store, own, index } = access.context;
+  const projects = own.projects.map((project) => projectWithAccess(project, "owner"));
+  const grants = await index.listProjectsForPrincipal(principal);
+  // Automation audiences add result threads only; they do not add projects to
+  // the runtime catalogue. Foreign snapshots are read only after their grants.
+  for (const [ownerUserId, ownerGrants] of Map.groupBy(grants, (grant) => grant.ownerUserId)) {
+    const snapshot = await store.loadAccessSnapshot(ownerUserId);
+    const roles = currentSharedRoles(snapshot.projects, principal, new Map(ownerGrants.map(grant => [grant.projectId, grant.role])));
+    projects.push(...snapshot.projects.filter(({ id }) => roles.has(id))
+      .map((project) => projectWithAccess(project, roles.get(project.id) ?? "viewer")));
+  }
+  return { projects };
 }
 
 export async function loadSharedWorkbench(session: AuthSession): Promise<WorkbenchSnapshot> {
-  return loadSharedWorkbenchFromContext(await ownAccessContext(session));
+  return loadSharedWorkbenchFromContext(await ownAccessContext(session, { fullSnapshot: true }));
 }
 
 export async function normalizeProjectMembers(session: AuthSession, project: WorkbenchProject) {

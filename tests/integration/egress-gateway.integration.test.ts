@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   EgressGateway,
   EgressGatewayError,
+  configFromEnvironment,
   isHealthProbeAuthorized,
   type EgressGatewayConfig,
   type GatewayConnection,
@@ -143,6 +144,7 @@ const servers: Array<NetServer | ReturnType<typeof createHttpServer>> = [];
 afterEach(async () => {
   await Promise.all(gateways.splice(0).map((gateway) => gateway.stop()));
   await Promise.all(servers.splice(0).map((server) => close(server)));
+  vi.unstubAllEnvs();
 });
 
 describe("physical egress gateway", () => {
@@ -230,6 +232,44 @@ describe("physical egress gateway", () => {
     expect((await connectExchange(proxyUrl, "api.openai.com:443", basic(WORKER_TOKEN, "worker"))).status).toBe(407);
   });
 
+  it("allows an installation connector only on the server channel and rejects other stores", async () => {
+    const echo = createNetServer(socket => socket.pipe(socket)); servers.push(echo);
+    const echoPort = await listen(echo);
+    const observed: GatewayConnection[] = [];
+    const gateway = new EgressGateway({ config: config({ serverConnectorHosts: new Set(["fixture-shop.myshopify.com"]) }), lookup: async () => [{ address: "93.184.216.34", family: 4 }], connect: localConnector(echoPort, observed) });
+    gateways.push(gateway); const proxy = await gateway.start();
+    expect((await connectExchange(proxy, "fixture-shop.myshopify.com:443", basic(SERVER_TOKEN))).status).toBe(200);
+    for (const [target, token] of [["fixture-shop.myshopify.com:443", WORKER_TOKEN], ["foreign.myshopify.com:443", SERVER_TOKEN], ["fixture-shop.myshopify.com:80", SERVER_TOKEN]]) expect((await connectExchange(proxy, target, basic(token))).status).toBe(403);
+    expect(observed).toHaveLength(1);
+    const unchanged = new EgressGateway({ config: config(), lookup: async () => [{ address: "93.184.216.34", family: 4 }], connect: localConnector(echoPort, observed) }); gateways.push(unchanged);
+    expect((await connectExchange(await unchanged.start(), "fixture-shop.myshopify.com:443", basic(SERVER_TOKEN))).status).toBe(403);
+  });
+  it.each(["*.myshopify.com", "127.0.0.1", "localhost", "shop.myshopify.com:443", "SHOP.myshopify.com", "shop.myshopify.com/"])("rejects unsafe connector host %s", host => {
+    expect(() => new EgressGateway({ config: config({ serverConnectorHosts: new Set([host]) }) })).toThrow(EgressGatewayError);
+  });
+
+  it("permits only opt-in exact Nominalia TLS targets for the server, never workers", async () => {
+    const echo = createNetServer(socket => socket.pipe(socket)); servers.push(echo);
+    const echoPort = await listen(echo);
+    const observed: GatewayConnection[] = [];
+    const gateway = new EgressGateway({ config: config({ serverMailTargets: new Set(["pop.securemail.pro:993", "authsmtp.securemail.pro:587"]) }), lookup: async () => [{ address: "93.184.216.34", family: 4 }], connect: localConnector(echoPort, observed) });
+    gateways.push(gateway); const proxy = await gateway.start();
+    for (const target of ["pop.securemail.pro:993", "authsmtp.securemail.pro:587"]) {
+      expect((await connectExchange(proxy, target, basic(SERVER_TOKEN))).status).toBe(200);
+      expect((await connectExchange(proxy, target, basic(WORKER_TOKEN))).status).toBe(403);
+    }
+    for (const target of ["pop.securemail.pro:465", "authsmtp.securemail.pro:993", "pop.securemail.pro:443", "foreign.example:993"]) {
+      expect((await connectExchange(proxy, target, basic(SERVER_TOKEN))).status).toBe(403);
+    }
+    expect(observed).toHaveLength(2);
+    const disabled = new EgressGateway({ config: config(), lookup: async () => [{ address: "93.184.216.34", family: 4 }], connect: localConnector(echoPort, observed) }); gateways.push(disabled);
+    expect((await connectExchange(await disabled.start(), "pop.securemail.pro:993", basic(SERVER_TOKEN))).status).toBe(403);
+  });
+
+  it.each(["*.securemail.pro:993", "127.0.0.1:993", "pop.securemail.pro:143", "foreign.example:465"])("rejects unreviewed mail target %s", target => {
+    expect(() => new EgressGateway({ config: config({ serverMailTargets: new Set([target]) }) })).toThrow(EgressGatewayError);
+  });
+
   it("rejects private, metadata and mixed DNS answers before opening a socket", async () => {
     const connector = vi.fn(async () => { throw new Error("must not connect"); });
     const gateway = new EgressGateway({
@@ -261,13 +301,16 @@ describe("physical egress gateway", () => {
     expect((await connectExchange(proxyUrl, "backend.composio.dev.evil.example:443", basic(SERVER_TOKEN))).status).toBe(403);
     expect((await connectExchange(proxyUrl, "backend.composio.dev:80", basic(SERVER_TOKEN))).status).toBe(403);
     expect((await connectExchange(proxyUrl, "backend.composio.dev:443", basic(WORKER_TOKEN))).status).toBe(403);
+    expect((await connectExchange(proxyUrl, "api.instantly.ai.evil.example:443", basic(SERVER_TOKEN))).status).toBe(403);
+    expect((await connectExchange(proxyUrl, "api.instantly.ai:80", basic(SERVER_TOKEN))).status).toBe(403);
+    expect((await connectExchange(proxyUrl, "api.instantly.ai:443", basic(WORKER_TOKEN))).status).toBe(403);
     expect((await connectExchange(proxyUrl, "project-ref.supabase.co:80", basic(SERVER_TOKEN))).status).toBe(403);
     expect((await connectExchange(proxyUrl, "browser.example:8443", bearer(BROWSER_TOKEN), "8.8.8.8")).status).toBe(403);
     expect(lookup).not.toHaveBeenCalled();
     expect(connector).not.toHaveBeenCalled();
   });
 
-  it("allows configured Supabase and the exact Composio API on the server channel", async () => {
+  it("allows configured Supabase and exact connector APIs on the server channel", async () => {
     const echo = createNetServer((socket) => socket.pipe(socket));
     servers.push(echo);
     const echoPort = await listen(echo);
@@ -281,6 +324,8 @@ describe("physical egress gateway", () => {
     expect(observed).toMatchObject([{ hostname: "project-ref.supabase.co", address: "104.18.38.10", port: 443, channel: "server" }]);
     expect((await connectExchange(proxyUrl, "backend.composio.dev:443", basic(SERVER_TOKEN))).status).toBe(200);
     expect(observed[1]).toMatchObject({ hostname: "backend.composio.dev", address: "104.18.38.10", port: 443, channel: "server" });
+    expect((await connectExchange(proxyUrl, "api.instantly.ai:443", basic(SERVER_TOKEN))).status).toBe(200);
+    expect(observed[2]).toMatchObject({ hostname: "api.instantly.ai", address: "104.18.38.10", port: 443, channel: "server" });
   });
 
   it("permits only opted-in exact IMAPS hosts on the server channel, rejects worker access and private DNS", async () => {
@@ -328,5 +373,102 @@ describe("physical egress gateway", () => {
     expect(isHealthProbeAuthorized("172.20.0.4", bearer(WORKER_TOKEN), HEALTH_TOKEN)).toBe(false);
     expect(isHealthProbeAuthorized("172.20.0.4", bearer(HEALTH_TOKEN), HEALTH_TOKEN)).toBe(true);
     expect(isHealthProbeAuthorized("127.0.0.1", undefined, HEALTH_TOKEN)).toBe(true);
+  });
+
+  it("allows the opted-in exact Transportexample CMS host only on server HTTPS with one pinned DNS decision", async () => {
+    const echo = createNetServer(socket => socket.pipe(socket));
+    servers.push(echo);
+    const port = await listen(echo);
+    const observed: GatewayConnection[] = [];
+    const lookup = vi.fn(async () => [{ address: "93.184.216.34", family: 4 as const }]);
+    const gateway = new EgressGateway({
+      config: config({ installationId: "transportexample-demo", transportexampleCmsOrigin: "https://CMS.website.example.:443/" }),
+      lookup,
+      connect: localConnector(port, observed),
+    });
+    gateways.push(gateway);
+    const url = await gateway.start();
+
+    expect((await connectExchange(url, "cms.website.example:443", basic(SERVER_TOKEN))).status).toBe(200);
+    expect(lookup).toHaveBeenCalledTimes(1);
+    expect(lookup).toHaveBeenCalledWith("cms.website.example", { all: true, verbatim: true });
+    expect(observed).toMatchObject([{ hostname: "cms.website.example", address: "93.184.216.34", family: 4, port: 443, channel: "server" }]);
+
+    lookup.mockClear();
+    for (const authority of ["cms.website.example.evil.example:443", "other.website.example:443", "cms.website.example:80", "cms.website.example:8443", "93.184.216.34:443"]) {
+      expect((await connectExchange(url, authority, basic(SERVER_TOKEN))).status).toBe(403);
+    }
+    expect((await connectExchange(url, "cms.website.example:443", basic(WORKER_TOKEN))).status).toBe(403);
+    // The CMS opt-in grants no browser exception to its existing pin/auth checks.
+    expect((await connectExchange(url, "cms.website.example:443", bearer(BROWSER_TOKEN))).status).toBe(403);
+    expect((await connectExchange(url, "cms.website.example:443", bearer(BROWSER_TOKEN), "127.0.0.1")).status).toBe(403);
+    expect((await connectExchange(url, "cms.website.example:443", basic(BROWSER_TOKEN), "8.8.8.8")).status).toBe(407);
+    expect(lookup).not.toHaveBeenCalled();
+    expect(observed).toHaveLength(1);
+  });
+
+  it("keeps CMS server egress disabled by default even for Transportexample", async () => {
+    const lookup = vi.fn(async () => [{ address: "93.184.216.34", family: 4 as const }]);
+    const connector = vi.fn(async () => { throw new Error("must not connect"); });
+    const gateway = new EgressGateway({ config: config({ installationId: "transportexample-demo" }), lookup, connect: connector });
+    gateways.push(gateway);
+    const url = await gateway.start();
+    expect((await connectExchange(url, "cms.website.example:443", basic(SERVER_TOKEN))).status).toBe(403);
+    expect(lookup).not.toHaveBeenCalled();
+    expect(connector).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "loopback IPv4", addresses: [{ address: "127.0.0.1", family: 4 as const }] },
+    { name: "private IPv4", addresses: [{ address: "10.0.0.8", family: 4 as const }] },
+    { name: "metadata IPv4", addresses: [{ address: "169.254.169.254", family: 4 as const }] },
+    { name: "loopback IPv6", addresses: [{ address: "::1", family: 6 as const }] },
+    { name: "mixed DNS", addresses: [{ address: "93.184.216.34", family: 4 as const }, { address: "10.0.0.8", family: 4 as const }] },
+  ])("rejects $name CMS DNS before connection", async ({ addresses }) => {
+    const connector = vi.fn(async () => { throw new Error("must not connect"); });
+    const lookup = vi.fn(async () => addresses);
+    const gateway = new EgressGateway({
+      config: config({ installationId: "transportexample-demo", transportexampleCmsOrigin: "https://cms.website.example" }),
+      lookup,
+      connect: connector,
+    });
+    gateways.push(gateway);
+    const url = await gateway.start();
+    expect((await connectExchange(url, "cms.website.example:443", basic(SERVER_TOKEN))).status).toBe(403);
+    expect(lookup).toHaveBeenCalledOnce();
+    expect(lookup).toHaveBeenCalledWith("cms.website.example", { all: true, verbatim: true });
+    expect(connector).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, "arnall", "another-installation", "transportexample-demo "])("rejects a CMS origin for typed foreign or missing installation %s", installationId => {
+    expect(() => new EgressGateway({ config: config({ installationId, transportexampleCmsOrigin: "https://cms.website.example" }) })).toThrowError(EgressGatewayError);
+  });
+
+  it.each([
+    "", " ", "http://cms.website.example", "https://cms.website.example:80", "https://cms.website.example:444",
+    "https://user:password@cms.website.example", "https://user@cms.website.example", "https://cms.website.example/path",
+    "https://cms.website.example/a/..", "https://cms.website.example?", "https://cms.website.example?q=1",
+    "https://cms.website.example#", "https://cms.website.example#fragment", "https://*.website.example",
+    "https://127.0.0.1", "https://93.184.216.34", "https://[2606:4700:4700::1111]", "https://localhost",
+    "https://cms.localhost", "https://metadata.google.internal", "https://cms", "https://cms_website.example",
+    " https://cms.website.example", "https://cms.website.example\n", "https://%63ms.website.example",
+    "https://cms.website.example\\path",
+  ])("rejects invalid typed CMS origin %s at construction", transportexampleCmsOrigin => {
+    expect(() => new EgressGateway({ config: config({ installationId: "transportexample-demo", transportexampleCmsOrigin }) })).toThrowError(EgressGatewayError);
+  });
+
+  it("validates the same Transportexample CMS opt-in from environment and defaults off", () => {
+    vi.stubEnv("AIBRAIN_EGRESS_WORKER_HOSTS", "api.openai.com");
+    vi.stubEnv("AIBRAIN_EGRESS_SUPABASE_ORIGIN", "https://project-ref.supabase.co");
+    vi.stubEnv("AIBRAIN_INSTALLATION_ID", "transportexample-demo");
+    vi.stubEnv("AIBRAIN_EGRESS_TRANSPORTEXAMPLE_CMS_ORIGIN", "");
+    expect(configFromEnvironment().transportexampleCmsOrigin).toBeUndefined();
+    vi.stubEnv("AIBRAIN_EGRESS_TRANSPORTEXAMPLE_CMS_ORIGIN", "https://CMS.website.example.:443/");
+    expect(configFromEnvironment()).toMatchObject({ installationId: "transportexample-demo", transportexampleCmsOrigin: "https://cms.website.example" });
+    vi.stubEnv("AIBRAIN_INSTALLATION_ID", "another-installation");
+    expect(() => configFromEnvironment()).toThrowError(EgressGatewayError);
+    vi.stubEnv("AIBRAIN_INSTALLATION_ID", "transportexample-demo");
+    vi.stubEnv("AIBRAIN_EGRESS_TRANSPORTEXAMPLE_CMS_ORIGIN", "https://cms.website.example/path");
+    expect(() => configFromEnvironment()).toThrowError(EgressGatewayError);
   });
 });

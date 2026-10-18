@@ -2,9 +2,9 @@ import { renderPresentationDraft, PresentationRenderError, type PresentationRend
 import { createHash } from "node:crypto";
 import { lstat, mkdir, open, readFile, realpath, rm } from "node:fs/promises";
 import path from "node:path";
-import type { DynamicToolCallParams } from "../../../contracts/codex/0.153.4/types/v2/DynamicToolCallParams";
-import type { DynamicToolCallResponse } from "../../../contracts/codex/0.153.4/types/v2/DynamicToolCallResponse";
-import type { DynamicToolSpec } from "../../../contracts/codex/0.153.4/types/v2/DynamicToolSpec";
+import type { DynamicToolCallParams } from "../../../contracts/codex/0.162.1/types/v2/DynamicToolCallParams";
+import type { DynamicToolCallResponse } from "../../../contracts/codex/0.162.1/types/v2/DynamicToolCallResponse";
+import type { DynamicToolSpec } from "../../../contracts/codex/0.162.1/types/v2/DynamicToolSpec";
 import type { InstallationConfig } from "@/config/installation-schema";
 import type { DocumentArtifact } from "@/lib/chat-contract";
 import type { ResolvedPermissions } from "@/permissions";
@@ -25,6 +25,7 @@ import { generatedDocumentArtifactId, persistGeneratedDocumentArtifact } from "@
 import { generatedImageArtifactId, isPng } from "@/runtime/generated-image-artifacts";
 import type { ArnallSchedule } from "@/runtime/documents/arnall-schedule";
 import { reviewFictionalArnallSchedule } from "@/runtime/documents/fictional-arnall-schedule";
+import { AttachmentReviewError, type AttachmentPageReview } from "@/runtime/documents/attachment-review";
 
 export const AIBRAIN_DOCUMENT_TOOL_NAMESPACE = "aibrain_documents";
 
@@ -63,6 +64,11 @@ export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze(
     { type: "function", name: "remember",
       description: "Persist the complete original of a file uploaded in this conversation as a reference available to all conversations in the current project. Use only when the user explicitly asks to remember/save that file. Pass its exact displayed filename. Returns a verified save receipt; never claim it is remembered before success. It does not save a summary instead of the original or grant access outside this project.",
       inputSchema: { type: "object", properties: { fileName: { type: "string", minLength: 1, maxLength: 120 } }, required: ["fileName"], additionalProperties: false },
+    },
+    {
+      type: "function", name: "inspect_attachment",
+      description: "Read one original PDF attachment page visually using the authorized document sandbox. Select the exact attachment filename from THIS turn and a page number. Returns the page image, original hash, total pages and server-recorded coverage. The initial preview contains only the first page; use this tool for every other page required for complete review. Once review starts, create/deliver require full coverage of this turn's original PDFs, unless the user explicitly requested a partial review; partial results remain labeled with their actual coverage. No shell commands, project paths, other threads or employees are accessible. A turn allows at most 50 page inspections and 20 MiB of rendered images; disclose any remaining unread pages.",
+      inputSchema: { type: "object", properties: { fileName: {type:"string",minLength:1,maxLength:500}, page:{type:"integer",minimum:1,maximum:50} }, required:["fileName","page"], additionalProperties:false },
     },
     {
       type: "function", name: "create_arnall_schedule",
@@ -257,6 +263,10 @@ export type LocalDocumentDynamicToolContext = Readonly<{
   rememberProjectFile?: (fileName: string) => Promise<Record<string, unknown>>;
   rememberProjectPreferences?: (notes: string) => Promise<Record<string, unknown>>;
   renderPresentation?: PresentationRenderCallback;
+  inspectAttachment?: (fileName: string, page: number) => Promise<AttachmentPageReview>;
+  assertAttachmentReviewComplete?: () => void;
+  attachmentReviewCoverage?: () => import("@/runtime/documents/attachment-review").AttachmentReviewCoverage;
+  attachmentReviewNotice?: () => string;
   spreadsheetLayout?: "schedule";
   arnallSchedule?: ArnallSchedule;
   now?: () => Date;
@@ -427,7 +437,7 @@ async function artifactFromReceipt(receipt: Receipt, context: LocalDocumentDynam
   });
 }
 
-function responseFor(receipt: Receipt, fictionalReview?: ReturnType<typeof reviewFictionalArnallSchedule>): DynamicToolCallResponse {
+function responseFor(receipt: Receipt, fictionalReview?: ReturnType<typeof reviewFictionalArnallSchedule>, coverage?: import("@/runtime/documents/attachment-review").AttachmentReviewCoverage): DynamicToolCallResponse {
   return {
     success: true,
     contentItems: [{
@@ -445,6 +455,7 @@ function responseFor(receipt: Receipt, fictionalReview?: ReturnType<typeof revie
         previewAvailable: true,
         downloadAvailable: true,
         ...(fictionalReview ? { review: fictionalReview } : {}),
+        ...(coverage?.started ? { attachmentReview: coverage } : {}),
       }),
     }],
   };
@@ -454,13 +465,14 @@ function failure(
   code: string,
   message: string,
   status: "failed" | "indeterminate" = "failed",
+  coverage?: import("@/runtime/documents/attachment-review").AttachmentReviewCoverage,
 ): LocalDocumentDynamicToolResult {
   return {
     response: {
       success: false,
       contentItems: [{
         type: "inputText",
-        text: JSON.stringify({ status, code, message, externalConnectorUsed: false }),
+        text: JSON.stringify({ status, code, message, externalConnectorUsed: false, ...(coverage ? { coverage } : {}) }),
       }],
     },
     artifacts: [],
@@ -659,7 +671,7 @@ async function completedBatchResult(
       throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_RECEIPT_CORRUPT", "Completed document batch is missing a child receipt.");
     }
     await verifyReceipt(receipt, createHash("sha256").update(canonicalInput(file)).digest("hex"), context);
-    results.push({ response: responseFor(receipt), artifacts: [await artifactFromReceipt(receipt, context)] });
+    results.push({ response: responseFor(receipt, undefined, context.attachmentReviewCoverage?.()), artifacts: [await artifactFromReceipt(receipt, context)] });
   }
   return batchResult(results);
 }
@@ -671,7 +683,7 @@ async function handleSingleLocalDocumentDynamicToolCall(
   try {
     if (!isRecord(params)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_REQUEST_INVALID", "Document tool request is invalid.");
     exactKeys(params, ["threadId", "turnId", "callId", "namespace", "tool", "arguments"]);
-    if (params.namespace !== AIBRAIN_DOCUMENT_TOOL_NAMESPACE || (params.tool !== "remember_preferences" && params.tool !== "remember" && params.tool !== "create" && params.tool !== "create_arnall_schedule" && params.tool !== "image_to_pdf" && params.tool !== "render" && params.tool !== "deliver")) {
+    if (params.namespace !== AIBRAIN_DOCUMENT_TOOL_NAMESPACE || (params.tool !== "remember_preferences" && params.tool !== "remember" && params.tool !== "create" && params.tool !== "create_arnall_schedule" && params.tool !== "image_to_pdf" && params.tool !== "render" && params.tool !== "deliver" && params.tool !== "inspect_attachment")) {
       throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_TOOL_REJECTED", "Document tool is not in the closed allowlist.");
     }
     for (const value of [params.threadId, params.turnId, params.callId]) {
@@ -686,6 +698,22 @@ async function handleSingleLocalDocumentDynamicToolCall(
         context.permissions.installationId !== context.installationId || context.permissions.userId !== context.userId ||
         context.permissions.projectId !== context.projectId) {
       throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_IDENTITY_MISMATCH", "Document tool call does not belong to this turn.");
+    }
+    if (params.tool === "inspect_attachment") {
+      const rules = context.permissions.rules.filter(rule => rule.ruleId === "documents.read" && rule.action === "consult");
+      if (rules.some(rule => rule.effect === "deny") || !rules.some(rule => rule.effect === "allow"))
+        return failure("LOCAL_DOCUMENT_PERMISSION_DENIED", "La política de este usuario no permite leer los adjuntos.");
+      if (!isRecord(params.arguments)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Selecciona un adjunto y una página.");
+      exactKeys(params.arguments,["fileName","page"]);
+      const {fileName,page}=params.arguments;
+      if (typeof fileName !== "string" || !fileName.length || fileName.length > 500 ||
+          typeof page !== "number" || !Number.isSafeInteger(page) || page < 1 || page > 50 || !context.inspectAttachment)
+        throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Selecciona un PDF original de este turno y una página entre 1 y 50.");
+      const {png,...review}=await context.inspectAttachment(fileName,page);
+      return {artifacts:[],response:{success:true,contentItems:[
+        {type:"inputText",text:JSON.stringify({status:"attachment_review",...review})},
+        {type:"inputImage",imageUrl:`data:image/png;base64,${png.toString("base64")}`},
+      ]}};
     }
     if (!permissionAllowsLocalDocumentCreation(context.permissions)) {
       return failure("LOCAL_DOCUMENT_PERMISSION_DENIED", "La política de este usuario no permite crear archivos locales.");
@@ -708,6 +736,7 @@ async function handleSingleLocalDocumentDynamicToolCall(
         return { artifacts: [], response: { success: true, contentItems: [{ type: "inputText", text: JSON.stringify(receipt) }] } };
       } catch (error) { return failure("PROJECT_REFERENCE_NOT_SAVED", error instanceof Error && !/(?:\/var\/|\/Users\/|ENOENT)/.test(error.message) ? error.message : "No se ha podido guardar el original como referencia. No está confirmado."); }
     }
+    if (params.tool !== "render") context.assertAttachmentReviewComplete?.();
     if (params.tool === "deliver") {
       if (!isRecord(params.arguments)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Delivery fields are invalid.");
       exactKeys(params.arguments, ["relativePath"]);
@@ -739,8 +768,10 @@ async function handleSingleLocalDocumentDynamicToolCall(
         artifactId: generatedDocumentArtifactId(context.sourceTurnId, relativePath), relativePath, contents, pages: null,
         context: { installation: context.installation, projectId: context.projectId, threadId: context.sourceThreadId, messageId: context.sourceTurnId, storageOwnerId: context.userId },
       });
+      const attachmentCoverage = context.attachmentReviewCoverage?.();
       return { artifacts: [artifact], response: { success: true, contentItems: [{ type: "inputText", text: JSON.stringify({
         status: "delivered", artifact, sha256: validated.sha256, externalConnectorUsed: false,
+        ...(attachmentCoverage?.started ? { attachmentReview: attachmentCoverage } : {}),
       }) }] } };
     }
     if (params.tool === "render") {
@@ -755,6 +786,8 @@ async function handleSingleLocalDocumentDynamicToolCall(
     }
     const fictional = params.tool === "create_arnall_schedule" ? parseFictionalArnallSchedule(params.arguments) : null;
     const input = fictional?.input ?? (params.tool === "image_to_pdf" ? parseImageToPdfArguments(params.arguments) : parseArguments(params.arguments));
+    const reviewCoverage = context.attachmentReviewCoverage?.();
+    const reviewNotice = reviewCoverage?.started && reviewCoverage.scope === "partial" ? context.attachmentReviewNotice?.() : undefined;
     const spreadsheetLayout = fictional ? "schedule" : context.spreadsheetLayout;
     const arnallSchedule = fictional?.schedule ?? context.arnallSchedule;
     const inputFingerprint = createHash("sha256").update(canonicalInput(input) + (spreadsheetLayout ? `|layout:${spreadsheetLayout}` : "") + (arnallSchedule ? `|arnall-schedule-v2-original-formulas:${JSON.stringify(arnallSchedule)}` : "")).digest("hex");
@@ -777,20 +810,20 @@ async function handleSingleLocalDocumentDynamicToolCall(
         );
       }
       await verifyReceipt(existing, inputFingerprint, context);
-      return { response: responseFor(existing, fictional?.review), artifacts: [await artifactFromReceipt(existing, context)] };
+      return { response: responseFor(existing, fictional?.review, reviewCoverage), artifacts: [await artifactFromReceipt(existing, context)] };
     }
     try {
       const existing = await readReceipt(receiptPath);
       if (existing) {
         await verifyReceipt(existing, inputFingerprint, context);
-        return { response: responseFor(existing, fictional?.review), artifacts: [await artifactFromReceipt(existing, context)] };
+        return { response: responseFor(existing, fictional?.review, reviewCoverage), artifacts: [await artifactFromReceipt(existing, context)] };
       }
       const documents = await secureDirectory(context.projectWorkspace);
       const sourcePng = await sourcePngFor(input, context);
       const generated = await generateLocalDocument({
         format: input.format,
         title: input.title,
-        content: input.content,
+        content: reviewNotice ? `${reviewNotice}\n\n${input.content}` : input.content,
         rows: input.rows,
         spreadsheetLayout,
         arnallSchedule,
@@ -835,7 +868,7 @@ async function handleSingleLocalDocumentDynamicToolCall(
           createdAt: (context.now ?? (() => new Date()))().toISOString(),
         });
         await atomicWriteFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
-        return { response: responseFor(receipt, fictional?.review), artifacts: [await artifactFromReceipt(receipt, context)] };
+        return { response: responseFor(receipt, fictional?.review, reviewCoverage), artifacts: [await artifactFromReceipt(receipt, context)] };
       } catch (error) {
         if (written) await rm(selected.target, { force: true }).catch(() => undefined);
         throw error;
@@ -844,8 +877,9 @@ async function handleSingleLocalDocumentDynamicToolCall(
       if (claimed) await rm(claimPath, { recursive: true, force: false }).catch(() => undefined);
     }
   } catch (error) {
-    return error instanceof LocalDocumentDynamicToolError || error instanceof LocalDocumentGenerationError || error instanceof PresentationRenderError
-      ? failure(error.code, error.message)
+    return error instanceof LocalDocumentDynamicToolError || error instanceof LocalDocumentGenerationError || error instanceof PresentationRenderError || error instanceof AttachmentReviewError
+      ? failure(error.code, error.message, "failed", error instanceof AttachmentReviewError ? error.coverage : undefined)
+      : params.tool === "inspect_attachment" ? failure("ATTACHMENT_REVIEW_FAILED", "No se ha podido revisar esta página del adjunto; su contenido sigue sin verificar.")
       : failure("LOCAL_DOCUMENT_GENERATION_FAILED", "No se ha podido crear y verificar el documento local.");
   }
 }
@@ -890,6 +924,7 @@ export async function handleLocalDocumentDynamicToolCall(
       return failure("LOCAL_DOCUMENT_PERMISSION_DENIED", "La política de este usuario no permite crear archivos locales.");
     }
     const files = parseBatchArguments(params.arguments);
+    context.assertAttachmentReviewComplete?.();
     const inputFingerprint = createHash("sha256").update(canonicalBatchInput(files)).digest("hex");
     const childCallIds = files.map((_, index) =>
       `batch-${createHash("sha256").update(`${params.callId}\0${index}`).digest("hex").slice(0, 48)}`);
@@ -962,8 +997,8 @@ export async function handleLocalDocumentDynamicToolCall(
       if (claimed) await rm(claimPath, { recursive: true, force: false }).catch(() => undefined);
     }
   } catch (error) {
-    return error instanceof LocalDocumentDynamicToolError || error instanceof LocalDocumentGenerationError
-      ? failure(error.code, error.message)
+    return error instanceof LocalDocumentDynamicToolError || error instanceof LocalDocumentGenerationError || error instanceof AttachmentReviewError
+      ? failure(error.code, error.message, "failed", error instanceof AttachmentReviewError ? error.coverage : undefined)
       : failure("LOCAL_DOCUMENT_GENERATION_FAILED", "No se ha podido crear y verificar el lote documental local.");
   }
 }

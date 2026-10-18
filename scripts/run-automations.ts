@@ -3,7 +3,7 @@ import { readdir } from "node:fs/promises";
 import { loadInstallationConfig } from "../src/config/installation";
 import type { InstallationConfig } from "../src/config/installation-schema";
 import { FileLocalUserStore } from "../src/auth/local-user-store";
-import type { AuthSession } from "../src/auth/types";
+import { provisionedAutomationPrincipal } from "../src/automations/principal";
 import { FileAutomationStore } from "../src/automations/store";
 import { runAutomationSweep } from "../src/automations/runner";
 import { executeScheduledTurn } from "../src/automations/executor";
@@ -37,12 +37,7 @@ async function sweep(workerId: string, installation: Readonly<InstallationConfig
   });
   const outputs = await Promise.all(users.map(async (user) => {
     if (!user) return [];
-    const session: AuthSession = {
-      provider: "local",
-      user: { id: user.userId, name: user.displayName, email: user.email },
-      tenant: { id: installation.installationId, name: installation.companyName },
-      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-    };
+    const session = await provisionedAutomationPrincipal(installation, user.userId);
     const store = new FileAutomationStore({
       installationId: installation.installationId,
       userId: user.userId,

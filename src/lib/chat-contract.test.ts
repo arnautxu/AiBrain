@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyChatStreamEvent,
+  isChatAttachment,
   isChatInputAttachment,
   isChatStreamEvent,
   isToolResult,
@@ -14,6 +15,13 @@ function dataUrl(mimeType: string, bytes: readonly number[]) {
 }
 
 describe("chat attachment contract", () => {
+  it("persists canonical staged Ogg metadata without admitting raw inline audio or foreign codecs", () => {
+    const voice = { id: "11111111-1111-4111-8111-111111111111", name: "voice.ogg", mimeType: "audio/ogg", size: 125139 };
+    expect(isChatAttachment(voice)).toBe(true);
+    expect(isChatInputAttachment({ ...voice, dataUrl: "data:audio/ogg;base64,T2dnUw==" })).toBe(false);
+    expect(isChatAttachment({ ...voice, mimeType: "audio/mpeg" })).toBe(false);
+    expect(isChatAttachment({ ...voice, mimeType: "audio/wav" })).toBe(false);
+  });
   it("accepts a canonical image and rejects false MIME, false size and malformed base64", () => {
     const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00];
     const valid = {
@@ -52,7 +60,7 @@ describe("chat attachment contract", () => {
     };
     const ids = Array.from({ length: 51 }, (_, index) =>
       `22222222-2222-4222-8222-${String(index + 1).padStart(12, "0")}`);
-    for (const count of [10, 11, 20, 33, 50]) {
+    for (const count of [10, 11, 20]) {
       expect(isTurnOptions({ ...base, documentUploadIds: ids.slice(0, count) })).toBe(true);
     }
     expect(isTurnOptions({ ...base, documentUploadIds: ids })).toBe(false);

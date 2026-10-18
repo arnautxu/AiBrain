@@ -9,6 +9,13 @@ import { TurnActivity } from "@/components/turn-activity";
 afterEach(cleanup);
 
 describe("TurnActivity timeline", () => {
+  it.each(["authorizationFingerprint", "connectorAuthorizationFingerprint"] as const)("keeps a legacy Shopify %s approval inspectable without decision buttons", (fingerprintKey) => {
+    const resolve = vi.fn(), approval = { id: "shopify-edit:test", threadId: "runtime-thread", turnId: "runtime-turn", itemId: "test", kind: "command" as const, title: "Change Shopify title", detail: "Draft B only", [fingerprintKey]: "a".repeat(64), status: "pending" as const };
+    render(<TurnActivity message={{ ...turnActivityScenarios.multipleTools, approvals: [approval] }} onResolveApproval={resolve} />);
+    expect(screen.queryByRole("button", { name: "Durante esta tarea" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Permitir" })).not.toBeInTheDocument();
+    expect(resolve).not.toHaveBeenCalled();
+  });
   it("collapses the same mounted live timeline when the final response arrives", () => {
     const message = turnActivityScenarios.multipleTools;
     const { rerender } = render(<TurnActivity message={message} onResolveApproval={vi.fn()} />);

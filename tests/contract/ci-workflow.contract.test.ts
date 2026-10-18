@@ -68,7 +68,7 @@ describe("backend CI contract", () => {
     }
   });
 
-  it("preserves the independent E2E partition and publication caches", async () => {
+  it("preserves the independent E2E partition and candidate build caches", async () => {
     const jobs = await readJobs();
     expect(jobs["e2e-suites"].needs).toBeUndefined();
     expect(jobs["e2e-suites"].strategy?.["fail-fast"]).toBe(false);
@@ -90,9 +90,11 @@ describe("backend CI contract", () => {
     expect(jobs.e2e.needs).toEqual(["e2e-suites", "webkit"]);
     expect(jobs.e2e.if).toBe("always()");
     const publish = await readFile(path.join(process.cwd(), ".github/workflows/publish-ghcr.yml"), "utf8");
-    expect(publish).toContain("cache-from:");
-    expect(publish).toContain("cache-to:");
-    expect(publish).toContain(":buildcache");
+    const candidate = JSON.stringify(jobs.containers);
+    expect(candidate).toContain("--cache-from");
+    expect(candidate).toContain("--cache-to");
+    expect(candidate).toContain(":buildcache");
+    expect(publish).not.toContain("docker/build-push-action@");
   });
 
   it("rejects every incomplete E2E dependency, including skipped WebKit", async () => {
@@ -129,7 +131,7 @@ describe("backend CI contract", () => {
       "docker compose",
       "--target runtime",
       "--target egress-gateway",
-      "--no-cache",
+      "--cache-from",
     ]) {
       expect(workflow, `missing CI gate: ${command}`).toContain(command);
     }
@@ -156,9 +158,13 @@ describe("backend CI contract", () => {
     const collection = workflow.indexOf("Collect post-deploy release identity readbacks");
 
     expect(publish).toContain("Backend CI");
-    expect(publish).toContain("packages: write");
-    expect(publish).toContain("docker/build-push-action@");
-    expect(publish).toContain("AIBRAIN_REVISION=${{ github.event.workflow_run.head_sha }}");
+    expect(publish).toContain("packages: read");
+    expect(publish).not.toContain("docker/build-push-action@");
+    expect(publish).toContain("aibrain-tested-images-${{ github.event.workflow_run.head_sha }}");
+    expect(publish).toContain("rebuild:false");
+    expect(publish).toContain(".workflow_id == $workflow");
+    expect(publish).toContain(".head_sha == $sha");
+    expect(workflow).toContain("vars.ARNALL_SOURCE_RETURN_HOLD != 'true'");
     expect(publish).toContain("aibrain-ghcr-release-${{ github.event.workflow_run.head_sha }}");
     expect(deploy).toBeGreaterThan(-1);
     expect(collection).toBeGreaterThan(deploy);

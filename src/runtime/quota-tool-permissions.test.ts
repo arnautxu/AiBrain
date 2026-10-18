@@ -3,6 +3,7 @@ import {
   attestQuotaToolPermissions,
   createQuotaToolPermissions,
   hasAttestedQuotaToolPermissions,
+  privateCodexToolPermissionsRequired,
   quotaToolPermissionConfigOverrides,
   quotaToolPermissionId,
 } from "@/runtime/quota-tool-permissions";
@@ -14,6 +15,13 @@ const roots = {
 };
 
 describe("quota tool permissions", () => {
+  it("requires credential privacy for RETAILDEMO independently of quotas without changing other installations", () => {
+    expect(privateCodexToolPermissionsRequired({ installationId: "retaildemo" })).toBe(true);
+    expect(privateCodexToolPermissionsRequired({ installationId: "retaildemo", usageLimits: null })).toBe(true);
+    expect(privateCodexToolPermissionsRequired({ installationId: "officeexample" })).toBe(false);
+    expect(privateCodexToolPermissionsRequired({ installationId: "officeexample-production" })).toBe(true);
+    expect(privateCodexToolPermissionsRequired({ installationId: "other", usageLimits: {} })).toBe(true);
+  });
   it("keeps read-only mode and exact project/temp writes while hiding private runtime state", () => {
     const policy = createQuotaToolPermissions(roots);
     const read = policy.config.permissions[policy.readOnlyId];

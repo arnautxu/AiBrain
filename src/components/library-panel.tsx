@@ -84,7 +84,7 @@ type DocumentHistoryVersion = {
   number: number;
   etag: string;
   fileName: string;
-  kind: "docx" | "xlsx" | "xls" | "pptx" | "pdf" | "text" | "image";
+  kind: "docx" | "xlsx" | "xls" | "pptx" | "pdf" | "text" | "image" | "audio";
   mediaType: string;
   size: number;
   author: { userId: string; name: string };
@@ -124,7 +124,7 @@ function parsedDocumentHistory(value: unknown): DocumentHistory | null {
         typeof version.etag !== "string" || !/^[0-9a-f]{64}$/.test(version.etag) ||
         typeof version.fileName !== "string" ||
         (version.kind !== "docx" && version.kind !== "xlsx" && version.kind !== "xls" && version.kind !== "pptx" &&
-          version.kind !== "pdf" && version.kind !== "text" && version.kind !== "image") ||
+          version.kind !== "pdf" && version.kind !== "text" && version.kind !== "image" && version.kind !== "audio") ||
         typeof version.mediaType !== "string" || !Number.isSafeInteger(version.size) ||
         typeof version.createdAt !== "string" || Number.isNaN(Date.parse(version.createdAt)) ||
         typeof version.downloadUrl !== "string" || !version.downloadUrl.startsWith("/api/") ||
@@ -435,7 +435,7 @@ export function LibraryPanel({
   const previewIsImage = effectivePreviewUrl && effectiveMimeType?.startsWith("image/");
   const previewIsPdf = effectiveMimeType === "application/pdf" ||
     effectiveMimeType?.startsWith("application/vnd.openxmlformats-officedocument.");
-  const previewIsText = effectiveMimeType?.startsWith("text/") || effectiveMimeType === "application/json";
+  const previewIsText = effectiveMimeType?.startsWith("text/") || effectiveMimeType === "application/json" || effectiveMimeType === "audio/ogg";
 
   return (
     <div className="workspace-overlay fixed inset-0 z-[75] flex sm:p-5">

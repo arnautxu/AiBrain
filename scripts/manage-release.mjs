@@ -340,7 +340,9 @@ function validInstallationConnectors(value) {
   if (value === undefined) return true;
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const keys = Object.keys(value);
-  if (keys.length === 0 || keys.some((key) => !["gmail", "outlook", "composio", "companyMail"].includes(key))) return false;
+  if (keys.length === 0 || keys.some((key) => !["gmail", "outlook", "composio", "companyMail", "mail"].includes(key))) return false;
+  if (value.mail !== undefined && (!exactObjectKeys(value.mail, ["enabled", "provider"])
+    || typeof value.mail.enabled !== "boolean" || value.mail.provider !== "nominalia")) return false;
   if (value.companyMail !== undefined) {
     const mail = value.companyMail;
     const dns = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$/u;
@@ -1662,6 +1664,15 @@ function advisoryLockInvocation(options, argv) {
     }
   }
   if (process.platform === "darwin") {
+    // Current macOS installations can lack lockf. Keep the same exclusive,
+    // nonblocking OS lock rather than bypassing release serialization in QA.
+    if (!existsSync("/usr/bin/lockf")) {
+      return {
+        executable: "/usr/bin/python3",
+        args: [path.join(path.dirname(script), "release-advisory-lock.py"), lockFile, process.execPath, script, ...argv],
+        conflictStatus: 75,
+      };
+    }
     return {
       executable: "/usr/bin/lockf",
       args: ["-t", "0", lockFile, process.execPath, script, ...argv],
@@ -1706,7 +1717,7 @@ function runCli(argv) {
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
-export { ReleaseError, execute, parseArguments, runCli };
+export { ReleaseError, execute, parseArguments, runCli, validInstallationConnectors };
 
 if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   try {

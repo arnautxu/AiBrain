@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 // Run only inside the final runtime image under the production container profile.
@@ -53,7 +54,7 @@ try {
     '            assert b\'<c r="B3"><v>0</v></c>\' in sheet, "Chart lost a zero value"',
   ].join('\n'), pptx], { cwd: work, timeout: 15_000 });
   await tool('soffice', [
-    `-env:UserInstallation=file://${work}/lo-profile`, '--headless', '--invisible', '--nologo',
+    `-env:UserInstallation=${pathToFileURL(path.join(work, 'lo-profile')).href}`, '--headless', '--invisible', '--nologo',
     '--nodefault', '--nofirststartwizard', '--norestore', '--safe-mode',
     '--convert-to', 'pdf', '--outdir', work, pptx,
   ]);

@@ -11,6 +11,9 @@ import { FileDocumentStorageGate } from "@/documents/storage-gate";
 import { FileDocumentVersionStore } from "@/documents/version-store";
 import { WorkerProvisioner } from "@/runtime/workers/provisioner";
 import { ResourceLockManager } from "@/storage";
+import { StorageError } from "@/storage/errors";
+import type { ResolvedPermissions } from "@/permissions";
+import { EnterpriseDocumentNetwork } from "@/documents/enterprise-document-network";
 
 function configuredAbsolutePath(name: string, fallback: string) {
   const value = process.env[name]?.trim() || fallback;
@@ -24,7 +27,11 @@ export function documentToolchainFromEnvironment(): ConfiguredDocumentToolchain 
   const darwin = process.platform === "darwin";
   const qpdf = process.env.AIBRAIN_QPDF_BIN?.trim() ||
     (process.env.NODE_ENV === "production" ? "/usr/local/bin/aibrain-qpdf" : undefined);
+  const ffprobe = process.env.AIBRAIN_FFPROBE_BIN?.trim();
+  const audioTranscriber = process.env.AIBRAIN_AUDIO_TRANSCRIBER_BIN?.trim();
   return {
+    ...(ffprobe ? { ffprobe: configuredAbsolutePath("AIBRAIN_FFPROBE_BIN", ffprobe) } : {}),
+    ...(audioTranscriber ? { audioTranscriber: configuredAbsolutePath("AIBRAIN_AUDIO_TRANSCRIBER_BIN", audioTranscriber) } : {}),
     soffice: configuredAbsolutePath(
       "AIBRAIN_SOFFICE_BIN",
       darwin ? "/Applications/LibreOffice.app/Contents/MacOS/soffice" : "/usr/local/bin/aibrain-soffice",
@@ -74,6 +81,11 @@ export async function documentServicesForUser(
     lockManager: locks,
     tools: toolchain,
     conversionGate,
+    ...({}),
+    audioGate: new FileDocumentConversionGate({
+      rootDirectory: path.join(installation.paths.dataRoot, "locks", "audio-transcriptions"),
+      maxConcurrent: 1,
+    }),
   });
   const versions = new FileDocumentVersionStore(
     path.join(stateRoot, "document-history"),
@@ -93,8 +105,12 @@ function publicationSecret() {
 export async function documentPublisherForUser(
   installation: Readonly<InstallationConfig>,
   userId: string,
+  context?: { projectId: string; permissions?: ResolvedPermissions },
 ) {
+  const remoteWORKSITEA = installation.installationId === "worksitea-production" || installation.installationId === "worksitea-qa";
+
   const services = await documentServicesForUser(installation, userId);
+
   const stateRoot = path.join(services.manifest.roots.userRoot, "state", "publications");
   return new FileDocumentPublisher({
     installationId: installation.installationId,

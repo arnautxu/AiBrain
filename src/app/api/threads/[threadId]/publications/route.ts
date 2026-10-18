@@ -79,7 +79,7 @@ export async function POST(request: Request, context: RouteContext) {
     if (preview.sourceSha256 !== document.sha256 || preview.status !== "ready") {
       return NextResponse.json({ error: "El preview ja no correspon al candidat." }, { status: 409 });
     }
-    const publisher = await documentPublisherForUser(installation, session.user.id);
+    const publisher = await documentPublisherForUser(installation, session.user.id, { projectId: threadContext.projectId, permissions });
     const frozen = await publisher.freezeCandidate({
       operationId: body.operationId,
       clientRequestId: body.clientRequestId,
@@ -108,5 +108,25 @@ export async function POST(request: Request, context: RouteContext) {
     if (resourceError) return resourceError;
     if (error instanceof StorageError) return publicationErrorResponse(error);
     return workbenchErrorResponse(error, "No s’ha pogut verificar la publicació.");
+  }
+}
+
+/** Reattach private confirmations after refresh without dispatching effects. */
+export async function GET(_request: Request, context: RouteContext) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "No autenticat." }, { status: 401 });
+  const { threadId } = await context.params;
+  if (!isUuid(threadId)) return NextResponse.json({ error: "Fil no vàlid." }, { status: 400 });
+  try {
+    assertLibraryResourceWritable(await resolveThreadAccess(session, threadId));
+    const installation = await loadInstallationConfig();
+    if (session.provider !== "local" || session.tenant.id !== installation.installationId) {
+      return NextResponse.json({ error: "Instal·lació no autoritzada." }, { status: 403 });
+    }
+    return NextResponse.json({ publications: [] }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    const resourceError = libraryResourceErrorResponse(error, "Publicación no encontrada.");
+    if (resourceError) return resourceError;
+    return workbenchErrorResponse(error, "No s’han pogut recuperar les publicacions.");
   }
 }

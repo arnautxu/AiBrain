@@ -4,9 +4,9 @@ import { establishDemoSession } from "../helpers/playwright-auth";
 test.setTimeout(60_000);
 
 const suggestions = [
-  { button: "Prepárame una presentación", prompt: "Prepárame una presentación sobre…" },
-  { button: "Trabajemos con estos Excels", prompt: "Trabajemos con estos Excels. Quiero…" },
-  { button: /Trabajemos en los horarios/, child: "Dame los horarios preparados", prompt: "Dame los horarios preparados del equipo de Example Laboratory para…" },
+  { button: "Resumir documentos", prompt: "Ayúdame a resumir estos documentos para Example Laboratory: … Usa solo el material aportado o autorizado, cita las fuentes y destaca decisiones, dudas y datos que faltan." },
+  { button: "Comparar opciones", prompt: "Comparemos estas opciones para Example Laboratory: … Organiza criterios, ventajas, costes conocidos y dudas con los datos disponibles. Indica qué falta para decidir sin inventar cifras ni compromisos." },
+  { button: "Organizar los próximos pasos", prompt: "Ayúdame a organizar los próximos pasos de este trabajo de Example Laboratory: … A partir de la información aportada, resume pendientes, dependencias y preguntas. Propón responsables y fechas para revisar, sin crear tareas programadas ni enviar mensajes." },
 ];
 
 for (const width of [390, 1440]) for (const suggestion of suggestions) {
@@ -15,7 +15,6 @@ for (const width of [390, 1440]) for (const suggestion of suggestions) {
     await establishDemoSession(page, "example-user");
     const input = page.getByRole("textbox", { name: "Mensaje", exact: true });
     await page.getByRole("button", { name: suggestion.button, exact: true }).click();
-    if (suggestion.child) await page.getByRole("menuitem", { name: suggestion.child, exact: true }).click();
     await expect(input).toHaveValue(suggestion.prompt);
     await expect(input).toBeFocused();
     await expect.poll(() => input.evaluate(el => (el as HTMLTextAreaElement).selectionStart)).toBe(suggestion.prompt.length);

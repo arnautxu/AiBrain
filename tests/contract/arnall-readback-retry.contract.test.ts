@@ -65,7 +65,10 @@ async function retryValidator(): Promise<string> {
   const script = await mkdtemp(path.join(os.tmpdir(), "aibrain-readback-validator-"));
   roots.push(script);
   const pathname = path.join(script, "validate.sh");
-  await writeFile(pathname, `${sourceable}\nfail() { return 1; }\nrequire_root_owned_file() { [[ -f "$1" && ! -L "$1" ]]; }\nrequire_root_owned_directory() { [[ -d "$1" && ! -L "$1" ]]; }\nvalidate_existing_release_readbacks "$1" "$2" "$3" "$4" "$5" "$6" "$7"\n`, { mode: 0o700 });
+  // macOS exposes the same real SHA-256 computation through shasum. Keep
+  // artifact-byte and tampering checks rather than substituting a fake digest.
+  const portableHash = '\nif ! command -v sha256sum >/dev/null 2>&1; then sha256sum() { shasum -a 256 "$@"; }; fi\n';
+  await writeFile(pathname, `${sourceable}${portableHash}\nfail() { return 1; }\nrequire_root_owned_file() { [[ -f "$1" && ! -L "$1" ]]; }\nrequire_root_owned_directory() { [[ -d "$1" && ! -L "$1" ]]; }\nvalidate_existing_release_readbacks "$1" "$2" "$3" "$4" "$5" "$6" "$7"\n`, { mode: 0o700 });
   await chmod(pathname, 0o700);
   return pathname;
 }

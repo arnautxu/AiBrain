@@ -23,9 +23,11 @@ for (const [name, width, height] of [["desktop", 1440, 900], ["mobile", 390, 844
     await expect(menu.getByRole("menuitem", { name: "Archivos del servidor", exact: true })).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "Añadir al mensaje", exact: true })).toBeFocused();
-    await page.getByRole("button", { name: /Trabajemos en los horarios/ }).click();
-    await page.getByRole("menuitem", { name: "Revisar cambios de horarios", exact: true }).click();
-    await expect(composer).toHaveValue(/^Revisemos los cambios de horarios/);
+    // The generic Example fixture must never expose Arnall's schedule templates.
+    await expect(page.getByRole("button", { name: /Trabajemos en los horarios/ })).toHaveCount(0);
+    await page.getByRole("button", { name: "Comparar opciones", exact: true }).click();
+    await expect(composer).toHaveValue(/^Comparemos estas opciones para Example Laboratory/);
+    await expect(composer).not.toHaveValue("Texto anterior que debe desaparecer.");
     await expect(composer).toBeFocused();
     await expect(menu).toHaveCount(0);
     await expect(page.getByRole("menu", { name: "Horarios del equipo", exact: true })).toHaveCount(0);

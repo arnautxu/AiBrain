@@ -7,7 +7,7 @@ export type AutomationExecution = (
   existingThreadId: string | null,
   onThreadPrepared: (threadId: string) => Promise<void>,
   signal: AbortSignal,
-) => Promise<{ threadId: string | null }>;
+) => Promise<{ threadId: string | null; deadlineAt?: number; finalize?: (persist: () => Promise<void>) => Promise<void> }>;
 
 export async function runAutomationSweep(options: {
   store: FileAutomationStore;
@@ -107,6 +107,7 @@ export async function runAutomationSweep(options: {
       }, controller.signal);
       await renew();
       if (leaseLost || controller.signal.aborted) throw controller.signal.reason ?? new Error("La automatización se ha cancelado.");
+      if (execution.deadlineAt !== undefined && now() >= execution.deadlineAt) throw Error("HOST_TERMINAL_TIMEOUT");
       threadId = execution.threadId;
       const run: AutomationRun = {
         schemaVersion: 1,
@@ -122,8 +123,11 @@ export async function runAutomationSweep(options: {
         threadId,
         error: null,
       };
-      await options.store.appendRun(run);
-      await options.store.settle(claim, { status: "succeeded" });
+      const persist = async () => {
+        await options.store.appendRun(run);
+        await options.store.settle(claim, { status: "succeeded" });
+      };
+      if (execution.finalize) await execution.finalize(persist); else await persist();
       results.push({ taskId: claim.task.id, runKey: claim.runKey, status: "succeeded", error: null });
     } catch (error) {
       const detail = error instanceof Error ? error.message.slice(0, 2_000) : "Error de ejecución";
@@ -154,7 +158,7 @@ export async function runAutomationSweep(options: {
         // never be retried or revive a paused/deleted recurrence.
         await options.store.settle(claim, { status: "failed", error: detail });
         results.push({ taskId: claim.task.id, runKey: claim.runKey, status: "failed", error: detail });
-      } else if (attempt < maxAttempts) {
+      } else if (attempt < (claim.task.schedule.kind === "external" ? 1 : maxAttempts)) {
         const delay = retryBaseMs * (2 ** (attempt - 1));
         await options.store.retry(claim, { error: detail, retryAt: new Date(now() + delay).toISOString() });
         results.push({ taskId: claim.task.id, runKey: claim.runKey, status: "failed", error: detail });

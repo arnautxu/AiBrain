@@ -11,6 +11,8 @@ export function SpreadsheetTable({ preview }: { preview: SpreadsheetPreview }) {
   const [columnPage, setColumnPage] = useState(0);
   const [activeCell, setActiveCell] = useState<string | null>(null);
   const sheet = preview.sheets[selected] ?? preview.sheets[0];
+  // Older private previews have only a workbook-level truncation flag.
+  const sheetIncomplete = sheet.truncated ?? preview.truncated;
   const populatedRows = sheet.cells.map((cell) => Number(cell.address.replace(/^[A-Z]+/, "")));
   const populatedColumns = sheet.cells.map((cell) => cell.address.replace(/\d+$/, ""));
   const columnIndex = (name: string) => [...name].reduce((total, letter) => total * 26 + letter.charCodeAt(0) - 64, 0);
@@ -41,7 +43,7 @@ export function SpreadsheetTable({ preview }: { preview: SpreadsheetPreview }) {
       <div className="grid h-7 w-14 shrink-0 place-items-center rounded border border-[#cbd6cf] bg-[#f5f7f5] text-[11px] font-semibold">{activeCell ?? "A1"}</div>
       <div className="min-w-0 flex-1 truncate rounded border border-[#cbd6cf] bg-white px-2 py-1 text-[11px]" aria-live="polite">{activeValue}</div>
     </div>
-    {preview.truncated ? <p role="status" className="shrink-0 border-b border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-900">{t("Vista parcial por tamaño. Confirma el resto antes de sacar conclusiones.")}</p> : null}
+    {sheetIncomplete ? <p role="status" className="shrink-0 border-b border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-900">{t("Vista parcial por tamaño. Confirma el resto antes de sacar conclusiones.")}</p> : null}
     <div tabIndex={0} aria-label={t("Celdas de {p0}", { p0: sheet.name })} className="scrollbar-thin min-h-0 flex-1 overflow-auto bg-white">
       {rowCount ? <table className="w-full border-separate border-spacing-0 text-left text-[12px] tabular-nums">
         <caption className="sr-only">{sheet.name}{t(": valores guardados por dirección de celda")}</caption>
@@ -51,7 +53,7 @@ export function SpreadsheetTable({ preview }: { preview: SpreadsheetPreview }) {
           const active = address === activeCell;
           return <td key={column} title={address} onClick={() => setActiveCell(address)} className={`h-8 min-w-28 max-w-80 cursor-cell whitespace-pre-wrap break-words border-b border-r px-2 py-1.5 align-top outline-none ${active ? "relative border-[#18864b] bg-[#eaf6ef] ring-2 ring-inset ring-[#18864b]" : "border-[#dce3de] bg-white hover:bg-[#f4faf6]"}`}>{values.get(address) ?? ""}</td>;
         })}</tr>)}</tbody>
-      </table> : <p className="p-6 text-sm">{t("No hay celdas con valores en esta vista.")}{preview.truncated ? t(" La extracción es parcial.") : ""}</p>}
+      </table> : <p className="p-6 text-sm">{sheetIncomplete ? t("No se han incluido valores de esta hoja en la vista parcial. Descarga el libro para consultarlos.") : t("No hay celdas con valores en esta hoja.")}</p>}
     </div>
     {rowCount > 50 || columnCount > 12 ? <nav aria-label={t("Páginas de celdas")} className="flex shrink-0 flex-wrap items-center gap-2 border-t border-[#cbd6cf] bg-white p-2">
       {rowCount > 50 ? <><button className={button} disabled={rowPage === 0} onClick={() => setRowPage(rowPage - 1)}>{t("Filas anteriores")}</button><span className="text-sm">{rowPage + 1} / {Math.ceil(rowCount / 50)}</span><button className={button} disabled={(rowPage + 1) * 50 >= rowCount} onClick={() => setRowPage(rowPage + 1)}>{t("Más filas")}</button></> : null}

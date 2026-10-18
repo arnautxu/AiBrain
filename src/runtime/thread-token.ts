@@ -1,17 +1,23 @@
 import "server-only";
 
 import { createHmac, timingSafeEqual } from "node:crypto";
+
 import { getSigningSecret } from "@/auth/session";
 
 const THREAD_TOKEN_SECONDS = 60 * 60 * 24 * 30;
 
 /**
  * Dynamic tools are fixed when App Server creates a thread.  A resumable
- * thread issued before this revision cannot acquire the automation tools on a
- * later `thread/resume`, so callers can use this marker to re-bootstrap only
- * turns that actually need the current toolset.
+ * thread issued before this revision cannot acquire the current tools on a
+ * later `thread/resume`. The chat route bootstraps its durable history into a
+ * fresh runtime, including follow-ups without any connector keywords.
  */
-export const CURRENT_THREAD_TOOLSET_REVISION = "aibrain-tools-2026-10-08-reviewed-pdf-v1";
+export const CURRENT_THREAD_TOOLSET_REVISION = "aibrain-tools-2026-10-16-fleet-common-automatic-v3";
+
+export function currentThreadToolsetRevision(installationId?: string) {
+
+  return CURRENT_THREAD_TOOLSET_REVISION;
+}
 
 type ThreadPayload = {
   version: 3;
@@ -30,10 +36,11 @@ export type RuntimeThreadTokenContext = {
 export function toolsetRevisionForIssuedThreadToken(
   resumedThreadId: string | null,
   resumedThreadToolsetRevision: string | null,
+  installationId?: string,
 ) {
   return resumedThreadId
     ? resumedThreadToolsetRevision
-    : CURRENT_THREAD_TOOLSET_REVISION;
+    : currentThreadToolsetRevision(installationId);
 }
 
 const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -55,7 +62,7 @@ export function issueThreadToken(
   tenantId: string,
   userId: string,
   threadId: string,
-  toolsetRevision: string | null = CURRENT_THREAD_TOOLSET_REVISION,
+  toolsetRevision: string | null = currentThreadToolsetRevision(tenantId),
 ) {
   if (!/^[a-z0-9-]{2,63}$/.test(tenantId) ||
       !USER_ID_PATTERN.test(userId) || !THREAD_ID_PATTERN.test(threadId)) {

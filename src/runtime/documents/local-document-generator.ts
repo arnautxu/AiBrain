@@ -220,6 +220,18 @@ function columnName(index: number) {
 
 async function xlsxBytes(title: string, content: string, explicitRows?: readonly (readonly LocalDocumentCell[])[], layout?: "schedule") {
   const rows = spreadsheetRows(content, explicitRows);
+  // Whole-sheet PDF export crops text that overflows the last used column.
+  // Give literal values their own cell width rather than relying on overflow;
+  // the approved schedule renderer supplies its own fixed column geometry.
+  const widths: number[] = [];
+  for (const row of rows) {
+    row.forEach((cell, index) => {
+      const value = cell === null || isLocalDocumentFormula(cell) ? "" : String(cell);
+      const longestLine = value.split(/\r\n?|\n/u).reduce((longest, line) => Math.max(longest, line.length), 0);
+      widths[index] = Math.min(255, Math.max(widths[index] ?? 12, longestLine + 3));
+    });
+  }
+  const columns = layout === "schedule" ? "" : `<cols>${widths.map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join("")}</cols>`;
   const sheetRows = rows.map((row, rowIndex) => {
     const cells = row.map((cell, columnIndex) => {
       const reference = `${columnName(columnIndex)}${rowIndex + 1}`;
@@ -235,7 +247,7 @@ async function xlsxBytes(title: string, content: string, explicitRows?: readonly
     "_rels/.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>`,
     "xl/workbook.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${xml(title.slice(0, 31).replace(/[\\/*?:\[\]]/gu, " ") || "Datos")}" sheetId="1" r:id="rId1"/></sheets><calcPr calcId="0" fullCalcOnLoad="1" forceFullCalc="1"/></workbook>`,
     "xl/_rels/workbook.xml.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
-    "xl/worksheets/sheet1.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/><sheetData>${sheetRows}</sheetData></worksheet>`,
+    "xl/worksheets/sheet1.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/>${columns}<sheetData>${sheetRows}</sheetData></worksheet>`,
     "xl/styles.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Arial"/></font><font><b/><sz val="11"/><name val="Arial"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>`,
     "docProps/core.xml": coreProperties(title),
     "docProps/app.xml": appProperties("AiBrain Spreadsheet Generator"),
@@ -306,11 +318,20 @@ const CP1252: Record<string, number> = {
   "™": 0x99, "š": 0x9a, "›": 0x9b, "œ": 0x9c, "ž": 0x9e, "Ÿ": 0x9f,
 };
 
+// Helvetica/WinAnsi has no arrow glyphs. Keep their direction in a readable
+// ASCII form before wrapping, without adding font binaries or licenses.
+function compatiblePdfText(value: string) {
+  return value.normalize("NFC").replace(/[→←↔]/gu, character => ({ "→": "->", "←": "<-", "↔": "<->" })[character]!);
+}
+
 function pdfString(value: string) {
   const bytes: number[] = [];
   for (const character of value) {
     const point = character.codePointAt(0)!;
-    const byte = CP1252[character] ?? (point <= 0xff ? point : 0x3f);
+    const byte = CP1252[character] ?? ((point >= 0x20 && point <= 0x7e) || (point >= 0xa0 && point <= 0xff) ? point : undefined);
+    if (byte === undefined) {
+      throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_PDF_TEXT_UNSUPPORTED", `Basic PDF cannot represent U+${point.toString(16).toUpperCase()}; use a compatible textual representation instead of silently changing the symbol.`);
+    }
     if (byte === 0x28 || byte === 0x29 || byte === 0x5c) bytes.push(0x5c);
     bytes.push(byte);
   }
@@ -413,9 +434,12 @@ export async function generateLocalDocument(input: LocalDocumentInput): Promise<
   let data: Buffer;
   let pages: number | null = null;
   if (normalized.format === "pdf") {
+    const title = compatiblePdfText(normalized.title);
+    const content = compatiblePdfText(normalized.content);
+    const slides = normalized.slides?.map(slide => ({ title: compatiblePdfText(slide.title), body: compatiblePdfText(slide.body) }));
     const generated = normalized.sourcePng
       ? await imagePdfBytes(normalized.title, normalized.sourcePng)
-      : textPdfBytes(normalized.title, normalized.content, normalized.slides ? presentationSlides(normalized.title, normalized.content, normalized.slides) : undefined);
+      : textPdfBytes(title, content, slides ? presentationSlides(title, content, slides) : undefined);
     data = generated.data;
     pages = generated.pages;
   } else if (normalized.format === "docx") {

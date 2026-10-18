@@ -11,6 +11,8 @@ export type PersonalConnectorSettings = {
   connectUrl: string | null;
   disconnectUrl: string | null;
   connectionVersion: number | null;
+  /** Password connections submit locally; they must never be opened as OAuth links. */
+  connectionMethod?: "password";
 };
 
 type PersonalConnectorCapability = ConnectorCapabilitySnapshot & {

@@ -1,10 +1,12 @@
 import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { connect as connectTcp } from "node:net";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import WebSocket from "ws";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from "vitest";
 import {
   AppServerRpcRouter,
   FileTransportEventJournal,
@@ -20,6 +22,7 @@ import {
 import type { WorkerLaunchContext } from "@/runtime/workers/types";
 import { quotaToolPermissionConfigOverrides } from "@/runtime/quota-tool-permissions";
 import { ResourceLockManager } from "@/storage";
+import * as ownerAuthentication from "@/runtime/installation-owner-auth";
 
 vi.mock("server-only", () => ({}));
 
@@ -189,8 +192,38 @@ describe("private per-user worker gateway", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
     await Promise.all(roots.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  });
+
+  it("answers external token refresh privately without journaling credentials or exposing it as a tool", async () => {
+    context = { ...context, installationId: "officeexample-production" };
+    vi.stubEnv("AIBRAIN_CODEX_OWNER_AUTH_SOCKET", "/run/officeexample-owner-auth/broker.sock");
+    vi.stubEnv("AIBRAIN_CODEX_AUTH_SCOPE", "installation-owner");
+    vi.stubEnv("AIBRAIN_INSTALLATION_OWNER_AUTH_ACK", "officeexample-production");
+    const accessToken = "private-temporary-access-token-must-never-appear-in-journals";
+    const ownerAccess = vi.spyOn(ownerAuthentication, "readInstallationOwnerAccess").mockResolvedValue({ accessToken, chatgptAccountId: "owner" });
+    await writeFile(fakeServer, [
+      'import { createInterface } from "node:readline";',
+      'let pending; const lines = createInterface({ input: process.stdin });',
+      'lines.on("line", (line) => { const request = JSON.parse(line);',
+      'if (request.method === "initialize") { pending=request.id; process.stdout.write(JSON.stringify({id:"owner-refresh",method:"account/chatgptAuthTokens/refresh",params:{reason:"unauthorized",previousAccountId:"owner"}})+"\\n"); }',
+      `else if(request.id === "owner-refresh" && request.result?.accessToken === ${JSON.stringify(accessToken)}) process.stdout.write(JSON.stringify({id:pending,result:{privateRefreshAnswered:true}})+"\\n");`,
+      '});',
+    ].join("\n"));
+    const worker = gateway(); await worker.start();
+    const client = transport(worker); const router = new AppServerRpcRouter(client);
+    try {
+      await router.start();
+      const request = initializeRequest();
+      expect(await router.request(request.rpc, 5_000)).toEqual({ privateRefreshAnswered: true });
+      expect(ownerAccess).toHaveBeenCalledWith("officeexample-production", "owner");
+      for (const filename of ["gateway-events.jsonl", "gateway-requests.jsonl", "test-client-events.jsonl"]) {
+        const journal = await readFile(path.join(context.transportAudit, filename), "utf8");
+        expect(journal).not.toContain(accessToken); expect(journal).not.toContain("account/chatgptAuthTokens/refresh");
+      }
+    } finally { await router.close(); await worker.stop(); }
   });
 
   function gateway(options: { maxRetainedCompletedRequests?: number; maxRetainedObservationBytes?: number; sharedAuth?: import("./shared-auth-broker").SharedAuthProvider } = {}) {
@@ -296,6 +329,89 @@ describe("private per-user worker gateway", () => {
       reconnectJitterRatio: 0,
     });
   }
+
+  it("releases journal ownership after cancellation during startup repair", async () => {
+    let finishRepair!: () => void;
+    const repair = vi.spyOn(FileTransportEventJournal.prototype, "verifyAndRepair")
+      .mockImplementationOnce(() => new Promise(resolve => { finishRepair = () => resolve({ count: 0, lastSequence: 0, repairedBytes: 0 }); }));
+    const cancelled = gateway();
+    const successor = gateway();
+    try {
+      const result = cancelled.start().catch(error => error);
+      await vi.waitFor(() => expect(repair).toHaveBeenCalled());
+      const stopping = cancelled.stop();
+      finishRepair();
+      expect(await result).toBeInstanceOf(Error);
+      await stopping;
+      await successor.start();
+      expect((await successor.health()).healthy).toBe(true);
+    } finally {
+      repair.mockRestore();
+      await Promise.all([cancelled.stop(), successor.stop()]);
+    }
+  });
+
+  it("rejects a second live owner before touching the shared replay journals and permits restart", async () => {
+    const first = gateway();
+    const duplicate = gateway();
+    const successor = gateway();
+    let router: AppServerRpcRouter | null = null;
+    try {
+      await first.start();
+      router = new AppServerRpcRouter(transport(first));
+      expect(await router.request(initializeRequest().rpc, 3_000)).toEqual({ acceptedMethod: "initialize" });
+      const eventPath = path.join(context.transportAudit, "gateway-events.jsonl");
+      const before = await readFile(eventPath, "utf8").catch(() => "");
+      await expect(duplicate.start()).rejects.toThrow();
+      expect(await readFile(eventPath, "utf8").catch(() => "")).toBe(before);
+      expect((await first.health()).healthy).toBe(true);
+      expect(duplicate.endpoint).toBeNull();
+      expect(await router.request({ method: "account/read", id: "owner-read-after-duplicate", params: { refreshToken: false } }, 3_000))
+        .toEqual({ acceptedMethod: "account/read" });
+      await router.close();
+      await first.stop();
+      await successor.start();
+      expect((await successor.health()).healthy).toBe(true);
+    } finally {
+      await router?.close();
+      await Promise.all([first.stop(), duplicate.stop(), successor.stop()]);
+    }
+  });
+  it.each(["", "GET /app-server HTTP/1.1\r\nHost: localhost\r\n"])(
+    "stops an owned gateway with an unfinished HTTP handshake (%j)", async (partialRequest) => {
+      const worker = gateway();
+      await worker.start();
+      const endpoint = new URL(worker.endpoint!);
+      const accepted = once(Reflect.get(worker, "server"), "connection");
+      const socket = connectTcp(Number(endpoint.port), endpoint.hostname);
+      socket.on("error", () => { /* Shutdown may reset a not-yet-upgraded connection. */ });
+      let stopping: Promise<void> | undefined;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await once(socket, "connect");
+        const [peer] = await accepted;
+        if (partialRequest) {
+          const received = once(peer, "data");
+          socket.write(partialRequest);
+          await received;
+        }
+        // A reconnect can own a TCP connection before it becomes a WebSocket.
+        // It must not hold shutdown until Node's multi-minute HTTP timeout.
+        stopping = worker.stop();
+        await Promise.race([
+          stopping,
+          new Promise<never>((_, reject) => {
+            timeout = setTimeout(() => reject(new Error("Unfinished handshake blocked shutdown.")), 1_000);
+          }),
+        ]);
+        expect((await worker.health()).state).toBe("stopped");
+      } finally {
+        if (timeout) clearTimeout(timeout);
+        socket.destroy();
+        await (stopping ?? worker.stop());
+      }
+    },
+  );
 
   it.each([undefined, false, true])("launches immutable quota profiles only when enabled (%s)", async (quotaToolPrivacy) => {
     const argumentsPath = path.join(root, "worker-arguments.json");
@@ -823,6 +939,16 @@ describe("private per-user worker gateway", () => {
   });
 
   it("drains an uncertain response from an earlier child before a new initialize response", async () => {
+    // A failed lifecycle stage must identify its boundary and clean up rather
+    // than consume the whole recovery-test deadline with an unlabelled hang.
+    async function stage<T>(name: string, operation: Promise<T>) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([operation, new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`Recovery stage stalled: ${name}`)), 5_000);
+        })]);
+      } finally { if (timer) clearTimeout(timer); }
+    }
     await writeFile(fakeServer, [
       'import { createInterface } from "node:readline";',
       'const lines = createInterface({ input: process.stdin });',
@@ -838,27 +964,32 @@ describe("private per-user worker gateway", () => {
       '});',
     ].join("\n"), { mode: 0o600 });
     const firstWorker = gateway();
-    await firstWorker.start();
+    await stage("first worker start", firstWorker.start());
     const firstClient = transport(firstWorker);
-    await firstClient.connect();
-    await firstClient.send(initializeRequest());
-    const initialized = await nextEvent(firstClient);
-    const approval = await nextEvent(firstClient);
-    if (!initialized.done) await firstClient.acknowledge(initialized.value);
-    expect(approval.value).toMatchObject({
-      message: { kind: "rpc-request", rpc: { id: "approval-1" } },
-    });
-    if (approval.done) throw new Error("Expected a durable approval event.");
-    const uncertain = firstClient.send(approvalResponse(
-      `server-response:${approval.value.eventId}:${APPROVAL_SCOPE_DIGEST}`,
-    )).then(
-      () => null,
-      (error: unknown) => error,
-    );
-    await vi.waitFor(async () => expect((await firstWorker.health()).state).toBe("failed"));
-    await firstClient.close();
-    expect(await uncertain).toBeInstanceOf(Error);
-    await firstWorker.stop();
+    try {
+      await stage("first client connect", firstClient.connect());
+      await stage("initialize accepted", firstClient.send(initializeRequest()));
+      const initialized = await nextEvent(firstClient);
+      const approval = await nextEvent(firstClient);
+      if (!initialized.done) await firstClient.acknowledge(initialized.value);
+      expect(approval.value).toMatchObject({
+        message: { kind: "rpc-request", rpc: { id: "approval-1" } },
+      });
+      if (approval.done) throw new Error("Expected a durable approval event.");
+      const uncertain = firstClient.send(approvalResponse(
+        `server-response:${approval.value.eventId}:${APPROVAL_SCOPE_DIGEST}`,
+      )).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      await vi.waitFor(async () => expect((await firstWorker.health()).state).toBe("failed"));
+      await firstClient.close();
+      expect(await stage("uncertain send settles after close", uncertain)).toBeInstanceOf(Error);
+
+    } finally {
+      await firstClient.close();
+      await stage("first worker shutdown", firstWorker.stop());
+    }
 
     await writeFile(fakeServer, [
       'import { createInterface } from "node:readline";',
@@ -871,7 +1002,7 @@ describe("private per-user worker gateway", () => {
       '});',
     ].join("\n"), { mode: 0o600 });
     const restartedWorker = gateway();
-    await restartedWorker.start();
+    await stage("restarted worker start", restartedWorker.start());
     const restartedClient = transport(restartedWorker);
     const router = new AppServerRpcRouter(restartedClient);
     try {
@@ -899,7 +1030,7 @@ describe("private per-user worker gateway", () => {
     } finally {
       await router.close();
       await restartedClient.close();
-      await restartedWorker.stop();
+      await stage("restarted worker shutdown", restartedWorker.stop());
     }
   }, PROCESS_RECOVERY_TEST_TIMEOUT_MS);
 

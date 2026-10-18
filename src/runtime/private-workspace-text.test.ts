@@ -11,6 +11,19 @@ describe("known private workspace prefixes", () => {
       .toBe(`[Descargar](${url})\nInterno: identificador interno`);
   });
 
+  it.each(["", "&published=1"])("preserves usable WORKSITEA app links while hiding unrelated ids: %s", (query) => {
+    const id = "07267fd4-0bc1-4b34-9a4c-3a023c27172b";
+    const url = `/worksitea/apps?id=${id}${query}`;
+    expect(publicAssistantText(`[Obrir aplicació](${url})\nIntern: ${id}`, "WORKSITEA AI"))
+      .toBe(`[Obrir aplicació](${url})\nIntern: identificador interno`);
+  });
+
+  it("does not exempt arbitrary internal API identifiers", () => {
+    const id = "07267fd4-0bc1-4b34-9a4c-3a023c27172b";
+    expect(publicAssistantText(`/api/internal/users/${id}`, "WORKSITEA AI"))
+      .not.toContain(id);
+  });
+
   it.each([
     '/tmp/aibrain QA_PRIVATE_MARKER tail-abc/workspace',
     '/tmp/aibrain "QA_PRIVATE_MARKER" tail-abc/workspace',

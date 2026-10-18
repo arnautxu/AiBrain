@@ -7,6 +7,10 @@ import { once } from "node:events";
 import { DurableTurnSubmission, TurnSubmissionRecoveryRequired, turnSubmissionBinding } from "./turn-submission-store";
 import * as storage from "@/storage";
 import { atomicWriteFile } from "@/storage/atomic-file";
+import { FileDocumentStagingStore } from "@/documents/staging-store";
+import { validateUploadedDocument } from "@/documents/upload-validation";
+import { generateLocalDocument } from "@/runtime/documents/local-document-generator";
+import { prepareTurnDocumentWorkspaceInputs } from "@/documents/turn-attachments";
 
 const roots: string[] = [];
 const leases: DurableTurnSubmission[] = [];
@@ -44,6 +48,64 @@ afterEach(async () => {
 });
 
 describe("durable turn submission", () => {
+  it("persists a confirmed pre-creation rejection as a terminal no-replay tombstone", async () => {
+    const f = await fixture();
+    const receipt = await f.open();
+    await receipt.prepareInputs(f.prepare);
+    const creationId = `thread-start:${id(4)}`;
+    const creation = { cwd: f.options.workspace, ephemeral: false };
+    await receipt.startThreadOnce(creation, creationId);
+    await expect(receipt.rejectThreadStart("foreign-request", -32600)).rejects.toBeInstanceOf(TurnSubmissionRecoveryRequired);
+    await expect(receipt.rejectThreadStart(creationId, -32603)).rejects.toBeInstanceOf(TurnSubmissionRecoveryRequired);
+    await receipt.rejectThreadStart(creationId, -32600);
+    expect(receipt.threadCreationRejected).toBe(true);
+    await receipt.close();
+    const restarted = await f.open();
+    expect(restarted.threadCreationRejected).toBe(true);
+    expect(restarted.terminal).toBe("failed");
+    expect(JSON.parse(await readFile(receipt.filePath, "utf8"))).toMatchObject({ phase: "terminal", terminal: "failed",
+      threadRequest: JSON.stringify({ method: "thread/start", id: creationId, params: creation }),
+      runtimeThreadId: null, runtimeTurnId: null, turnRequest: null, inputs: null, inputDirectory: null });
+    await expect(restarted.startThreadOnce(creation, creationId)).rejects.toBeInstanceOf(TurnSubmissionRecoveryRequired);
+    await expect(restarted.dispatchOnce(rpc, requestId)).rejects.toBeInstanceOf(TurnSubmissionRecoveryRequired);
+  });
+
+  it("cannot declare a bound or dispatched remote turn rejected before creation", async () => {
+    const f = await fixture();
+    const receipt = await f.open();
+    const creationId = `thread-start:${id(4)}`;
+    await receipt.startThreadOnce({ cwd: f.options.workspace }, creationId);
+    await receipt.bindThread("remote-thread");
+    await expect(receipt.rejectThreadStart(creationId, -32600)).rejects.toBeInstanceOf(TurnSubmissionRecoveryRequired);
+    await receipt.prepareInputs(f.prepare);
+    await receipt.dispatchOnce(rpc, requestId);
+    await expect(receipt.rejectThreadStart(creationId, -32600)).rejects.toBeInstanceOf(TurnSubmissionRecoveryRequired);
+    expect(receipt.threadCreationRejected).toBe(false);
+    expect(receipt.terminal).toBeNull();
+  });
+
+  it("admits original PDF working copies through durable submission and restart while rejecting modified bytes", async () => {
+    const f = await fixture();
+    const stagingRoot = path.join(f.userRoot, "staging");
+    const staging = new FileDocumentStagingStore(stagingRoot, new storage.ResourceLockManager({rootDirectory:path.join(f.userRoot,"locks")}));
+    const pdf = await generateLocalDocument({format:"pdf",title:"Fictional original scan",content:"Fictional commission EUR 47.08"});
+    const document = await staging.stage({threadId:id(3),uploadId:id(7),validated:validateUploadedDocument({fileName:"source.pdf",declaredMimeType:"application/pdf",data:pdf.data}),data:pdf.data});
+    const prepare = vi.fn((onDirectoryCreated: (directory: string) => Promise<void>) => prepareTurnDocumentWorkspaceInputs({documents:[{document,absolutePath:path.join(stagingRoot,document.relativePath),codexInputs:[]}],projectWorkspace:f.options.workspace,stagingRoot,onDirectoryCreated}));
+    const first = await f.open();
+    const inputs = await first.prepareInputs(prepare);
+    await first.validateWorkingCopies();
+    await first.close();
+    const restarted = await f.open();
+    expect(await restarted.prepareInputs(prepare)).toEqual(inputs);
+    expect(prepare).toHaveBeenCalledOnce();
+    await restarted.bindThread("remote-thread");
+    await restarted.dispatchOnce(rpc,requestId);
+    expect(await readFile(path.join(inputs.directory!,"input-1.pdf"))).toEqual(pdf.data);
+    await writeFile(path.join(inputs.directory!,"input-1.pdf"),"%PDF-modified",{mode:0o600});
+    await expect(restarted.validateWorkingCopies()).rejects.toThrow("Admitted PDF bytes changed");
+    expect(await readFile(path.join(stagingRoot,document.relativePath))).toEqual(pdf.data);
+  });
+
   it("persists the chosen fallback and rejects a changed model after restart", async () => {
     const f = await fixture();
     let receipt = await f.open();

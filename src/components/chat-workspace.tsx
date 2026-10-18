@@ -4,8 +4,9 @@ import { useUiLocale, useUiText } from "@/i18n/provider";
 
 import { ConnectorPopover } from "@/components/connector-popover";
 import { ConnectorLogo } from "@/components/connector-logo";
-import { connectorPresentation } from "@/connectors/presentation";
+import { connectorPresentation, connectorStatusLabel } from "@/connectors/presentation";
 import { mentionQueryAt, mentionTextParts } from "@/ui/connector-mention-text";
+import { useMenuViewport } from "@/ui/use-menu-viewport";
 import { ServerPicker } from "@/components/server-picker";
 import type { ServerReference } from "@/documents/server-reference-contract";
 
@@ -31,6 +32,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { ChatAttachmentImage } from "@/components/chat-attachment-image";
+import { ChatAudioAttachment } from "@/components/chat-audio-attachment";
 import { RadialGlowButton } from "@/components/ui/radial-glow-button";
 import NextImage from "next/image";
 import { useComposerFileDrop } from "@/ui/use-composer-file-drop";
@@ -46,10 +48,11 @@ import type { BrainManifest, BrainPreferences } from "@/config/brain";
 import type { RuntimeStatus } from "@/lib/runtime-status";
 import type { ComposerExperience } from "@/lib/composer-experience";
 import { LandingTasks } from "@/components/landing-tasks";
+
 import { landingSuggestions } from "@/lib/landing-suggestions";
 import { isStandaloneProject, type WorkbenchProject, type WorkbenchThread } from "@/workbench/types";
 import { currentTurnStatusLabel, hasRelevantWorkProcess, TurnActivity } from "@/components/turn-activity";
-import { publicAssistantText } from "@/ui/public-activity";
+import { publicActivityText, publicAssistantText } from "@/ui/public-activity";
 import { TurnArtifactCard } from "@/components/turn-artifact-card";
 import { DocumentPublicationCard } from "@/components/document-publication-card";
 import { TurnSourceChips } from "@/components/turn-sources";
@@ -73,6 +76,7 @@ type ChatWorkspaceProps = {
   projects: WorkbenchProject[];
   userName: string;
   companyName: string;
+  installationId?: string;
   assistantName: string;
   hydrated: boolean;
   prompt: string;
@@ -93,7 +97,7 @@ type ChatWorkspaceProps = {
   queuedMessages: readonly QueuedMessage[];
   runtimeStatus: RuntimeStatus;
   networkOnline: boolean;
-  streamRecovery: { attempt: number | null; paused?: boolean; onRetry?: () => void } | null;
+  streamRecovery: { attempt: number | null; paused?: boolean; admissionUnconfirmed?: boolean; onRetry?: () => void } | null;
   onRetryRuntime: () => void;
   onPromptChange: (value: string) => void;
   onComposerExperienceChange: (value: ComposerExperience) => void;
@@ -124,6 +128,7 @@ type ChatWorkspaceProps = {
   onPreviewDocument: (artifact: DocumentArtifact) => void;
   onOpenReview: (messageId: string) => void;
   onOpenBrowser: () => void;
+  onCreateAutomation?: () => void;
   readOnly?: boolean;
 };
 
@@ -186,6 +191,7 @@ function ComposerPicker({
     requestAnimationFrame(() => triggerRef.current?.focus());
   }, [onOpenChange]);
   const onMenuKeyDown = useMenuKeyboardNavigation(closeAndRestore);
+  useMenuViewport(menuRef, open, placement);
 
   useEffect(() => {
     if (!open) return;
@@ -327,6 +333,7 @@ function AssistantMessage({
   onPreviewDocument: (artifact: DocumentArtifact) => void;
   onOpenReview: (messageId: string) => void;
   onOpenBrowser: () => void;
+  onCreateAutomation?: () => void;
   onRestoreRequest?: () => void;
   restoreDisabled?: boolean;
   readOnly?: boolean;
@@ -339,10 +346,11 @@ function AssistantMessage({
   const hasExecution = hasRelevantWorkProcess(message);
   const liveStatus = currentTurnStatusLabel(message, t) ?? t("Enviando solicitud");
   const publicContent = publicAssistantText(content, assistantName);
+  const failureLabel = publicActivityText(message.activity.find(item => item.id === "host-analysis-outcome" && item.status === "failed")?.label ?? "", 500);
 
   return (
     <article className="message-enter group">
-      {showActivity || managedAppAction || message.approvals.some((approval) => managedAppApprovalKeys.includes(managedAppActionKey({ ...approval, approvalId: approval.id }))) ? (
+      {showActivity || ((message.status === "error" || message.status === "stopped") && hasExecution) || managedAppAction || message.approvals.some((approval) => managedAppApprovalKeys.includes(managedAppActionKey({ ...approval, approvalId: approval.id }))) ? (
         <TurnActivity message={message} recoveryPaused={recoveryPaused} projectId={projectId} readOnly={readOnly} onResolveApproval={onResolveApproval} onOpenReview={() => onOpenReview(message.id)} onOpenBrowser={onOpenBrowser} managedAppAction={readOnly ? null : managedAppAction} managedAppApprovalKeys={managedAppApprovalKeys} />
       ) : null}
 
@@ -357,7 +365,7 @@ function AssistantMessage({
           announce={streaming}
           showActions={false}
           className="mt-4 max-w-[76ch]"
-          contentClassName="text-[length:calc(var(--font-reading)-1px)] leading-[23px] text-[var(--text)]"
+          contentClassName="text-[length:var(--font-reading)] leading-[1.75] text-[var(--text)]"
         >
           <MarkdownMessage streaming={streaming}>{publicContent}</MarkdownMessage>
         </StreamingResponse>
@@ -369,7 +377,7 @@ function AssistantMessage({
         <div className="mt-3 flex max-w-xl items-start gap-2 rounded-[var(--brain-radius)] border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2.5 text-[12px] text-[var(--danger)]" role="alert">
           <WarningCircle size={15} className="mt-0.5 shrink-0" />
           <div className="min-w-0">
-            <p>{t("No se ha podido completar esta respuesta.")}</p>
+            <p>{failureLabel || t("No se ha podido completar esta respuesta.")}</p>
             {!readOnly && onRestoreRequest ? <>
               <p className="mt-1">{t("Revisa la solicitud y los resultados parciales antes de volver a enviarla.")}</p>
               <button type="button" disabled={restoreDisabled} className="touch-target mt-2 min-h-9 rounded-lg border border-current px-3 py-2 font-medium disabled:opacity-40" onClick={onRestoreRequest}>{t("Editar solicitud")}</button>
@@ -404,14 +412,16 @@ function UserMessage({ message, connectorMentions, threadId, onRequestPublicatio
   return (
     <article className="message-enter group flex justify-end">
       <div className="min-w-0 max-w-[86%] md:max-w-[70%]">
-      <div className="min-w-0 overflow-hidden rounded-[22px] bg-[var(--user-message)] px-4 py-2.5 text-[length:calc(var(--font-reading)-1px)] leading-[23px] text-[var(--user-message-text)] [overflow-wrap:anywhere]">
+      <div className="user-message-bubble min-w-0 overflow-hidden rounded-[24px] bg-[var(--user-message)] px-5 py-3 text-[length:var(--font-reading)] leading-[1.65] text-[var(--user-message-text)] [overflow-wrap:anywhere]">
         {message.serverReferences?.length ? <div className="mb-2 flex flex-wrap gap-2">{message.serverReferences.map(ref => <span className="rounded bg-[var(--surface-raised)]/70 px-2 py-1 text-xs text-[var(--text)]" key={ref.path} title={ref.path}>{t("Server ·")}{" "}{ref.name}</span>)}</div> : null}
         {message.attachments.length ? (
           <div className="mb-2 flex flex-wrap justify-end gap-1.5">
             {message.attachments.map((attachment) => (
               <span key={attachment.id} className="flex max-w-52 items-center gap-1.5 rounded-md bg-[var(--surface-raised)]/70 px-2 py-1 text-[12px] text-[var(--text)]">
-                {attachment.mimeType.startsWith("image/") ? <ChatAttachmentImage attachment={attachment} threadId={threadId} /> : <FileIcon size={11} />}
-                <span className="truncate">{attachment.name}</span>
+                {attachment.mimeType === "audio/ogg" ? <ChatAudioAttachment attachment={attachment} threadId={threadId} /> : <>
+                  {attachment.mimeType.startsWith("image/") ? <ChatAttachmentImage attachment={attachment} threadId={threadId} /> : <FileIcon size={11} />}
+                  <span className="truncate">{attachment.name}</span>
+                </>}
                 {!readOnly && onRequestPublication ? <button type="button" aria-label={t("Preparar publicación de {p0}", { p0: attachment.name })} title={t("Publicar como documento oficial")} onClick={() => onRequestPublication(attachment)} className="touch-target shrink-0 rounded p-1 hover:bg-[var(--surface-hover)]"><Plus size={12} /></button> : null}
               </span>
             ))}
@@ -442,7 +452,9 @@ export function ChatWorkspace({
   thread,
   projects,
   userName,
+  onCreateAutomation,
   companyName,
+  installationId,
   assistantName,
   hydrated,
   prompt,
@@ -524,6 +536,7 @@ export function ChatWorkspace({
   }, [project?.id, thread?.id]);
   const serverSelectionKey = `${project?.id ?? ""}:${thread?.id ?? ""}`;
   const serverReturnFocusRef = useRef<HTMLButtonElement>(null);
+  const serverFilesAvailable = installationId !== "officeexample-production" && installationId !== "transportexample-demo";
   const [serverOpenKey, setServerOpenKey] = useState<string | null>(null);
   const serverOpen = serverOpenKey === serverSelectionKey;
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -643,6 +656,7 @@ export function ChatWorkspace({
   }, [resizeComposer]);
 
   const hasMessages = Boolean(thread?.messages.length);
+  useMenuViewport(composerMenuRef, composerMenuOpen, hasMessages ? "above" : "below");
   const composerEngaged = Boolean(prompt.trim() || attachments.length || documents.length || selectedConnectorMentionIds.length);
   const canAttachImages = manifest.composer.images && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageInput);
   const canGenerateImages = manifest.composer.imageGeneration && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageGeneration);
@@ -660,18 +674,19 @@ export function ChatWorkspace({
     mention.canRead && mention.status === "connected" &&
     (mention.id.toLocaleLowerCase("es") === "gmail" || mention.label.toLocaleLowerCase("es") === "gmail"));
   const suggestions = useMemo(
-    () => landingSuggestions(project, companyName, { gmailAuthorized, imageGeneration }, t),
-    [companyName, gmailAuthorized, imageGeneration, project, t],
+    () => landingSuggestions(project, companyName, { gmailAuthorized, imageGeneration, installationId }, t),
+    [companyName, gmailAuthorized, imageGeneration, installationId, project, t],
   );
   const noProject = !project || standaloneConversation;
   const firstName = userName.trim().split(/\s+/)[0] || t("ahí");
-  const landingHeadline = imageGeneration ? t("¿Qué imagen quieres crear?") : noProject
-    ? t("¿En qué te puedo ayudar, {p0}?", { p0: firstName })
-    : t("¿Cómo puedo ayudarte en {p0}?", { p0: project.name });
+  const landingHeadline = imageGeneration ? t("¿Qué imagen quieres crear?")
+    : t("¿En qué te puedo ayudar, {p0}?", { p0: firstName });
   const placeholderName = assistantName.trim().replace(/\bbrain\b/giu, "AI") || "AI";
   const mentionMatch = composing ? null : mentionQueryAt(prompt, composerCaret);
   const mentionQuery = mentionMatch?.query ?? null;
-  const mentionOptions = mentionQuery === null ? [] : connectorMentions
+  const toolMentions = connectorMentions.filter(mention =>
+    true);
+  const mentionOptions = mentionQuery === null ? [] : toolMentions
     .filter((mention) => mention.label.toLocaleLowerCase("es").includes(mentionQuery) || mention.id.includes(mentionQuery));
   const selectedMentions = useMemo(() => connectorMentions.filter((mention) => selectedConnectorMentionIds.includes(mention.id)), [connectorMentions, selectedConnectorMentionIds]);
   const mentionParts = useMemo(() => mentionTextParts(prompt, selectedMentions), [prompt, selectedMentions]);
@@ -732,7 +747,7 @@ export function ChatWorkspace({
   const queueingMessage = sending && hasMessages && Boolean(prompt.trim());
   const visibleMentionActiveIndex = Math.min(mentionActiveIndex, Math.max(mentionOptions.length - 1, 0));
   const activeMentionOption = mentionOptions[visibleMentionActiveIndex] ?? null;
-  const catalogOptions = connectorCatalogStatus === "ready" ? connectorMentions : [];
+  const catalogOptions = connectorCatalogStatus === "ready" ? toolMentions : [];
   const visibleCatalogActiveIndex = Math.min(catalogActiveIndex, Math.max(catalogOptions.length - 1, 0));
   const activeCatalogOption = catalogOptions[visibleCatalogActiveIndex] ?? null;
   useEffect(() => {
@@ -762,7 +777,7 @@ export function ChatWorkspace({
     if (connectorCatalogStatus === "error") onRetryConnectorCatalog?.();
     setComposerMenuOpen(false);
     setMentionOpen(false);
-    const firstEnabled = connectorMentions.findIndex((mention) => mention.canRead);
+    const firstEnabled = catalogOptions.findIndex((mention) => mention.canRead);
     setCatalogActiveIndex(firstEnabled >= 0 ? firstEnabled : 0);
     setConnectorCatalogOpen(true);
   };
@@ -900,13 +915,12 @@ export function ChatWorkspace({
             <SidebarSimple size={17} />
           </button>
           <div data-testid="project-breadcrumb" className="min-w-0 px-1 py-1 text-left">
-            {!standaloneConversation ? <span className="flex min-w-0 items-center gap-1 text-[11px] font-medium leading-4 text-[var(--text-subtle)]"><FolderOpen size={12} className="shrink-0" weight="fill" /><span className="max-w-[calc(100vw-6rem)] truncate sm:max-w-44">{project?.name}</span></span> : null}
+            {!standaloneConversation ? <span className="flex min-w-0 items-center gap-1.5 text-[12px] leading-5 text-[var(--text-secondary)]"><FolderOpen size={15} className="shrink-0" /><span className="max-w-[calc(100vw-6rem)] truncate sm:max-w-44">{project?.name}</span></span> : null}
             {thread ? <h1 className="max-w-[calc(100vw-5.5rem)] truncate text-[13px] font-semibold leading-4 text-[var(--text)] sm:max-w-72">{thread.title}</h1> : null}
           </div>
         </div>
         <div aria-hidden="true" className="workbench-navigation-balance" />
       </header>
-
 
       <div
         ref={scrollRef}
@@ -926,7 +940,7 @@ export function ChatWorkspace({
             <div className="space-y-4"><div className="h-20 rounded-xl bg-[var(--surface-muted)] motion-safe:animate-pulse" /><div className="h-14 rounded-xl bg-[var(--surface-hover)] motion-safe:animate-pulse" /></div>
           </div>
         ) : hasMessages ? (
-          <div ref={contentRef} className="mobile-chat-content mx-auto w-full max-w-[768px] px-5 py-3 md:px-8">
+          <div ref={contentRef} className="mobile-chat-content mx-auto w-full max-w-[var(--conversation-width)] px-5 py-5 md:px-6">
             <div className={preferences.density === "compact" ? "space-y-6" : "space-y-8"}>
               {thread?.messages.map((message, index) => (
                 <div key={message.id} id={`message-${message.id}`} className="scroll-mt-8">
@@ -971,7 +985,7 @@ export function ChatWorkspace({
           {streamRecovery ? <StreamRecoveryBanner {...streamRecovery} /> : null}
           <div role="status">{t("Conversación de solo lectura · puedes consultar el historial y los archivos compartidos.")}</div>
         </div>
-      ) : <div className={`mobile-composer-dock ${hasMessages ? "relative shrink-0 bg-[var(--surface)]/94 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:pb-6" : "chat-empty-composer-dock !absolute inset-x-0 z-10"} px-3 md:px-6`}>
+      ) : <div data-worksitea-landing={undefined} className={`mobile-composer-dock ${hasMessages ? "relative shrink-0 bg-[var(--surface)]/94 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:pb-6" : "chat-empty-composer-dock !absolute inset-x-0 z-10"} px-3 md:px-6`}>
         {hasMessages && !isAtBottom ? <div className="mb-2 flex justify-center md:absolute md:left-1/2 md:top-0 md:z-20 md:mb-0 md:-translate-x-1/2 md:-translate-y-full"><button
           type="button"
           className="flex min-h-10 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[11px] font-medium text-[var(--text)] shadow-[var(--shadow-sm)]"
@@ -982,8 +996,8 @@ export function ChatWorkspace({
             if (event.detail === 0) jumpToBottom();
           }}
         ><ArrowDown size={13} />{t("Volver al final")}</button></div> : null}
-        <div className="relative mx-auto max-w-[768px]">
-          {!hasMessages ? <h1 className="mb-10 text-center text-balance text-[24px] font-medium leading-8 tracking-[-0.15px] text-[var(--text)]">{landingHeadline}</h1> : null}
+        <div className="relative mx-auto max-w-[var(--composer-width)]">
+          {!hasMessages ? <h1 className="landing-headline mb-7 text-center text-balance font-normal text-[var(--text)]">{landingHeadline}</h1> : null}
           {sending && hasMessages ? <MessageQueue
             running={runningMessage}
             queued={queuedMessages}
@@ -1017,11 +1031,11 @@ export function ChatWorkspace({
                 {(canAttachImages || canAttachDocuments) ? <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99]" disabled={sending || documentUploading} onClick={() => { setComposerMenuOpen(false); fileInputRef.current?.click(); }}><Paperclip size={17} />{t("Adjuntar archivos")}</button> : null}
                 {canGenerateImages ? <button role="menuitemcheckbox" tabIndex={-1} aria-checked={imageGeneration} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={() => { onImageGenerationChange(!imageGeneration); setComposerMenuOpen(false); requestAnimationFrame(() => composerAddButtonRef.current?.focus()); }}><ImagesSquare size={17} /><span className="min-w-0 flex-1">{t("Crear imagen")}</span>{imageGeneration ? <Check size={13} weight="bold" /> : null}</button> : null}
                 <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={() => openAuthorizedConnectors(composerAddButtonRef.current)}><At size={17} />{t("Tools")}</button>
-                <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] disabled:opacity-45" disabled={!project || sending || !onServerReferencesChange} onClick={() => { serverReturnFocusRef.current = composerAddButtonRef.current; setComposerMenuOpen(false); setServerOpenKey(serverSelectionKey); }}><FileIcon size={17} />{t("Server")}</button>
+                {serverFilesAvailable ? <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] disabled:opacity-45" disabled={!project || sending || !onServerReferencesChange} onClick={() => { serverReturnFocusRef.current = composerAddButtonRef.current; setComposerMenuOpen(false); setServerOpenKey(serverSelectionKey); }}><FileIcon size={17} />{t("Server")}</button> : null}
               </div>
             ) : null}
-            {serverOpen && project && onServerReferencesChange ? <ServerPicker key={project.id + (thread?.id ?? "")} projectId={project.id} selected={serverReferences} onSelect={onServerReferencesChange} onClose={() => setServerOpenKey(null)} returnFocus={serverReturnFocusRef} /> : null}
-            {serverReferences.length ? <div className="flex flex-wrap gap-2 px-2 py-1" aria-label={t("Referencias Server")}>{serverReferences.map(item => <span key={item.path} title={item.path} className="flex max-w-full items-center gap-2 rounded-lg bg-[var(--surface-hover)] px-2 py-1 text-xs"><FileIcon size={14}/><span className="truncate">{item.name}{item.kind === "directory" ? " · carpeta" : ""}</span><button type="button" aria-label={t("Quitar referencia {p0}", { p0: item.name })} className="touch-target" onClick={() => onServerReferencesChange?.(serverReferences.filter(ref => ref.path !== item.path))}><X size={14}/></button></span>)}</div> : null}
+            {serverFilesAvailable && serverOpen && project && onServerReferencesChange ? <ServerPicker key={project.id + (thread?.id ?? "")} projectId={project.id} selected={serverReferences} onSelect={onServerReferencesChange} onClose={() => setServerOpenKey(null)} returnFocus={serverReturnFocusRef} /> : null}
+            {serverFilesAvailable && serverReferences.length ? <div className="flex flex-wrap gap-2 px-2 py-1" aria-label={t("Referencias Server")}>{serverReferences.map(item => <span key={item.path} title={item.path} className="flex max-w-full items-center gap-2 rounded-lg bg-[var(--surface-hover)] px-2 py-1 text-xs"><FileIcon size={14}/><span className="truncate">{item.name}{item.kind === "directory" ? " · carpeta" : ""}</span><button type="button" aria-label={t("Quitar referencia {p0}", { p0: item.name })} className="touch-target" onClick={() => onServerReferencesChange?.(serverReferences.filter(ref => ref.path !== item.path))}><X size={14}/></button></span>)}</div> : null}
             {attachments.length || documents.length ? (
               <div className="flex gap-2 overflow-x-auto px-2 pb-1 pt-1">
                 {attachments.map((attachment) => (
@@ -1034,7 +1048,7 @@ export function ChatWorkspace({
                 {documents.map((document) => (
                   <div key={document.uploadId} className={`group/attachment flex min-w-0 max-w-64 shrink-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 ${document.status === "error" ? "border-[var(--danger)] bg-[var(--danger-soft)]" : "border-[var(--border)] bg-[var(--surface-muted)]"}`}>
                     <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--surface-raised)] text-[var(--text-muted)]">{document.kind === "image" && document.status === "ready" && document.previewFiles[0] ? <NextImage unoptimized src={document.previewFiles[0].url} width={32} height={32} alt={t("Vista previa de {p0}", { p0: document.name })} className="size-6 object-contain" /> : document.status === "uploading" ? <SpinnerGap size={12} className="motion-safe:animate-spin" /> : <FileIcon size={12} />}</span>
-                    <span className="min-w-0"><span className="block truncate text-[12px] font-medium text-[var(--text-secondary)]">{document.name}</span><span className={`block truncate text-[11px] ${document.status === "error" ? "text-[var(--danger)]" : "text-[var(--text-subtle)]"}`}>{document.status === "uploading" ? t("Preparando vista previa…") : document.status === "error" ? document.error : document.processingUnavailable ? t("Original guardado · procesamiento no disponible") : document.passive ? t("Copia pasiva · datos sin verificar") : document.previewUnavailable ? t("Guardado · vista previa no disponible") : `Lista · ${document.kind.toUpperCase()}${document.pages ? t(" · {p0} pág.", { p0: document.pages }) : ""}`}</span></span>
+                    <span className="min-w-0"><span className="block truncate text-[12px] font-medium text-[var(--text-secondary)]">{document.name}</span><span className={`block truncate text-[11px] ${document.status === "error" ? "text-[var(--danger)]" : "text-[var(--text-subtle)]"}`}>{document.status === "uploading" ? (document.kind === "audio" ? t("Transcribiendo audio…") : t("Preparando vista previa…")) : document.status === "error" ? document.error : document.processingUnavailable ? t("Original guardado · procesamiento no disponible") : document.passive ? t("Copia pasiva · datos sin verificar") : document.previewUnavailable ? t("Guardado · vista previa no disponible") : `Lista · ${document.kind.toUpperCase()}${document.pages ? t(" · {p0} pág.", { p0: document.pages }) : ""}`}</span></span>
                     {document.status === "ready" && document.previewFiles[0] ? <a href={document.previewFiles[0].url} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-[var(--brain-accent)] hover:underline">{t("Abrir")}</a> : null}
                     <button type="button" aria-label={t("Quitar {p0}", { p0: document.name })} className="touch-target ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]" onClick={() => onDocumentsChange(documents.filter((item) => item.uploadId !== document.uploadId))}><X size={10} /></button>
                   </div>
@@ -1060,7 +1074,7 @@ export function ChatWorkspace({
               aria-controls={mentionOpen ? "connector-mention-options" : undefined}
               aria-activedescendant={mentionOpen && activeMentionOption ? connectorOptionId("mention", activeMentionOption.id) : undefined}
               autoFocus={false}
-              className={`composer-textarea max-h-52 w-full resize-none overflow-y-auto bg-transparent px-2.5 py-2.5 text-[14px] leading-[24px] text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)] ${hasMessages ? "min-h-8" : "min-h-12"}`}
+              className={`composer-textarea max-h-52 w-full resize-none overflow-y-auto bg-transparent px-2.5 py-2.5 leading-[24px] text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)] ${hasMessages ? "min-h-8" : "min-h-12"}`}
               style={hasInlineMentions ? { color: "transparent", caretColor: "var(--text)" } : undefined}
               placeholder={imageGeneration ? t("Describe la imagen que quieres crear…") : t("Escribe a {name}…", { name: placeholderName })}
               rows={1}
@@ -1107,7 +1121,7 @@ export function ChatWorkspace({
               }}
             />
             {mentionOpen && mentionQuery !== null ? <ConnectorPopover anchor={composerRef} caret={composerCaret}><div id="connector-mention-options" role="listbox" aria-label={t("Conectores disponibles")} className="max-h-[inherit] overflow-y-auto overscroll-contain outline-none">
-              {mentionOptions.length ? mentionOptions.map((mention, index) => <button key={mention.id} id={connectorOptionId("mention", mention.id)} type="button" role="option" aria-selected={index === visibleMentionActiveIndex} tabIndex={-1} disabled={(!mention.canRead && !mention.connectUrl) || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleMentionActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setMentionActiveIndex(index)} onClick={() => selectConnectorMention(mention)}><ConnectorLogo id={mention.id} /><span className="min-w-0 flex-1"><span className="block truncate font-medium">{mention.label}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-subtle)]">{connectorPresentation(mention.id).description}</span></span><span className="text-[11px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? t("conectado · escritura con aprobación") : "conectado" : mention.status === "requires_login" ? t("Conectar") : mention.status === "admin_setup_required" ? t("falta configuración administrativa") : t("no disponible")}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label={t("Seleccionado")} /> : null}</button>) : <p className="px-3 py-2 text-[12px] text-[var(--text-subtle)]">{t("No hay conectores autorizados que coincidan.")}</p>}
+              {mentionOptions.length ? mentionOptions.map((mention, index) => <button key={mention.id} id={connectorOptionId("mention", mention.id)} type="button" role="option" aria-selected={index === visibleMentionActiveIndex} tabIndex={-1} disabled={(!mention.canRead && !mention.connectUrl) || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleMentionActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setMentionActiveIndex(index)} onClick={() => selectConnectorMention(mention)}><ConnectorLogo id={mention.id} /><span className="min-w-0 flex-1"><span className="block truncate font-medium">{mention.label}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-subtle)]">{t(connectorPresentation(mention.id).description)}</span></span><span className="text-[11px] text-[var(--text-subtle)]">{t(connectorStatusLabel(mention))}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label={t("Seleccionado")} /> : null}</button>) : <p className="px-3 py-2 text-[12px] text-[var(--text-subtle)]">{t("No hay conectores autorizados que coincidan.")}</p>}
             </div></ConnectorPopover> : null}
             {connectorCatalogOpen ? <ConnectorPopover anchor={connectorTriggerRef} triggerAligned avoidOverlapWith={composerShellRef}><>
               {connectorCatalogStatus === "loading" ? <p role="status" className="px-3 py-4 text-[12px] text-[var(--text-subtle)]">{t("Cargando tus conectores…")}</p> : null}
@@ -1135,21 +1149,20 @@ export function ChatWorkspace({
                 requestAnimationFrame(() => (event.shiftKey ? composerRef.current : connectorTriggerRef.current)?.focus());
               }
             }}>
-              {catalogOptions.map((mention, index) => <button key={mention.id} id={connectorOptionId("catalog", mention.id)} type="button" role="option" aria-selected={index === visibleCatalogActiveIndex} tabIndex={-1} disabled={(!mention.canRead && !mention.connectUrl) || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleCatalogActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setCatalogActiveIndex(index)} onClick={() => selectCatalogConnector(mention)}><ConnectorLogo id={mention.id} /><span className="min-w-0 flex-1"><span className="block truncate font-medium">{mention.label}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-subtle)]">{connectorPresentation(mention.id).description}</span></span><span className="text-[11px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? t("conectado · escritura con aprobación") : "conectado" : mention.status === "requires_login" ? t("Conectar") : mention.status === "admin_setup_required" ? t("falta configuración administrativa") : t("no disponible")}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label={t("Seleccionado")} /> : null}</button>)}
+              {catalogOptions.map((mention, index) => <button key={mention.id} id={connectorOptionId("catalog", mention.id)} type="button" role="option" aria-selected={index === visibleCatalogActiveIndex} tabIndex={-1} disabled={(!mention.canRead && !mention.connectUrl) || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleCatalogActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setCatalogActiveIndex(index)} onClick={() => selectCatalogConnector(mention)}><ConnectorLogo id={mention.id} /><span className="min-w-0 flex-1"><span className="block truncate font-medium">{mention.label}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-subtle)]">{t(connectorPresentation(mention.id).description)}</span></span><span className="text-[11px] text-[var(--text-subtle)]">{t(connectorStatusLabel(mention))}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label={t("Seleccionado")} /> : null}</button>)}
               {connectorCatalogStatus === "ready" && catalogOptions.length === 0 ? <p className="px-3 py-4 text-[12px] text-[var(--text-subtle)]">{t("No hay conectores habilitados en tu catálogo.")}</p> : null}
             </div></></ConnectorPopover> : null}
             <div data-testid="composer-controls" className="composer-controls relative flex items-center justify-between gap-3 px-1 pb-0.5">
               <div className="composer-controls-start flex min-w-0 items-center gap-1 overflow-visible">
                 <button ref={composerAddButtonRef} aria-label={t("Añadir al mensaje")} aria-haspopup="menu" aria-controls={composerMenuOpen ? "composer-add-menu" : undefined} aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setMentionOpen(false); setConnectorCatalogOpen(false); setComposerMenuOpen((current) => !current); }}><span className="composer-add-icon" aria-hidden="true"><Plus size={15} /></span></button>
-                {canAttachImages || canAttachDocuments ? <input ref={fileInputRef} aria-label={t("Seleccionar archivos para adjuntar")} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.docx,.xlsx,.xls,.xlsm,.pptx,.txt,.md,.csv,.json" multiple tabIndex={-1} onChange={(event) => void addFiles(event.target.files)} /> : null}
+                {canAttachImages || canAttachDocuments ? <input ref={fileInputRef} aria-label={t("Seleccionar archivos para adjuntar")} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,audio/ogg,audio/opus,.ogg,.opus,application/pdf,.docx,.xlsx,.xls,.xlsm,.pptx,.txt,.md,.csv,.json" multiple tabIndex={-1} onChange={(event) => void addFiles(event.target.files)} /> : null}
               </div>
               <div className="composer-controls-end flex shrink-0 items-center gap-2">
                 <ComposerPicker
                   ariaLabel={t("Experiencia")}
                   value={composerExperience}
-                  valueLabel={composerExperience === "fast" ? t("Rápido") : composerExperience === "expert" ? t("Experto") : t("Inteligente")}
+                  valueLabel={composerExperience === "expert" ? t("Experto") : t("Inteligente")}
                   options={[
-                    { value: "fast", label: t("Rápido"), detail: t("Resúmenes breves y consultas") },
                     { value: "smart", label: t("Inteligente"), detail: t("Redacción y planificación diaria") },
                     { value: "expert", label: t("Experto"), detail: t("Análisis y problemas complejos") },
                   ]}
@@ -1165,7 +1178,7 @@ export function ChatWorkspace({
                 <VoiceDictationControl
                   value={prompt}
                   disabled={!project || sending || documentUploading}
-                  language={locale === "en" ? "en-US" : "es-ES"}
+                  language={locale === "en" ? "en-US" : locale === "ca" ? "ca-ES" : "es-ES"}
                   onChange={onPromptChange}
                   onNotice={onComposerNotice}
                 />
@@ -1186,7 +1199,7 @@ export function ChatWorkspace({
                   }}
                 >
                   <span key={queueingMessage ? "queue" : sending ? "stop" : "send"} className="composer-submit-icon" aria-hidden="true">
-                    {queueingMessage ? <ArrowUp size={13} weight="bold" /> : sending ? <Stop size={11} weight="fill" /> : <ArrowUp size={13} weight="bold" />}
+                    {queueingMessage ? <ArrowUp size={20} /> : sending ? <Stop size={15} weight="fill" /> : <ArrowUp size={20} />}
                   </span>
                 </RadialGlowButton>
               </div>
@@ -1210,11 +1223,11 @@ export function ChatWorkspace({
                 ) : null}
 
             </div>
-            <button type="button" className="landing-band-item" disabled={!project || sending || !onServerReferencesChange} onClick={event => { serverReturnFocusRef.current = event.currentTarget; setServerOpenKey(serverSelectionKey); }}><FileIcon size={15} aria-hidden="true" />{t("Server")}</button>
+            {serverFilesAvailable ? <button type="button" className="landing-band-item" disabled={!project || sending || !onServerReferencesChange} onClick={event => { serverReturnFocusRef.current = event.currentTarget; setServerOpenKey(serverSelectionKey); }}><FileIcon size={15} aria-hidden="true" />{t("Server")}</button> : null}
             <button type="button" className="landing-band-item" disabled={sending} aria-haspopup="listbox" aria-expanded={connectorCatalogOpen} onClick={(event) => { setComposerPickerOpen(null); if (connectorCatalogOpen) setConnectorCatalogOpen(false); else openAuthorizedConnectors(event.currentTarget); }}><At size={15} aria-hidden="true" />{t("Tools")}</button>
           </div> : null}
           {!hasMessages ? <div className="landing-suggestions mx-auto mt-5 w-full max-w-[720px]" aria-label={t("Sugerencias para empezar")}>
-            <LandingTasks tasks={suggestions} disabled={sending} onSelect={selectSuggestion} />
+            <LandingTasks tasks={suggestions} disabled={sending} onSelect={selectSuggestion} onCreateAutomation={onCreateAutomation} />
           </div> : null}
         </div>
       </div>}

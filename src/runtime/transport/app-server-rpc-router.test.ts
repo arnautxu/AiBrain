@@ -8,6 +8,7 @@ import type {
 } from "@/runtime/transport/contracts";
 import {
   AppServerRequestTimeoutError,
+  AppServerRpcResponseError,
   AppServerRpcRouter,
 } from "@/runtime/transport/app-server-rpc-router";
 
@@ -73,6 +74,22 @@ function event(sequence: number, message: AppServerEvent["message"]): AppServerE
 }
 
 describe("AppServerRpcRouter", () => {
+  it("retains the exact method and identity on a correlated multiline RPC rejection", async () => {
+    const transport = new FakeTransport();
+    const router = new AppServerRpcRouter(transport);
+    const message = "Invalid request: unknown variant ``\nin apps._default.approvals_reviewer";
+    const rejected = router.request({ method: "thread/start", id: "exact-thread-create", params: {} });
+    const observed = rejected.catch(error => error);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(1));
+    transport.queue.push(event(1, { kind: "rpc-response", rpc: { id: "exact-thread-create", error: { code: -32600, message } } }));
+    const error = await observed;
+    expect(error).toBeInstanceOf(AppServerRpcResponseError);
+    expect(error).toMatchObject({ method: "thread/start", requestId: "exact-thread-create", code: -32600, message });
+    await vi.waitFor(() => expect(transport.acknowledged).toHaveLength(1));
+    expect(transport.sent).toHaveLength(1);
+    await router.close();
+  });
+
   it("observes unregistered usage durably without blocking the independent RPC response lane", async () => {
     const transport = new FakeTransport();
     let release!: () => void;
@@ -106,7 +123,7 @@ describe("AppServerRpcRouter", () => {
       threadId: "parent", turnId: "turn", callId: "tool", namespace: "aibrain_horaria", tool: "run", arguments: {},
     } } }));
     transport.queue.push(event(2, { kind: "rpc-notification", rpc: { method: "turn/started", params: {
-      threadId: "parent", turn: { id: "turn", status: "inProgress", items: [], error: null, itemsView: "full", startedAt: null, completedAt: null, durationMs: null },
+      threadId: "parent", turn: { id: "turn", status: "inProgress", items: [], error: null, itemsView: "full", rootTurnId: null, startedAt: null, completedAt: null, durationMs: null },
     } } }));
     await vi.waitFor(() => expect(observer).toHaveBeenCalledOnce());
     expect(tool).toHaveBeenCalledOnce();
@@ -121,7 +138,7 @@ describe("AppServerRpcRouter", () => {
     const router = new AppServerRpcRouter(transport, { onNotification: () => { throw new Error("Ledger unavailable"); } });
     await router.start();
     transport.queue.push(event(1, { kind: "rpc-notification", rpc: { method: "turn/started", params: {
-      threadId: "child", turn: { id: "turn", status: "inProgress", items: [], error: null, itemsView: "full", startedAt: null, completedAt: null, durationMs: null },
+      threadId: "child", turn: { id: "turn", status: "inProgress", items: [], error: null, itemsView: "full", rootTurnId: null, startedAt: null, completedAt: null, durationMs: null },
     } } }));
     await vi.waitFor(() => expect(router.failed).toBe(true));
     expect(transport.acknowledged).toHaveLength(0);
@@ -154,7 +171,7 @@ describe("AppServerRpcRouter", () => {
     }));
     transport.queue.push(event(1402, { kind: "rpc-notification", rpc: { method: "turn/completed", params: {
       threadId: "calculation", turn: { id: "calculation-turn", status: "completed", items: [], error: null,
-        itemsView: "full", startedAt: null, completedAt: null, durationMs: null },
+        itemsView: "full", rootTurnId: null, startedAt: null, completedAt: null, durationMs: null },
     } } }));
     try {
       await vi.waitFor(() => expect(transport.acknowledged).toHaveLength(1402), { timeout: 2_000 });

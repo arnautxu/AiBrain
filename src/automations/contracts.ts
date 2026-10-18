@@ -16,10 +16,11 @@ export type AutomationAudience = {
 };
 
 export type AutomationSchedule =
+  | { kind: "external" }
   | { kind: "interval"; minutes: number; anchorAt: string }
   | { kind: "once"; runAt: string }
   | { kind: "daily"; hour: number; minute: number }
-  | { kind: "weekly"; weekdays: number[]; hour: number; minute: number };
+  | { kind: "weekly"; weekdays: number[]; hour: number; minute: number; intervalWeeks?: 2; anchorDate?: string };
 
 export type AutomationExecutionContext = {
   /** Scheduled work always requests live web search and fails closed if the
@@ -60,6 +61,8 @@ export type AutomationTask = {
   timeZone: AutomationTimeZone;
   schedule: AutomationSchedule;
   executionContext: AutomationExecutionContext;
+  /** Operator-controlled preparation gate; never accepted from public patches. */
+  preparationBlock?: string | null;
   state: AutomationState;
   nextRunAt: string | null;
   lastRunAt: string | null;
@@ -93,6 +96,13 @@ export type AutomationRun = {
   finishedAt: string | null;
   threadId: string | null;
   error: string | null;
+};
+
+/** Read-only history projection; interruption is proven by a successor attempt. */
+export type AutomationRunHistory = Omit<AutomationRun, "status"> & {
+  status: AutomationRunStatus | "interrupted";
+  recoveredByAttempt?: number;
+  recoveredAt?: string;
 };
 
 export type AutomationTaskInput = {
@@ -154,12 +164,14 @@ export function isValidTimeZone(value: unknown): value is string {
 
 export function isAutomationSchedule(value: unknown): value is AutomationSchedule {
   if (!isRecord(value)) return false;
+  if (value.kind === "external") return Object.keys(value).length === 1;
   if (value.kind === "interval") return Object.keys(value).length === 3 && Number.isSafeInteger(value.minutes) && Number(value.minutes) >= 60 && Number(value.minutes) <= 10080 && isIsoDate(value.anchorAt);
   if (value.kind === "once") return Object.keys(value).length === 2 && isIsoDate(value.runAt);
   const hasTime = Number.isInteger(value.hour) && Number(value.hour) >= 0 && Number(value.hour) <= 23 &&
     Number.isInteger(value.minute) && Number(value.minute) >= 0 && Number(value.minute) <= 59;
   if (value.kind === "daily") return Object.keys(value).length === 3 && hasTime;
-  if (value.kind !== "weekly" || Object.keys(value).length !== 4 || !hasTime ||
+  const fortnightly = value.intervalWeeks === 2 && typeof value.anchorDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.anchorDate) && Number.isFinite(Date.parse(value.anchorDate)) && new Date(value.anchorDate).toISOString().slice(0,10) === value.anchorDate;
+  if (value.kind !== "weekly" || !(Object.keys(value).length === 4 && value.intervalWeeks === undefined && value.anchorDate === undefined || Object.keys(value).length === 6 && fortnightly) || !hasTime ||
     !Array.isArray(value.weekdays) || value.weekdays.length === 0 || value.weekdays.length > 7) return false;
   return new Set(value.weekdays).size === value.weekdays.length &&
     value.weekdays.every((day) => Number.isInteger(day) && day >= 0 && day <= 6);
@@ -190,7 +202,7 @@ export function parseAutomationInput(value: unknown): AutomationTaskInput | null
   const projectName = typeof value.projectName === "string" ? value.projectName.trim() : "";
   if (!name || name.length > 100 || !prompt || prompt.length > 20_000 ||
     !/^[0-9a-f-]{36}$/i.test(projectId) || !projectName || projectName.length > 100 ||
-    !isValidTimeZone(value.timeZone) || !isAutomationSchedule(value.schedule) ||
+    !isValidTimeZone(value.timeZone) || !isAutomationSchedule(value.schedule) || value.schedule.kind === "external" ||
     ("executionContext" in value && !isAutomationExecutionContext(value.executionContext)) ||
     ("audience" in value && !isAutomationAudience(value.audience))) return null;
   return {
@@ -232,7 +244,7 @@ export function parseAutomationPatch(value: unknown): AutomationTaskPatch | null
     patch.timeZone = value.timeZone;
   }
   if ("schedule" in value) {
-    if (!isAutomationSchedule(value.schedule)) return null;
+    if (!isAutomationSchedule(value.schedule) || value.schedule.kind === "external") return null;
     patch.schedule = value.schedule;
   }
   if ("audience" in value) {

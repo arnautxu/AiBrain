@@ -306,6 +306,29 @@ describe("turn control route", () => {
     expect((await projections.read(pendingThreadId, PENDING_ASSISTANT_MESSAGE))?.message.status).toBe("streaming");
   });
 
+  it("reports an authorized missing projection without acknowledging a Stop, then accepts the same identity once initialized", async () => {
+    const route = await import("@/app/api/runtime/turns/control/route");
+    const assistantId = "0198b9f0-6631-7000-8000-000000000422";
+    const body = { action: "stop", threadId: immediateThreadId, assistantMessageId: assistantId, clientRequestId: "0198b9f0-6631-7000-8000-000000000423" };
+    auth.session = session(USER_B);
+    const foreign = await route.POST(request(body));
+    expect(foreign.status).toBe(404);
+    expect(await foreign.json()).not.toHaveProperty("code", "TURN_PROJECTION_NOT_FOUND");
+    auth.session = session(USER_A);
+    const missing = await route.POST(request(body));
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: "El torn no existeix.", code: "TURN_PROJECTION_NOT_FOUND" });
+    expect(controls.calls.some(call => call.request.assistantMessageId === assistantId)).toBe(false);
+    const { FileTurnProjectionStore } = await import("@/workbench/turn-projection-store");
+    const projections = new FileTurnProjectionStore({ installationId: "control-lab", userId: USER_A, usersRoot: path.join(root, "data", "users") });
+    await projections.initialize(immediateThreadId, message(assistantId, "assistant", "streaming"));
+    const accepted = await route.POST(request(body));
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toEqual({ ok: true, action: "stop", idempotent: false });
+    expect(controls.calls.filter(call => call.request.assistantMessageId === assistantId)).toHaveLength(1);
+    expect((await projections.read(immediateThreadId, assistantId))?.message.status).toBe("streaming");
+  });
+
   it("accepts an immediate stop before App Server has returned a thread id", async () => {
     const route = await import("@/app/api/runtime/turns/control/route");
     auth.session = session(USER_A);

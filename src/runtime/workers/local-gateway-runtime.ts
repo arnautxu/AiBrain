@@ -4,6 +4,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { stopOwnedWorkerProcess } from "./owned-process";
 import { createServer, type Server as HttpServer } from "node:http";
+import type { Socket } from "node:net";
 import { createInterface, type Interface } from "node:readline";
 import path from "node:path";
 import { stat } from "node:fs/promises";
@@ -35,6 +36,7 @@ import type {
   WorkerRuntimeFactory,
 } from "@/runtime/workers/types";
 import { quotaToolPermissionConfigOverrides } from "@/runtime/quota-tool-permissions";
+import { installationOwnerAuthSocket, readInstallationOwnerAccess } from "@/runtime/installation-owner-auth";
 import type { SharedAuthProvider, SharedAuthTokens } from "./shared-auth-broker";
 import {
   defineVersionedSchema,
@@ -43,6 +45,7 @@ import {
   expectString,
   FileJournal,
   ResourceLockManager,
+  type ResourceLockLease,
   type StorageSchema,
 } from "@/storage";
 
@@ -366,7 +369,10 @@ export class PrivateWorkerGateway {
   private readonly locks: ResourceLockManager;
   private readonly events: FileTransportEventJournal;
   private readonly requests: GatewayRequestLedger;
+  private journalOwner: ResourceLockLease | null = null;
+  private startupJournalWork: Promise<unknown> | null = null;
   private server: HttpServer | null = null;
+  private readonly connections = new Set<Socket>();
   private sockets: WebSocketServer | null = null;
   private activeSocket: WebSocket | null = null;
   private child: ChildProcessWithoutNullStreams | null = null;
@@ -448,8 +454,20 @@ export class PrivateWorkerGateway {
     this.state = "starting";
     this.stopping = false;
     try {
-      await this.events.verifyAndRepair();
-      await this.requests.compact();
+      // A stable role is a replay identity, not permission for two live
+      // processes to consume it. Reject operator/duplicate starts before any
+      // journal repair, cursor advancement or child process creation.
+      const owner = await this.locks.acquire("worker-journal-owner", { timeoutMs: 0 });
+      if (this.retired) {
+        await owner.release();
+        throw new Error("Worker gateway startup was cancelled.");
+      }
+      this.journalOwner = owner;
+      this.startupJournalWork = (async () => {
+        await this.events.verifyAndRepair();
+        await this.requests.compact();
+      })();
+      await this.startupJournalWork;
       if (this.retired) throw new Error("Worker gateway startup was cancelled.");
       this.child = this.processFactory(this.context);
       this.lines = createInterface({ input: this.child.stdout });
@@ -492,8 +510,16 @@ export class PrivateWorkerGateway {
         response.writeHead(404, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
         response.end("Not found");
       });
+      this.server.on("connection", (socket) => {
+        // Own TCP connections before the WebSocket upgrade. A reconnect
+        // interrupted before HTTP headers complete is absent from ws.clients.
+        if (this.retired) { socket.destroy(); return; }
+        this.connections.add(socket);
+        socket.once("close", () => this.connections.delete(socket));
+      });
       this.sockets = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
       this.server.on("upgrade", (request, socket, head) => {
+        if (this.retired) { socket.destroy(); return; }
         const expected = `Bearer ${this.token}`;
         const received = request.headers.authorization ?? "";
         const requestPath = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
@@ -629,6 +655,9 @@ export class PrivateWorkerGateway {
     // The durable cursor owns replay. Do not wait for a disconnected client
     // to finish a WebSocket close handshake before stopping our process.
     for (const client of this.sockets?.clients ?? []) client.terminate();
+    // HTTP server.close() waits for incomplete handshakes. Retiring prevents
+    // new ownership; terminate only the sockets created by this gateway.
+    for (const connection of this.connections) connection.destroy();
     await new Promise<void>((resolve) => {
       if (!this.sockets) return resolve();
       this.sockets.close(() => resolve());
@@ -651,6 +680,9 @@ export class PrivateWorkerGateway {
       this.eventRecordChain.catch(() => undefined),
     ]);
     this.endpoint = null;
+    await this.startupJournalWork?.catch(() => undefined);
+    await this.journalOwner?.release();
+    this.journalOwner = null;
     this.state = "stopped";
     this.stopping = false;
   }
@@ -916,6 +948,21 @@ export class PrivateWorkerGateway {
       throw new Error("Codex App Server line exceeds the safety limit.");
     }
     const value: unknown = JSON.parse(line);
+    if (isRecord(value) && value.method === "account/chatgptAuthTokens/refresh"
+        && (typeof value.id === "string" || typeof value.id === "number")
+        && installationOwnerAuthSocket(this.context.installationId)) {
+      // Provider auth is a backend control exchange, not a model tool or a
+      // replayable turn event. Never journal access tokens or send them to UI.
+      const previousAccountId = isRecord(value.params) && typeof value.params.previousAccountId === "string"
+        ? value.params.previousAccountId : undefined;
+      let response: object;
+      try { response = { id: value.id, result: await readInstallationOwnerAccess(this.context.installationId, previousAccountId) }; }
+      catch { response = { id: value.id, error: { code: -32000, message: "Installation owner authentication is unavailable." } }; }
+      const child = this.child;
+      if (!child?.stdin.writable) throw new Error("Codex App Server input is unavailable.");
+      await new Promise<void>((resolve, reject) => child.stdin.write(`${JSON.stringify(response)}\n`, (error) => error ? reject(error) : resolve()));
+      return;
+    }
     if (isRecord(value) && typeof value.id === "string" && ("result" in value || "error" in value)) {
       await this.requests.complete(value.id, value);
       this.inFlightRequests.delete(value.id);

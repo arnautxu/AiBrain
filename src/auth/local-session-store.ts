@@ -224,6 +224,17 @@ export class FileLocalSessionStore {
     });
   }
 
+  /** Revalidate a server-bound session without exposing its bearer or renewing it. */
+  async isActiveBinding(installationId: string, userId: string, sessionIdHash: string): Promise<boolean> {
+    if (!HASH_PATTERN.test(sessionIdHash) || !USER_ID_PATTERN.test(userId)) return false;
+    return this.lockManager.withLock(`session:${sessionIdHash}`, async () => {
+      const record = await this.readByHash(sessionIdHash);
+      const now = this.now();
+      return Boolean(record && record.installationId === installationId && record.userId === userId
+        && record.idleExpiresAt > now && record.absoluteExpiresAt > now);
+    });
+  }
+
   async revokeUser(installationId: string, userId: string) {
     await mkdir(this.recordsDirectory, { recursive: true, mode: 0o700 });
     const entries = await readdir(this.recordsDirectory, { withFileTypes: true });

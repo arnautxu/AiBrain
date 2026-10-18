@@ -20,6 +20,9 @@ import type { AutomationTask } from "@/automations/contracts";
 import { FileAutomationAudienceStore } from "@/automations/audience-store";
 import { authorizedConnectorMentionIdsForTurn } from "@/connectors/mentions";
 import { featurePolicyForIdentity } from "@/settings/server-service";
+import { awaitHostTurn, hostFailure } from "@/automations/host-analysis/outcome";
+import { hostExecution } from "@/automations/host-analysis/execution";
+import { turnDocumentChatAttachments } from "@/documents/turn-attachments";
 import { scheduledTurnOptions } from "@/automations/execution-context";
 
 function stableUuid(value: string) {
@@ -60,13 +63,21 @@ export type ScheduledExecutionInput = {
 
 /** Executes the prompt as a real persistent AiBrain turn. It never sends an external message by itself. */
 export async function executeScheduledTurn(input: ScheduledExecutionInput) {
+  if (input.task.installationId !== input.installation.installationId || input.task.userId !== input.session.user.id || input.session.tenant.id !== input.installation.installationId) {
+    throw new Error("La automatización no pertenece a este empleado o instalación.");
+  }
+  const host = input.task.schedule.kind === "external" ? await hostExecution(input) : null;
+  try { return await executeTurn(input, host); } finally { host?.dispose(); }
+}
+
+async function executeTurn(input: ScheduledExecutionInput, host: Awaited<ReturnType<typeof hostExecution>> | null) {
   // The worker constructs its session from the installation's provisioned
   // employee record; retain this boundary immediately before a durable task
   // can enter the runtime as defence in depth against tenant/user mix-ups.
   if (input.task.installationId !== input.installation.installationId || input.task.userId !== input.session.user.id) {
     throw new Error("La automatización no pertenece a este empleado o instalación.");
   }
-  const signal = input.signal ?? new AbortController().signal;
+  const signal = host?.signal ?? input.signal ?? new AbortController().signal;
   const thread = input.existingThreadId
     ? null
     : await createThread(input.session, input.task.projectId, `Programada · ${input.task.name}`, {
@@ -96,13 +107,14 @@ export async function executeScheduledTurn(input: ScheduledExecutionInput) {
   const runtimeConfig = readRuntimeConfig(input.installation.installationId, context.workspaceKey);
   if (runtimeConfig.mode !== "codex") throw new Error("El runtime real de Codex no está activo.");
   const featurePolicy = await featurePolicyForIdentity(input.installation.installationId, input.session.user.id);
-  if (!featurePolicy["web-search"]) {
+  if ((!host || host.policy.webSearch) && !featurePolicy["web-search"]) {
     throw new Error("La búsqueda web de esta automatización ya no está autorizada para el usuario.");
   }
-  const connectorMentions = input.task.executionContext.inheritAuthorizedConnectors
+  const connectorMentions = !host && input.task.executionContext.inheritAuthorizedConnectors
     ? await authorizedConnectorMentionIdsForTurn(input.session)
     : [];
 
+  const prompt = host?.message ?? input.task.prompt;
   const userMessageId = stableUuid(`${input.runKey}:user`);
   const assistantMessageId = stableUuid(`${input.runKey}:assistant`);
   const assertPersistedResult = async (result: ChatMessage) => {
@@ -112,7 +124,7 @@ export async function executeScheduledTurn(input: ScheduledExecutionInput) {
     const persisted = await getThread(input.session, threadId);
     const persistedPrompt = persisted.messages.find(({ id }) => id === userMessageId);
     const persistedResult = persisted.messages.find(({ id }) => id === assistantMessageId);
-    if (persistedPrompt?.role !== "user" || persistedPrompt.content !== input.task.prompt ||
+    if (persistedPrompt?.role !== "user" || persistedPrompt.content !== prompt ||
         persistedResult?.role !== "assistant" || persistedResult.status !== "complete" ||
         !persistedResult.content.trim()) {
       throw new Error("La conversación programada no conserva el prompt y el resultado terminal.");
@@ -124,14 +136,23 @@ export async function executeScheduledTurn(input: ScheduledExecutionInput) {
     threadId,
     userMessageId,
     assistantMessageId,
-    message: input.task.prompt,
-    preferences: { tone: "balanced", language: "es", showActivity: true },
+    message: prompt,
+    preferences: { tone: host ? "direct" : "balanced", language: "es", showActivity: true },
     options: scheduledTurnOptions({
-      skillsAuthorized: input.task.executionContext.inheritAuthorizedSkills && featurePolicy.skills,
+      skillsAuthorized: !host && input.task.executionContext.inheritAuthorizedSkills && featurePolicy.skills,
       connectorMentions,
     }),
   };
-  const userMessage = message(userMessageId, "user", input.task.prompt, "complete", startedAt);
+  if (host) request.options = { ...request.options, experience: "smart", model: null, effort: null,
+    webSearch: host.policy.webSearch, inheritAuthorizedSkills: false, connectorMentions: [] };
+  const permissions = await resolveServerTurnPermissions(input.installation, {
+    installationId: input.installation.installationId, userId: input.session.user.id,
+    projectId: input.task.projectId, turnId: assistantMessageId,
+  });
+  const documents = host ? await host.documents(threadId, permissions) : [];
+  if (host) request.options.documentUploadIds = documents.map(({ document }) => document.uploadId);
+  const userMessage = message(userMessageId, "user", prompt, "complete", startedAt);
+  userMessage.attachments = turnDocumentChatAttachments(documents);
   let assistantMessage = message(assistantMessageId, "assistant", "", "streaming", new Date(Date.now() + 1).toISOString());
   const begun = await beginThreadTurn(
     input.session,
@@ -143,16 +164,11 @@ export async function executeScheduledTurn(input: ScheduledExecutionInput) {
   assistantMessage = begun.assistantMessage;
   if (begun.outcome === "existing" && assistantMessage.status !== "streaming") {
     if (assistantMessage.status !== "complete") throw new Error(assistantMessage.content || "La ejecución anterior falló.");
+    if (host) await host.validate(assistantMessage.content, threadId, true);
     await assertPersistedResult(assistantMessage);
-    return { threadId };
+    return { threadId, ...(host ? { deadlineAt: host.terminalDeadlineAt, finalize: host.finalize } : {}) };
   }
 
-  const permissions = await resolveServerTurnPermissions(input.installation, {
-    installationId: input.installation.installationId,
-    userId: input.session.user.id,
-    projectId: input.task.projectId,
-    turnId: assistantMessageId,
-  });
   const approvals = new FileApprovalStore({
     installationId: input.installation.installationId,
     userId: input.session.user.id,
@@ -167,7 +183,12 @@ export async function executeScheduledTurn(input: ScheduledExecutionInput) {
     }),
   };
   let runtimeThreadToken: string | null = null;
+  let hostEventsClosed = false;
+  let runtimeFailure: string | undefined;
+  let hostFailureCode: string | undefined;
   const emit = async (event: WorkerCodexTurnEvent) => {
+    if (host && (hostEventsClosed || signal.aborted)) return;
+    if (event.type === "error") runtimeFailure = event.message;
     if (event.type === "runtimeThread") {
       runtimeThreadToken = event.threadToken;
       return;
@@ -177,7 +198,7 @@ export async function executeScheduledTurn(input: ScheduledExecutionInput) {
   };
 
   try {
-    await runWorkerCodexTurn(
+    const run = () => runWorkerCodexTurn(
       request,
       input.installation.installationId,
       input.session.user.id,
@@ -186,7 +207,7 @@ export async function executeScheduledTurn(input: ScheduledExecutionInput) {
       permissions,
       approvals,
       memory,
-      [],
+      documents,
       signal,
       emit,
       undefined,
@@ -199,15 +220,37 @@ export async function executeScheduledTurn(input: ScheduledExecutionInput) {
       true,
       null,
       begun.outcome === "existing",
+      host?.policy,
     );
+    if (host) await awaitHostTurn(run, signal);
+    else await run();
+    if (host) {
+      if (assistantMessage.approvals.length) throw Error("AUTOMATION_NON_READ_ONLY_RESULT");
+      if (assistantMessage.status !== "complete") throw Error(runtimeFailure ?? (assistantMessage.status === "stopped" ? "HOST_ANALYSIS_STOPPED" : "HOST_MODEL_ERROR"));
+      assistantMessage = { ...assistantMessage, content: await host.validate(assistantMessage.content, threadId) };
+    }
   } catch (error) {
+    if (host) {
+      const failure = hostFailure(error, signal);
+      hostFailureCode = failure.code;
+      assistantMessage = { ...assistantMessage,
+        content: assistantMessage.content || `${failure.label} (${failure.code})`,
+        toolResults: assistantMessage.toolResults?.map(item => item.status === "running" ? { ...item, status: "stopped" as const } : item),
+        activity: [...assistantMessage.activity.map(item => item.status === "running" || item.status === "waiting" ? { ...item, status: "stopped" as const } : item),
+          { id: "host-analysis-outcome", kind: "system", status: "failed", label: failure.label, detail: failure.code,
+            ...(failure.output || failure.cancellation ? { output: [failure.output, failure.cancellation].filter(Boolean).join("\n") } : {}) }],
+      };
+    }
     assistantMessage = applyChatStreamEvent(assistantMessage, {
       type: "error",
       message: error instanceof Error ? error.message : "La ejecución programada ha fallado.",
     });
+  } finally {
+    hostEventsClosed = true;
   }
   if (assistantMessage.status === "streaming") assistantMessage = { ...assistantMessage, status: "error" };
   await finishThreadTurn(input.session, threadId, assistantMessage, runtimeThreadToken);
+  if (hostFailureCode) throw Error(hostFailureCode);
   await assertPersistedResult(assistantMessage);
-  return { threadId };
+  return { threadId, ...(host ? { deadlineAt: host.terminalDeadlineAt, finalize: host.finalize } : {}) };
 }

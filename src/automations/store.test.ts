@@ -34,6 +34,36 @@ function input(runAt: string) {
 }
 
 describe("FileAutomationStore", () => {
+  it("projects abandoned attempts as interrupted without rewriting their audit or inventing a finish time", async () => {
+    const usersRoot = await root();
+    const store = new FileAutomationStore({ installationId: "tenant-one", userId: userA, usersRoot });
+    const task = await store.create(input("2030-08-28T09:00:00.000Z"));
+    const runKey = `${task.id}:2030-08-28T09:00:00.000Z`;
+    const running = {
+      schemaVersion: 1 as const, runKey, taskId: task.id, installationId: "tenant-one", userId: userA,
+      scheduledFor: "2030-08-28T09:00:00.000Z", status: "running" as const, attempt: 1,
+      startedAt: "2030-08-28T09:00:00.000Z", finishedAt: null, threadId: projectId, error: null,
+    };
+    await store.appendRun(running);
+    expect(await store.listRuns()).toEqual([running]);
+    const successor = { ...running, attempt: 2, startedAt: "2030-08-28T09:10:00.000Z" };
+    await store.appendRun(successor);
+    const journalPath = path.join(usersRoot, userA, "automations", "runs.jsonl");
+    const journalBefore = await readFile(journalPath, "utf8");
+    expect(await store.listRuns(task.id)).toEqual([
+      { ...running, status: "interrupted", recoveredByAttempt: 2, recoveredAt: successor.startedAt }, successor,
+    ]);
+    expect(await store.latestRun(runKey)).toEqual(successor);
+    expect(await readFile(journalPath, "utf8")).toBe(journalBefore);
+    await store.appendRun({ ...successor, status: "succeeded", finishedAt: "2030-08-28T09:12:00.000Z" });
+    const terminalJournal = await readFile(journalPath, "utf8");
+    expect((await store.listRuns(task.id)).map(({ status }) => status)).toEqual(["interrupted", "succeeded"]);
+    expect((await store.latestRun(runKey))?.status).toBe("succeeded");
+    expect(await readFile(journalPath, "utf8")).toBe(terminalJournal);
+    const otherRun = { ...running, runKey: `${task.id}:other`, attempt: 1 };
+    await store.appendRun(otherRun);
+    expect((await store.listRuns()).at(-1)).toEqual(otherRun);
+  });
   it("isolates tasks and runs by tenant user", async () => {
     const usersRoot = await root();
     const now = () => Date.parse("2026-08-28T08:00:00.000Z");
@@ -326,4 +356,20 @@ describe("FileAutomationStore", () => {
 
     expect((await store.listRuns()).at(-1)).toMatchObject({ status: "succeeded", threadId: projectId });
   });
+});
+
+it('persists an operator dependency gate across restart, editing and manual execution', async () => {
+  const usersRoot = await root();
+  const now = () => Date.parse('2026-08-28T08:00:00.000Z');
+  const store = new FileAutomationStore({installationId:'worksitea-production',userId:userA,usersRoot,now});
+  const task = await store.create(input('2026-08-28T09:00:00.000Z'));
+  await store.setPreparationBlock(task.id,'Pendent de connexió a SAGE');
+  const restarted = new FileAutomationStore({installationId:'worksitea-production',userId:userA,usersRoot,now});
+  await restarted.update(task.id,{name:'Nou nom',prompt:'Una altra instrucció'});
+  await expect(restarted.update(task.id,{state:'active'})).rejects.toThrow('SAGE');
+  await expect(restarted.runNow(task.id,'11111111-1111-4111-8111-111111111112')).rejects.toThrow('SAGE');
+  expect(await restarted.claimDue('worker')).toEqual([]);
+  await restarted.setPreparationBlock(task.id,null);
+  expect((await restarted.get(task.id)).state).toBe('paused');
+  await restarted.update(task.id,{state:'active'});
 });

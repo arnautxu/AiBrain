@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { PASSWORD_RECOVERY_MS } from "@/auth/password-recovery-store";
 import type { CreatedLocalSession } from "@/auth/local-session-store";
 
 export const LOCAL_SESSION_COOKIE = "__Host-aibrain-session";
@@ -43,5 +44,22 @@ export async function clearAuthChallengeCookie() {
     ...BASE_COOKIE_OPTIONS,
     expires: new Date(0),
     maxAge: 0,
+  });
+}
+
+
+export const PASSWORD_RECOVERY_COOKIE = "__Host-aibrain-password-recovery";
+
+export async function setPasswordRecoveryCookie(recoveryId: string) {
+  (await cookies()).set(PASSWORD_RECOVERY_COOKIE, recoveryId, {
+    // Constant public lifetime; the private record enforces its own deadline.
+    // Provider latency/error must not change observable cookie attributes.
+    ...BASE_COOKIE_OPTIONS, maxAge: PASSWORD_RECOVERY_MS / 1000,
+  });
+}
+
+export async function clearPasswordRecoveryCookie() {
+  (await cookies()).set(PASSWORD_RECOVERY_COOKIE, "", {
+    ...BASE_COOKIE_OPTIONS, expires: new Date(0), maxAge: 0,
   });
 }

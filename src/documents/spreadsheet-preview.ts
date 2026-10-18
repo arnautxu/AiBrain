@@ -2,7 +2,7 @@
 export type SpreadsheetPreview = {
   schemaVersion: 1;
   kind: "spreadsheet";
-  sheets: { name: string; hidden: boolean; cells: { address: string; value: string }[] }[];
+  sheets: { name: string; hidden: boolean; truncated?: boolean; cells: { address: string; value: string }[] }[];
   truncated: boolean;
 };
 
@@ -14,6 +14,7 @@ export function isSpreadsheetPreview(value: unknown): value is SpreadsheetPrevie
   let bytes = 0;
   return v.sheets.every((sheet) => {
     if (!sheet || typeof sheet.name !== "string" || !sheet.name || sheet.name.length > 100 ||
+        (sheet.truncated !== undefined && typeof sheet.truncated !== "boolean") ||
         typeof sheet.hidden !== "boolean" || !Array.isArray(sheet.cells) || sheet.cells.length > 2000) return false;
     bytes += new TextEncoder().encode(sheet.name).length + 100;
     if (bytes > 60000) return false;

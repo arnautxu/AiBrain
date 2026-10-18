@@ -4,6 +4,7 @@ import type { AuthSession } from "@/auth/types";
 import type { ChatStreamEvent } from "@/lib/chat-contract";
 import type { RuntimeStatus } from "@/lib/runtime-status";
 import type { WorkbenchProject, WorkbenchSnapshot } from "@/workbench/types";
+import type { PersonalConnectorSettings } from "@/settings/connector-settings";
 import { describe, expect, it } from "vitest";
 import { assertUiContract, uiContract, uiContractErrors } from "../helpers/ui-contract";
 
@@ -187,6 +188,39 @@ describe("versioned AiBrain UI/backend contract", () => {
     assertUiContract("WorkbenchProject", viewerProject);
     assertUiContract("RuntimeStatus", runtime);
     for (const event of events) assertUiContract("ChatStreamEvent", event);
+  });
+
+  it("models personal password connection settings without broadening the existing OAuth contract", () => {
+    const settings = { id: "mail", label: "Correo Nominalia", status: "requires_login", statusCode: "MAIL_LOGIN_REQUIRED", statusDetail: "Conecta tu cuenta de correo.", accountEmail: "employee@example.test", scopes: ["mail.read", "mail.write", "mail.send"], connectUrl: "/api/connectors/mail/connect", disconnectUrl: null, connectionVersion: null, connectionMethod: "password" } satisfies PersonalConnectorSettings;
+    assertUiContract("PersonalConnectorSettings", settings);
+    const { connectionMethod: _method, ...oauthSettings } = settings;
+    assertUiContract("PersonalConnectorSettings", oauthSettings);
+    for (const method of ["oauth", "provider-password", true, null]) expect(uiContractErrors("PersonalConnectorSettings", { ...settings, connectionMethod: method })).not.toBeNull();
+    expect(uiContractErrors("PersonalConnectorSettings", { ...settings, password: "must-never-be-published" })).not.toBeNull();
+    expect(uiContractErrors("PersonalConnectorSettings", { ...settings, connectionVersion: 0 })).not.toBeNull();
+  });
+
+  it("accepts the three real mail response shapes and safe errors while rejecting secrets and incomplete success", () => {
+    expect(routeCatalog.operations["GET /api/connectors/mail/capability"]).toBe("MailCapabilityResponse");
+    expect(routeCatalog.operations["POST /api/connectors/mail/connect"]).toBe("MailConnectResponse");
+    expect(routeCatalog.operations["POST /api/connectors/mail/disconnect"]).toBe("MailDisconnectResponse");
+    expect(uiContractErrors("MailCapabilityResponse", null)).toBeNull();
+    const capability = uiContract["x-examples"].find(example => example.schema === "MailCapabilityResponse" && (example.value as { status?: string } | null)?.status === "connected")!.value as Record<string, unknown>;
+    assertUiContract("MailCapabilityResponse", capability);
+    assertUiContract("MailConnectResponse", { connected: true, accountEmail: "employee@example.test", connectionVersion: 1 });
+    assertUiContract("MailDisconnectResponse", { status: "revoked" });
+    for (const schema of ["MailCapabilityResponse", "MailConnectResponse", "MailDisconnectResponse"]) {
+      for (const code of ["AUTH_REQUIRED", "ORIGIN_REQUIRED", "MAIL_AUTH_FAILED", "MAIL_RATE_LIMITED", "MAIL_REQUEST_FAILED"]) {
+        expect(uiContractErrors(schema, { code })).toBeNull();
+        expect(uiContractErrors(schema, { code, error: "No se ha podido completar la operación." })).toBeNull();
+        expect(uiContractErrors(schema, { code, password: "must-never-be-published" })).not.toBeNull();
+      }
+    }
+    for (const key of ["password", "credentialRef", "credentials", "token"]) expect(uiContractErrors("MailCapabilityResponse", { ...capability, [key]: "private" }), key).not.toBeNull();
+    expect(uiContractErrors("MailCapabilityResponse", { ...capability, approvalRequiredOperations: ["send"] })).not.toBeNull();
+    expect(uiContractErrors("MailConnectResponse", { connected: true, connectionVersion: 1 })).not.toBeNull();
+    expect(uiContractErrors("MailConnectResponse", { connected: true, accountEmail: "employee@example.test", connectionVersion: 0 })).not.toBeNull();
+    expect(uiContractErrors("MailDisconnectResponse", { status: "connected" })).not.toBeNull();
   });
 
   it("rejects provider and persistence values forbidden by the product boundary", () => {

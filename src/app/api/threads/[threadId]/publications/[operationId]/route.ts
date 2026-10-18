@@ -49,6 +49,7 @@ export async function POST(request: Request, context: RouteContext) {
       return NextResponse.json({ error: "El torn de publicació no pertany al fil." }, { status: 403 });
     }
     let permissionFingerprint: string | null = null;
+    let publicationPermissions: Awaited<ReturnType<typeof resolveServerTurnPermissions>> | undefined;
     if (body.action === "confirm") {
       const permissions = await resolveServerTurnPermissions(installation, {
         installationId: installation.installationId,
@@ -60,8 +61,10 @@ export async function POST(request: Request, context: RouteContext) {
         return NextResponse.json({ error: "PERMISSIONS.md no autoritza aquesta publicació." }, { status: 403 });
       }
       permissionFingerprint = permissions.fingerprint;
+      publicationPermissions = permissions;
     }
-    const publisher = await documentPublisherForUser(installation, session.user.id);
+    const publisher = await documentPublisherForUser(installation, session.user.id,
+      { projectId: threadContext.projectId, permissions: publicationPermissions });
     const input = {
       operationId,
       clientRequestId: body.clientRequestId,

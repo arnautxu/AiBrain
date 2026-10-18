@@ -228,10 +228,15 @@ export class WorkerRuntimeRegistry {
       await entry.stopPromise;
       return this.start(userId, activityLease);
     }
-    if ((entry.state === "running" || entry.state === "degraded") && entry.handle) {
-      return entry.handle;
-    }
     if (entry.startPromise) return entry.startPromise;
+    if ((entry.state === "running" || entry.state === "degraded") && entry.handle) {
+      const reusePromise = this.reuseOrRecover(entry, activityLease);
+      entry.startPromise = reusePromise;
+      void reusePromise.finally(() => {
+        if (entry.startPromise === reusePromise) entry.startPromise = null;
+      }).catch(() => undefined);
+      return reusePromise;
+    }
     if (entry.runtime) throw new Error("Previous worker cleanup must complete before restart.");
 
     const startLease = activityLease
@@ -334,6 +339,52 @@ export class WorkerRuntimeRegistry {
       if (failure) throw failure.reason;
     })().finally(() => { this.closePromise = null; });
     return this.closePromise;
+  }
+
+  private async reuseOrRecover(
+    entry: RegistryEntry,
+    activityLease?: MaintenanceActivityLease,
+  ): Promise<WorkerRuntimeHandle> {
+    const runtime = entry.runtime;
+    const handle = entry.handle;
+    if (!runtime || !handle) throw new Error("Worker runtime ownership is unavailable.");
+    let health: WorkerControllerHealth;
+    try {
+      health = await runtime.health();
+    } catch (error) {
+      entry.lastError = safeError(error);
+      entry.state = "degraded";
+      throw new Error("Worker controller health could not be confirmed.");
+    }
+    // Transport reconnects and transient degraded health do not establish that
+    // the process generation is dead. Never replace an otherwise active worker.
+    if (health.healthy || !["failed", "stopped"].includes(health.state)) return handle;
+    if (this.closed || entry.stopPromise) throw new Error("Worker recovery was cancelled.");
+    const recoveryLease = activityLease
+      ? null
+      : this.maintenance?.acquire("worker-start") ?? null;
+    try {
+      if (activityLease) this.maintenance!.assertActiveLease(activityLease);
+      entry.state = "stopping";
+      const cleanup = await Promise.allSettled([runtime.transport.close(), runtime.stop()]);
+      entry.handle = null;
+      const failure = cleanup.find((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failure) {
+        entry.state = "failed";
+        entry.lastError = safeError(failure.reason);
+        throw failure.reason;
+      }
+      entry.runtime = null;
+      entry.state = "stopped";
+      // A concurrent stop/close waits for this promise. Do not create a new
+      // generation after that caller has fenced the employee's lifecycle.
+      if (this.closed || entry.stopPromise) throw new Error("Worker recovery was cancelled.");
+      entry.state = "starting";
+      entry.lastError = null;
+      return await this.startEntry(entry);
+    } finally {
+      recoveryLease?.release();
+    }
   }
 
   private async startEntry(entry: RegistryEntry) {

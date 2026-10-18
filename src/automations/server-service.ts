@@ -170,6 +170,7 @@ export async function listAutomationTasks(session: AuthSession) {
 }
 
 export async function createAutomationTask(session: AuthSession, input: AutomationTaskInput, options: { taskId?: string } = {}) {
+  if (input.schedule.kind === "external") throw new AutomationAccessError("HOST_BINDING_REQUIRED", "Usa la autorización operativa.", 403);
   const context = await automationWorkspaceForSession(session);
   const audience = validateAutomationAudience(input.audience ?? {
     membershipPolicy: "current",
@@ -186,6 +187,9 @@ export async function updateAutomationTask(session: AuthSession, taskId: string,
   const access = automationTaskAccess(located.task, context.principal.userId, context, context.isAdmin);
   if (!access.canManage || located.task.deletedAt !== null) {
     throw new AutomationAccessError("AUTOMATION_NOT_FOUND", "Automatización no encontrada.", 404);
+  }
+  if (located.task.schedule.kind === "external" && (patch.schedule || patch.prompt || patch.projectId || patch.timeZone)) {
+    throw new AutomationAccessError("HOST_BINDING_REAUTHORIZE", "Revoca y autoriza de nuevo este análisis desde su pantalla de autorización.", 409);
   }
   const nextPatch = patch.audience
     ? { ...patch, audience: validateAutomationAudience(patch.audience, context, context.principal.userId) }
@@ -211,6 +215,7 @@ export async function runAutomationTaskNow(session: AuthSession, taskId: string,
   if (!access.canManage || located.task.deletedAt !== null) {
     throw new AutomationAccessError("AUTOMATION_NOT_FOUND", "Automatización no encontrada.", 404);
   }
+  if (located.task.schedule.kind === "external") throw new AutomationAccessError("HOST_INPUT_REQUIRED", "Este análisis requiere un lote del scheduler autorizado.", 409);
   const task = await located.store.runNow(taskId, clientRequestId);
   return { ...task, owner: { userId: task.userId, name: context.users.find(({ userId }) => userId === task.userId)?.displayName ?? "Usuario no disponible" }, access: automationTaskAccess(task, context.principal.userId, context, context.isAdmin) } satisfies AutomationTaskView;
 }

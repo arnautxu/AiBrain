@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { DynamicToolCallParams } from "../../contracts/codex/0.153.4/types/v2/DynamicToolCallParams";
+import type { DynamicToolCallParams } from "../../contracts/codex/0.162.1/types/v2/DynamicToolCallParams";
 import type { CompanyMailToolContext } from "./company-mail-dynamic-tools";
 import { COMPANY_MAIL_NAMESPACE, handleCompanyMailTool } from "./company-mail-dynamic-tools";
 

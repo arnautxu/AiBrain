@@ -1,3 +1,4 @@
+import { loginDemoEmployee } from "../helpers/demo-login";
 import { reloadAndReopenConversation } from "../helpers/reopen-conversation";
 import { devices, expect, test, type Locator, type Page } from "@playwright/test";
 
@@ -7,9 +8,7 @@ const { defaultBrowserType: _defaultBrowserType, ...iphone13 } = devices["iPhone
 test.use(iphone13);
 
 async function login(page: Page) {
-  await page.goto("/login");
-  await page.getByRole("button", { name: new RegExp(accountName) }).click();
-  await expect(page.getByTestId("composer")).toBeVisible();
+  await loginDemoEmployee(page, accountName);
 }
 
 async function expectTouchTarget(locator: Locator) {

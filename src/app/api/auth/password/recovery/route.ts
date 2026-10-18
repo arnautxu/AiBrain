@@ -1,17 +1,26 @@
+import { randomUUID } from "node:crypto";
+import { operationalLogger } from "@/operations/server-logger";
+import { recoveryFailureResponse } from "@/auth/recovery-outcome";
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { readRecoveryProof } from "@/auth/recovery-proof";
 import { LocalAuthError } from "@/auth/auth-service";
 import { createLocalAuthService } from "@/auth/auth-context";
-import { IdentityProviderError } from "@/auth/identity-provider";
 import { isSameOriginMutation } from "@/auth/request-security";
-import { setLocalSessionCookie } from "@/auth/session-cookie";
+import { setLocalSessionCookie, PASSWORD_RECOVERY_COOKIE, clearPasswordRecoveryCookie } from "@/auth/session-cookie";
 import { authRateLimitSubject } from "@/auth/rate-limit";
 import { checkAuthRateLimit } from "@/auth/rate-limit-context";
+
+function logRecovery(level: "info" | "warn" | "error", event: string, attributes: Record<string, unknown>) {
+  // A diagnostic sink failure must not change an already-committed auth result.
+  try { operationalLogger[level](event, attributes); } catch { /* no credentials or exception fallback */ }
+}
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   if (!await isSameOriginMutation(request)) {
-    return NextResponse.json({ error: "Origen no autoritzat." }, { status: 403 });
+    return NextResponse.json({ error: "Origen no autoritzat." }, { status: 403, headers: { "Cache-Control": "private, no-store" } });
   }
   const body: unknown = await request.json().catch(() => null);
   const password = body && typeof body === "object" && "password" in body && typeof body.password === "string"
@@ -33,7 +42,7 @@ export async function POST(request: Request) {
     );
   } catch {
     return NextResponse.json(
-      { error: "No s’ha pogut verificar temporalment la recuperació." },
+      { error: "No s’ha pogut verificar temporalment la recuperació.", code: "recovery_unavailable", nextStep: "retry" },
       { status: 503, headers: { "Cache-Control": "private, no-store" } },
     );
   }
@@ -50,28 +59,43 @@ export async function POST(request: Request) {
     );
   }
   if (!body || typeof body !== "object") {
-    return NextResponse.json({ error: "Petició no vàlida." }, { status: 400 });
+    return NextResponse.json({ error: "Petició no vàlida.", code: "recovery_invalid_input", nextStep: "retry" }, { status: 400, headers: { "Cache-Control": "private, no-store" } });
   }
-  if (password !== confirmation || (!!code === !!tokenHash)) {
-    return NextResponse.json({ error: "Petició de recuperació no vàlida." }, { status: 400 });
+  const proof = readRecoveryProof({
+    code: "code" in body ? body.code : undefined,
+    tokenHash: "tokenHash" in body ? body.tokenHash : undefined,
+  });
+  if (password !== confirmation || !proof) {
+    return NextResponse.json({ error: "Petició de recuperació no vàlida.", code: "recovery_invalid_input", nextStep: "retry" }, { status: 400, headers: { "Cache-Control": "private, no-store" } });
   }
+  const requestId = randomUUID();
+  const headers = { "Cache-Control": "private, no-store", "X-Recovery-Request-Id": requestId };
+  let phase: "prepare" | "completion" | "session_cookie" = "prepare";
+  let completed = false;
+  const clearBinding = async () => {
+    try { await clearPasswordRecoveryCookie(); }
+    catch { logRecovery("warn", "auth.recovery_cookie_cleanup_failed", { requestId }); }
+  };
   try {
-    const result = await (await createLocalAuthService()).completePasswordRecovery(
-      code ? { code } : { tokenHash: tokenHash! },
-      password,
-    );
+    const service = await createLocalAuthService();
+    const recoveryId = (await cookies()).get(PASSWORD_RECOVERY_COOKIE)?.value;
+    phase = "completion";
+    const result = await service.completePasswordRecovery(proof, password, recoveryId);
+    completed = true;
+    phase = "session_cookie";
     await setLocalSessionCookie(result.session);
-    return NextResponse.json(
-      { authenticated: true },
-      { headers: { "Cache-Control": "private, no-store" } },
-    );
+    await clearBinding();
+    logRecovery("info", "auth.recovery_completed", { requestId, phase: "complete", changeState: "changed" });
+    return NextResponse.json({ authenticated: true }, { headers });
   } catch (error) {
     if (error instanceof LocalAuthError && error.code === "invalid_input") {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ error: "Revisa los requisitos de la contraseña.", code: "recovery_invalid_input", nextStep: "retry" }, { status: 400, headers });
     }
-    if (error instanceof IdentityProviderError && error.code === "provider_unavailable") {
-      return NextResponse.json({ error: "El servei d’identitat no està disponible." }, { status: 503 });
-    }
-    return NextResponse.json({ error: "L’enllaç de recuperació no és vàlid o ha caducat." }, { status: 401 });
+    const failure = recoveryFailureResponse(error, phase, completed);
+    if (failure.nextStep !== "retry") await clearBinding();
+    const attributes = { requestId, ...failure.diagnostics, httpStatus: failure.status, nextStep: failure.nextStep };
+    if (failure.status >= 500) logRecovery("error", "auth.recovery_failed", attributes);
+    else logRecovery("warn", "auth.recovery_failed", attributes);
+    return NextResponse.json({ error: "No se ha podido completar la recuperación.", code: failure.code, nextStep: failure.nextStep }, { status: failure.status, headers });
   }
 }

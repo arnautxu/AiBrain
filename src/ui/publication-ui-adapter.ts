@@ -1,3 +1,4 @@
+
 export type PublicationStatus =
   | "awaiting_confirmation"
   | "publishing"
@@ -28,7 +29,7 @@ export type DocumentPublicationDraft = {
   fileName: string;
   size: number;
   targetRelativePath: string;
-  phase: "ready" | "freezing" | "awaiting_confirmation" | "deciding" | "published" | "declined" | "expired" | "conflict" | "error";
+  phase: "ready" | "freezing" | "awaiting_confirmation" | "uncertain" | "deciding" | "published" | "declined" | "expired" | "conflict" | "error";
   operation: PublicationOperationView | null;
   confirmationToken: string | null;
   permissionFingerprint: string | null;
@@ -213,4 +214,25 @@ export async function decideDocumentPublication(
     throw new Error("La decisión de publicación no cumple el contrato seguro.");
   }
   return parsed;
+}
+
+export async function recoverDocumentPublications(threadId: string, signal?: AbortSignal): Promise<DocumentPublicationDraft[]> {
+  if (!UUID.test(threadId)) throw new Error("Conversación no válida.");
+  const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/publications`, { cache: "no-store", signal });
+  if (!response.ok) throw new Error(await responseError(response));
+  const body = record(await response.json());
+  if (!body || !exactKeys(body, ["publications"]) || !Array.isArray(body.publications) || body.publications.length > 1000) throw new Error("Listado de publicaciones no válido.");
+  const seen = new Set<string>();
+  return body.publications.map((value: unknown) => {
+    const entry = record(value); const op = parseOperation(entry?.operation);
+    if (!entry || !exactKeys(entry, ["operation", "confirmationToken"]) || !op || op.threadId !== threadId ||
+        seen.has(op.operationId) ||
+        typeof entry.confirmationToken !== "string" || !SHA256.test(entry.confirmationToken)) throw new Error("Publicación recuperada no válida.");
+    seen.add(op.operationId);
+    const raw = entry.operation as { preview: { previewId: string } };
+    return { id: `remote-${op.operationId}`, threadId, turnId: op.turnId, uploadId: raw.preview.previewId,
+      fileName: op.candidate.fileName, size: op.candidate.size, targetRelativePath: op.targetRelativePath,
+      phase: op.status === "publishing" ? "uncertain" : op.status,
+      operation: op, confirmationToken: entry.confirmationToken, permissionFingerprint: null, error: null };
+  });
 }

@@ -27,6 +27,7 @@ import type {
   ManagedWorkerRuntime,
   WorkerLaunchContext,
   WorkerRuntimeFactory,
+  WorkerControllerHealth,
 } from "@/runtime/workers/types";
 
 const temporaryRoots: string[] = [];
@@ -125,7 +126,7 @@ class FakeRuntime implements ManagedWorkerRuntime {
     this.started = true;
   }
 
-  async health() {
+  async health(): Promise<WorkerControllerHealth> {
     return {
       healthy: this.started,
       state: this.started ? "running" as const : "stopped" as const,
@@ -272,6 +273,30 @@ describe("WorkerProvisioner", () => {
     expect(await readFile(sourcePath, "utf8")).toContain("secret-b");
   });
 
+  it("keeps authorized Officeexample owner authentication private and preserves per-home refreshes", async () => {
+    const { config: base } = await fixture();
+    const config = { ...base, installationId: "officeexample-production" };
+    const sourcePath = path.join(config.paths.dataRoot, "installation-owner-auth", "auth.json");
+    await mkdir(path.dirname(sourcePath), { recursive: true, mode: 0o700 });
+    await writeFile(sourcePath, JSON.stringify({ tokens: { test: "owner-original" } }), { mode: 0o600 });
+    expect(() => new WorkerProvisioner({ config: base, sharedCodexAuth: { scope: "installation-owner", sourcePath } })).toThrowError(expect.objectContaining({ code: "WORKER_SHARED_AUTH_CONFIG_INVALID" }));
+    const provisioner = new WorkerProvisioner({ config, sharedCodexAuth: { scope: "installation-owner", sourcePath } });
+    const [first, second] = await Promise.all([provisioner.provision(syntheticUser(1)), provisioner.provision(syntheticUser(2))]);
+    expect(first.roots.codexHome).not.toBe(second.roots.codexHome);
+    const target = path.join(first.roots.codexHome, "auth.json");
+    await writeFile(target, JSON.stringify({ tokens: { test: "provider-refreshed" } }), { mode: 0o600 });
+    await provisioner.provision(first.userId);
+    expect(await readFile(target, "utf8")).toContain("provider-refreshed");
+    expect(await readFile(path.join(second.roots.codexHome, "auth.json"), "utf8")).toContain("owner-original");
+    await writeFile(sourcePath, JSON.stringify({ tokens: { test: "operator-rotation" } }), { mode: 0o600 });
+    await provisioner.provision(first.userId);
+    expect(await readFile(target, "utf8")).toContain("operator-rotation");
+    const receipt = await readFile(path.join(first.roots.auditRoot, "codex-auth-scope.json"), "utf8");
+    expect(receipt).toContain('"scope": "installation-owner"');
+    expect(receipt).not.toContain("operator-rotation");
+    expect(await mode(target)).toBe(0o600);
+  });
+
   it("rejects unsafe shared Codex credential sources", async () => {
     const { root, config } = await fixture();
     const outside = path.join(root, "outside-auth.json");
@@ -291,12 +316,40 @@ describe("WorkerProvisioner", () => {
 
     const insecure = path.join(config.paths.dataRoot, "auth.json");
     await writeFile(insecure, "{}", { mode: 0o644 });
+    // Creation mode is filtered by umask. Make the intentionally unsafe fixture
+    // exact even under Cloud's private 0077 mask; production must still reject it.
+    await chmod(insecure, 0o644);
+    expect(await mode(insecure)).toBe(0o644);
     await expect(new WorkerProvisioner({
       config,
       sharedCodexAuth: { scope: "shared-qa", sourcePath: insecure },
     }).provision(syntheticUser(4))).rejects.toMatchObject({
       code: "WORKER_SHARED_AUTH_SOURCE_UNSAFE",
     });
+  });
+
+  it("migrates only receipted owner credentials to external access without copying a refresh token", async () => {
+    const { config: base } = await fixture();
+    const config = { ...base, installationId: "officeexample-production" };
+    const sourcePath = path.join(config.paths.dataRoot, "installation-owner-auth", "auth.json");
+    await mkdir(path.dirname(sourcePath), { recursive: true, mode: 0o700 });
+    await writeFile(sourcePath, JSON.stringify({ tokens: { refresh_token: "never-duplicate-me" } }), { mode: 0o600 });
+    const provisioner = new WorkerProvisioner({ config, sharedCodexAuth: { scope: "installation-owner", sourcePath } });
+    const first = await provisioner.provision(syntheticUser(1));
+    vi.stubEnv("AIBRAIN_CODEX_OWNER_AUTH_SOCKET", "/run/officeexample-owner-auth/broker.sock");
+    vi.stubEnv("AIBRAIN_CODEX_AUTH_SCOPE", "installation-owner");
+    vi.stubEnv("AIBRAIN_INSTALLATION_OWNER_AUTH_ACK", "officeexample-production");
+    try {
+      await provisioner.provision(first.userId);
+      await expect(lstat(path.join(first.roots.codexHome, "auth.json"))).rejects.toMatchObject({ code: "ENOENT" });
+      await provisioner.provision(first.userId);
+      const second = await provisioner.provision(syntheticUser(2));
+      await expect(lstat(path.join(second.roots.codexHome, "auth.json"))).rejects.toMatchObject({ code: "ENOENT" });
+      await writeFile(path.join(second.roots.codexHome, "auth.json"), "{}", { mode: 0o600 });
+      await writeFile(path.join(second.roots.auditRoot, "codex-auth-scope.json"), JSON.stringify({ scope: "per-user", userId: second.userId }));
+      await expect(provisioner.provision(second.userId)).rejects.toMatchObject({ code: "WORKER_SHARED_AUTH_SOURCE_UNSAFE" });
+      expect(await readFile(path.join(second.roots.codexHome, "auth.json"), "utf8")).toBe("{}");
+    } finally { vi.unstubAllEnvs(); }
   });
 
   it("resolves only normalized paths without existing symlink components", async () => {
@@ -322,6 +375,119 @@ describe("WorkerProvisioner", () => {
 });
 
 describe("WorkerRuntimeRegistry", () => {
+  it.each(["stopped", "failed"] as const)("replaces a confirmed %s generation once across concurrent starts", async (state) => {
+    const { config } = await fixture();
+    const factory = new RecordingFactory();
+    const registry = new WorkerRuntimeRegistry({ config, factory });
+    try {
+      const original = await registry.start(syntheticUser(1));
+      vi.spyOn(factory.runtimes[0], "health").mockResolvedValue({ healthy: false, state });
+      const handles = await Promise.all(Array.from({ length: 8 }, () => registry.start(syntheticUser(1))));
+      expect(factory.runtimes).toHaveLength(2);
+      expect(new Set(handles)).toHaveLength(1);
+      expect(handles[0].transport).not.toBe(original.transport);
+      expect(handles[0].roots).toEqual(original.roots);
+      expect(factory.runtimes[0].stopCalls).toBe(1);
+      expect(factory.runtimes[0].transport.closeCalls).toBe(1);
+    } finally { await registry.close(); }
+  });
+
+  it("keeps a live generation through transport loss and nonterminal degradation", async () => {
+    const { config } = await fixture();
+    const factory = new RecordingFactory();
+    const registry = new WorkerRuntimeRegistry({ config, factory });
+    try {
+      const original = await registry.start(syntheticUser(1));
+      factory.runtimes[0].transport.connected = false;
+      expect(await registry.start(syntheticUser(1))).toBe(original);
+      vi.spyOn(factory.runtimes[0], "health").mockResolvedValue({ healthy: false, state: "degraded" });
+      expect(await registry.start(syntheticUser(1))).toBe(original);
+      expect(factory.runtimes).toHaveLength(1);
+      expect(factory.runtimes[0].stopCalls).toBe(0);
+    } finally { await registry.close(); }
+  });
+
+  it("does not replace a generation when its health cannot be established", async () => {
+    const { config } = await fixture();
+    const factory = new RecordingFactory();
+    const registry = new WorkerRuntimeRegistry({ config, factory });
+    try {
+      await registry.start(syntheticUser(1));
+      vi.spyOn(factory.runtimes[0], "health").mockRejectedValue(new Error("health unavailable"));
+      await expect(registry.start(syntheticUser(1))).rejects.toThrow("could not be confirmed");
+      expect(factory.runtimes).toHaveLength(1);
+      expect(factory.runtimes[0].stopCalls).toBe(0);
+    } finally { await registry.close(); }
+  });
+
+  it("retains ownership after recovery cleanup fails and permits explicit cleanup", async () => {
+    const { config } = await fixture();
+    const factory = new RecordingFactory();
+    const registry = new WorkerRuntimeRegistry({ config, factory });
+    try {
+      await registry.start(syntheticUser(1));
+      factory.runtimes[0].started = false;
+      vi.spyOn(factory.runtimes[0], "stop").mockRejectedValueOnce(new Error("cleanup unconfirmed"));
+      await expect(registry.start(syntheticUser(1))).rejects.toThrow("cleanup unconfirmed");
+      await expect(registry.start(syntheticUser(1))).rejects.toThrow("cleanup must complete");
+      expect(factory.runtimes).toHaveLength(1);
+      await registry.stop(syntheticUser(1));
+      await registry.start(syntheticUser(1));
+      expect(factory.runtimes).toHaveLength(2);
+    } finally { await registry.close(); }
+  });
+
+  it.each(["stop", "close"] as const)("fences recovery when %s is requested during the health check", async (operation) => {
+    const { config } = await fixture();
+    const factory = new RecordingFactory();
+    const registry = new WorkerRuntimeRegistry({ config, factory });
+    await registry.start(syntheticUser(1));
+    const gate = deferred();
+    vi.spyOn(factory.runtimes[0], "health").mockImplementation(async () => {
+      await gate.promise;
+      return { healthy: false, state: "failed" };
+    });
+    const start = registry.start(syntheticUser(1)).catch((error: unknown) => error);
+    const stopping = operation === "close" ? registry.close() : registry.stop(syntheticUser(1));
+    gate.resolve();
+    expect(await start).toMatchObject({ message: "Worker recovery was cancelled." });
+    await stopping;
+    expect(factory.runtimes).toHaveLength(1);
+    expect(factory.runtimes[0].stopCalls).toBe(1);
+    expect((await registry.health(syntheticUser(1))).state).toBe("stopped");
+    await registry.close();
+  });
+
+  it("recovers a killed real process without stopping another employee or losing files", async () => {
+    const { config } = await fixture();
+    const children: ReturnType<typeof spawn>[] = [];
+    const registry = new WorkerRuntimeRegistry({
+      config,
+      factory: new LocalGatewayWorkerRuntimeFactory({ processFactory: () => {
+        const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+          stdio: ["pipe", "pipe", "pipe"], env: { NODE_ENV: "test" },
+        });
+        children.push(child);
+        return child;
+      } }),
+    });
+    try {
+      const first = await registry.start(syntheticUser(1));
+      const other = await registry.start(syntheticUser(2));
+      const document = path.join(first.roots.workspace, "retained.txt");
+      await writeFile(document, "retained across process recovery");
+      children[0].kill("SIGKILL");
+      await vi.waitFor(async () => expect((await registry.health(syntheticUser(1))).controller?.state).toBe("failed"));
+      const recovered = await registry.start(syntheticUser(1));
+      expect(recovered.transport).not.toBe(first.transport);
+      expect(await readFile(document, "utf8")).toBe("retained across process recovery");
+      expect(await registry.start(syntheticUser(2))).toBe(other);
+      expect(children[1].exitCode).toBeNull();
+      expect(children[1].signalCode).toBeNull();
+      expect(children).toHaveLength(3);
+    } finally { await registry.close(); }
+  });
+
   it("drains admitted work and rejects new worker starts during maintenance", async () => {
     const { config } = await fixture();
     const maintenance = new MaintenanceCoordinator();
@@ -503,6 +669,13 @@ describe("WorkerRuntimeRegistry", () => {
     let release!: () => void;
     const blocked = new Promise<void>((resolve) => { release = resolve; });
     const original = PrivateWorkerGateway.prototype.start;
+    const originalStop = PrivateWorkerGateway.prototype.stop;
+    let cleanupEntered!: () => void;
+    const cleaning = new Promise<void>((resolve) => { cleanupEntered = resolve; });
+    const stopSpy = vi.spyOn(PrivateWorkerGateway.prototype, "stop").mockImplementation(function(this: PrivateWorkerGateway) {
+      cleanupEntered();
+      return originalStop.call(this);
+    });
     let staleStart: Promise<void> | undefined;
     const spy = vi.spyOn(PrivateWorkerGateway.prototype, "start").mockImplementationOnce(function(this: PrivateWorkerGateway) {
       vi.spyOn((this as unknown as { events: { verifyAndRepair(): Promise<void> } }).events, "verifyAndRepair").mockImplementation(() => blocked);
@@ -513,18 +686,23 @@ describe("WorkerRuntimeRegistry", () => {
     // Give the subsequent real filesystem/process startups a CI-sized budget.
     const registry = new WorkerRuntimeRegistry({ config, factory: new LocalGatewayWorkerRuntimeFactory({ processFactory }), workerConnectTimeoutMs: 2_000 });
     try {
-      await expect(registry.start(syntheticUser(1))).rejects.toThrow(/connect in time/);
+      const starting = registry.start(syntheticUser(1));
+      const rejected = expect(starting).rejects.toThrow(/connect in time/);
+      await cleaning;
+      // Cleanup must drain the in-flight journal repair before retrying.
+      // Releasing it only after awaiting start() deadlocks this fixture.
       expect(processFactory).not.toHaveBeenCalled();
+      release();
+      await rejected;
       const replacement = await registry.start(syntheticUser(1));
       await registry.start(syntheticUser(2));
-      release();
       await expect(staleStart).rejects.toThrow(/cancelled/);
       expect(processFactory).toHaveBeenCalledTimes(2);
       expect(registry.get(syntheticUser(1))).toBe(replacement);
       await registry.stop(syntheticUser(1));
       expect((await registry.health(syntheticUser(2))).healthy).toBe(true);
-    } finally { release(); spy.mockRestore(); await staleStart?.catch(() => undefined); await registry.close(); }
-  });
+    } finally { release(); spy.mockRestore(); stopSpy.mockRestore(); await staleStart?.catch(() => undefined); await registry.close(); }
+  }, 10_000);
 
   it("recovers durable roots in a new registry and rejects factory object reuse", async () => {
     const { config } = await fixture();

@@ -1,5 +1,6 @@
 import { chmod, lstat, mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import {
   applyChatStreamEvent,
   isChatMessage,
@@ -27,6 +28,9 @@ const INSTALLATION_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const EVENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const PROJECTION_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/;
 const MAX_PROJECTION_BYTES = 64 * 1024 * 1024;
+// A single completed tool item can supply 100 sources plus its result and
+// activity events. Keep the cursor bounded without rejecting that fan-out.
+const MAX_KEYS_PER_TRANSPORT_EVENT = 128;
 
 export type TurnProjection = {
   schemaVersion: 1;
@@ -146,7 +150,7 @@ const turnProjectionSchema = defineVersionedSchema<TurnProjection>({
           maxLength: 512,
           pattern: PROJECTION_KEY_PATTERN,
         }),
-        { maxLength: 32 },
+        { maxLength: MAX_KEYS_PER_TRANSPORT_EVENT },
       ),
       localRevision: expectInteger(record.localRevision, context.at("localRevision"), { minimum: 0 }),
       runtimeThreadToken: nullableSafeString(record.runtimeThreadToken, context.at("runtimeThreadToken"), 2_048),
@@ -175,6 +179,20 @@ const turnProjectionSchema = defineVersionedSchema<TurnProjection>({
     return projection;
   },
 });
+
+export function isUnboundTurnBefore(projection: TurnProjection, restartedAt: string, preparedSourceName?: string) {
+  const cutoff = Date.parse(restartedAt);
+  const message = projection.message;
+  const preparedSources = (message.sources ?? []).every(source =>
+    preparedSourceName !== undefined && source.kind === "file" && source.title === preparedSourceName &&
+    source.id.startsWith("source-file-") && isUuid(source.id.slice("source-file-".length)) &&
+    source.url === null && source.domain === null && source.publishedAt === null);
+  return Number.isFinite(cutoff) && cutoff <= Date.now() && Date.parse(projection.updatedAt) < cutoff &&
+    projection.runtimeThreadToken === null && projection.runtimeTurnId === null && projection.lastTransportSequence === 0 &&
+    message.status === "streaming" && message.content === "" && !message.approvals.length && !message.artifacts.length &&
+    !message.attachments.length && !message.diff && !message.toolResults?.length && preparedSources && !message.plan.length &&
+    message.activity.every(item => item.kind === "system" && item.id.startsWith("runtime-"));
+}
 
 export class FileTurnProjectionStore {
   readonly installationId: string;
@@ -382,7 +400,7 @@ export class FileTurnProjectionStore {
         } else {
           keys = [];
         }
-        if (keys.length >= 32) {
+        if (keys.length >= MAX_KEYS_PER_TRANSPORT_EVENT) {
           throw new WorkbenchPersistenceError("La seqüència supera el límit de projeccions.");
         }
         // Events are validated above; validate the complete accumulated
@@ -422,6 +440,46 @@ export class FileTurnProjectionStore {
         ...projection,
         localRevision: projection.localRevision + 1,
         message: applyChatStreamEvent(projection.message, event),
+        updatedAt: new Date().toISOString(),
+      });
+      await this.write(identity.filePath, next);
+      return next;
+    });
+  }
+
+  /** Operator recovery after a verified app restart; never completes work. */
+  async stopUnboundTurnBefore(
+    threadId: string,
+    assistantMessageId: string,
+    options: { restartedAt: string; expectedDigest: string; preparedSourceName?: string },
+  ) {
+    const cutoff = Date.parse(options.restartedAt);
+    if (!Number.isFinite(cutoff) || cutoff > Date.now() ||
+        !/^[a-f0-9]{64}$/.test(options.expectedDigest)) {
+      throw new WorkbenchPersistenceError("La prova de recuperació no és vàlida.");
+    }
+    const identity = await this.prepare(threadId, assistantMessageId);
+    return this.locks.withLock(identity.lockKey, async () => {
+      const projection = await this.readUnlocked(identity.filePath);
+      if (!projection) throw new WorkbenchPersistenceError("La projecció del torn no existeix.");
+      this.assertBinding(projection, threadId, assistantMessageId);
+      const digest = createHash("sha256").update(JSON.stringify(projection)).digest("hex");
+      const message = projection.message;
+      if (digest !== options.expectedDigest || !isUnboundTurnBefore(projection, options.restartedAt, options.preparedSourceName)) {
+        throw new WorkbenchPersistenceError("El torn no és un inici abandonat sense execució.");
+      }
+      const recoveredMessage: ChatMessage = {
+        ...message,
+        content: "Ejecución interrumpida antes de iniciar el análisis, durante una versión anterior del servicio. No hay resultado ni acciones ejecutadas por este turno.",
+        status: "stopped",
+        activity: message.activity.map(item =>
+          ["pending", "running", "waiting"].includes(item.status)
+            ? { ...item, status: "stopped" as const } : item),
+      };
+      const next = turnProjectionSchema.parse({
+        ...projection,
+        localRevision: projection.localRevision + 1,
+        message: recoveredMessage,
         updatedAt: new Date().toISOString(),
       });
       await this.write(identity.filePath, next);

@@ -28,7 +28,7 @@ import { resolveServerTurnPermissions } from "@/runtime/permission-turn";
 import type { ResolvedPermissions } from "@/permissions";
 import { FileApprovalStore } from "@/runtime/approval-store";
 import {
-  CURRENT_THREAD_TOOLSET_REVISION,
+  currentThreadToolsetRevision,
   readThreadTokenContext,
 } from "@/runtime/thread-token";
 import { runtimeThreadIdForChatMessage } from "@/runtime/chat-thread-selection";
@@ -67,7 +67,7 @@ import {
 import { recordTurnUsage } from "@/usage/server-service";
 import type { TokenUsageBreakdown } from "@/usage/contracts";
 import { featurePolicyForUser } from "@/settings/server-service";
-import { isComposerExperience } from "@/lib/composer-experience";
+import { normalizeComposerExperience } from "@/lib/composer-experience";
 import { resolveServerComposerExperience } from "@/runtime/composer-experience";
 
 export const runtime = "nodejs";
@@ -307,11 +307,13 @@ export async function POST(request: Request) {
     !isUuid(body.userMessageId) || !isUuid(body.assistantMessageId)) {
     return NextResponse.json({ error: "La petició de xat no és vàlida." }, { status: 400 });
   }
-  if (!isComposerExperience(body.options.experience) ||
+  const experience = normalizeComposerExperience(body.options.experience);
+  if (!experience ||
     body.options.model !== null || body.options.effort !== null) {
     return NextResponse.json({ error: "Selecciona una experiència vàlida." }, { status: 400 });
   }
-  const privateExperience = resolveServerComposerExperience(body.options.experience);
+  body.options.experience = experience;
+  const privateExperience = resolveServerComposerExperience(experience);
   body.options.model = privateExperience.model;
   body.options.effort = privateExperience.effort;
   const setupCorrelation = {
@@ -410,13 +412,13 @@ export async function POST(request: Request) {
       { status: 409 },
     );
   }
-  const runtimeThreadId = runtimeThreadIdForChatMessage(runtimeThreadContext, body.message);
+  const runtimeThreadId = runtimeThreadIdForChatMessage(runtimeThreadContext, body.message, session.tenant.id);
   const rebootstrapToolsetThread = Boolean(runtimeThreadContext && !runtimeThreadId);
   if (rebootstrapToolsetThread) {
     operationalLogger.info("chat.runtime_thread_toolset_upgrade", {
       ...setupCorrelation,
       fromRevision: runtimeThreadContext?.toolsetRevision ?? "legacy",
-      toRevision: CURRENT_THREAD_TOOLSET_REVISION,
+      toRevision: currentThreadToolsetRevision(session.tenant.id),
       reason: "runtime-toolset-upgrade-required",
     });
   }
@@ -787,12 +789,14 @@ export async function POST(request: Request) {
               : context,
             requestStartedAt,
             streamTelemetry,
+            // Keep automation-management tools and the foreground identity
+            // bound to this authenticated session. Background stays false.
             session,
-            undefined,
+            session,
             false,
             runtimeThreadContext
               ? runtimeThreadContext.toolsetRevision
-              : CURRENT_THREAD_TOOLSET_REVISION,
+              : currentThreadToolsetRevision(session.tenant.id),
             turnOutcome === "existing",
           );
         } else {

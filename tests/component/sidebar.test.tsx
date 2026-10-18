@@ -8,6 +8,7 @@ import type { AuthSession } from "@/auth/types";
 import type { PublicInstallationBranding } from "@/config/installation-branding";
 import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
 import { STANDALONE_PROJECT_SLUG } from "@/workbench/types";
+import type { ThreadActivity } from "@/workbench/thread-activity";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/components/ui/primitives", async (importOriginal) => {
@@ -63,7 +64,7 @@ function thread(id: string, projectId: string, title: string): WorkbenchThread {
   };
 }
 
-function renderSidebar(running = false, pinnedIds: string[] = [], extraThreads: WorkbenchThread[] = []) {
+function renderSidebar(running = false, pinnedIds: string[] = [], extraThreads: WorkbenchThread[] = [], extraActivities: Record<string, ThreadActivity> = {}, cms?: { session: AuthSession; installationId: string; authorized: boolean }) {
   const onNewThread = vi.fn();
   const onSelectThread = vi.fn();
   const onThreadAction = vi.fn();
@@ -87,8 +88,12 @@ function renderSidebar(running = false, pinnedIds: string[] = [], extraThreads: 
 
   render(
     <Sidebar
-      branding={branding}
-      session={session}
+      branding={cms ? { ...branding, installationId: cms.installationId } : branding}
+      session={cms?.session ?? session}
+      transportexampleWorkspaceAccess={cms?.authorized}
+      onOpenCMS={cms ? vi.fn() : undefined}
+      onOpenPriceIndex={cms ? vi.fn() : undefined}
+      onOpenDirectory={cms ? vi.fn() : undefined}
       projects={[operations, product, standalone]}
       threads={orderedThreads}
       activeProjectId={operations.id}
@@ -96,7 +101,7 @@ function renderSidebar(running = false, pinnedIds: string[] = [], extraThreads: 
       mobileOpen={false}
       desktopOpen
       busy={false}
-      threadActivityById={running ? { "thread-plan": { state: "running", unreadCount: 0 } } : {}}
+      threadActivityById={{ ...extraActivities, ...(running ? { "thread-plan": { state: "running", unreadCount: 0 } as ThreadActivity } : {}) }}
       onCloseMobile={vi.fn()}
       onCloseDesktop={vi.fn()}
       onOpenDesktop={vi.fn()}
@@ -133,6 +138,42 @@ describe("Sidebar", () => {
     expect(within(list).queryByRole("button", { name: "Recent 11" })).not.toBeInTheDocument();
     fireEvent.click(within(list).getByRole("button", { name: "Ver más conversaciones" }));
     expect(within(list).getByRole("button", { name: "Recent 11" })).toBeInTheDocument();
+  });
+
+  it("bounds a large unread automation history while keeping the selected chat and approvals visible", () => {
+    const history = Array.from({ length: 1_000 }, (_, i) => ({
+      ...thread(`automation-${i}`, "project-operations", `Automation ${i}`),
+      updatedAt: "2026-08-29T08:00:00.000Z",
+    }));
+    const approval = thread("old-approval", "project-operations", "Pending exact approval");
+    const activities = Object.fromEntries(history.map((item) => [item.id, { state: "completed", unreadCount: 1 } as ThreadActivity]));
+    activities[approval.id] = { state: "needs_attention", unreadCount: 1 };
+    renderSidebar(true, [], [...history, approval], activities);
+    const list = screen.getByLabelText("Chats de Operaciones");
+    expect(within(list).getAllByTestId("sidebar-project-thread")).toHaveLength(22);
+    expect(within(list).getByRole("button", { name: /^Plan semanal/ })).toBeInTheDocument();
+    expect(within(list).getByRole("button", { name: /^Pending exact approval/ })).toBeInTheDocument();
+    expect(within(list).queryByText("Automation 999")).not.toBeInTheDocument();
+    fireEvent.click(within(list).getByRole("button", { name: "Ver más conversaciones · Operaciones" }));
+    expect(within(list).getAllByTestId("sidebar-project-thread")).toHaveLength(42);
+    expect(within(list).getByText("Automation 39")).toBeInTheDocument();
+  });
+
+  it("reveals older project conversations independently for each project", () => {
+    const history = ["operations", "product"].flatMap((name) => Array.from({ length: 50 }, (_, i) => ({
+      ...thread(`${name}-${i}`, `project-${name}`, `${name} ${i}`),
+      updatedAt: "2026-08-29T08:00:00.000Z",
+    })));
+    const { onSelectThread } = renderSidebar(false, [], history);
+    fireEvent.click(screen.getByRole("button", { name: "Expandir Producto" }));
+    const operations = screen.getByLabelText("Chats de Operaciones");
+    const product = screen.getByLabelText("Chats de Producto");
+    fireEvent.click(within(operations).getByRole("button", { name: "Ver más conversaciones · Operaciones" }));
+    expect(within(operations).getByText("operations 39")).toBeInTheDocument();
+    expect(within(product).queryByText("product 39")).not.toBeInTheDocument();
+    fireEvent.click(within(product).getByRole("button", { name: "Ver más conversaciones · Producto" }));
+    fireEvent.click(within(product).getByRole("button", { name: "product 39" }));
+    expect(onSelectThread).toHaveBeenCalledWith("product-39");
   });
 
   it("keeps navigation and new chats enabled while the selected chat works", () => {
@@ -242,6 +283,17 @@ describe("Sidebar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Nueva conversación independiente" }));
     expect(onNewThread).toHaveBeenNthCalledWith(1, "project-operations");
     expect(onNewThread).toHaveBeenNthCalledWith(2);
+  });
+
+  it.each([false, true])("keeps one durable identity for a pinned chat while running=%s", (running) => {
+    renderSidebar(running, ["thread-plan"]);
+    const pinned = screen.getByRole("region", { name: "Anclados" });
+    const identity = '[data-thread-id="thread-plan"]';
+    expect(document.querySelectorAll(identity)).toHaveLength(1);
+    const row = pinned.querySelector(identity);
+    expect(row).toBeVisible();
+    expect(row).toHaveTextContent("Plan semanal");
+    if (running) expect(within(row as HTMLElement).getByLabelText("Trabajando")).toBeInTheDocument();
   });
 
   it("shows pinned chats once above projects and chats in their durable order", () => {

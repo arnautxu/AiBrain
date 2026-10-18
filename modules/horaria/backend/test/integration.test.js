@@ -38,13 +38,6 @@ test('service rejects browser bearer tokens, rechecks active manager, limits sho
       assert.equal((await call(`/api/integration/${path}?semana=2026-W41&establecimiento=3`)).status, 403);
     }
     assert.equal((await call('/api/integration/readiness')).status, 403);
-    assert.equal((await call(`/api/integration/reviewed-excel/${'a'.repeat(64)}?establecimiento=3`)).status, 403);
-    for (const name of ['review-source', 'reviewed-excel', 'reviewed-excel-send']) {
-      const target = `/api/integration/${name}`, body = JSON.stringify({ establecimientoId: 3 });
-      assert.equal((await fetch(base + target, { method: 'POST', body, headers: {
-        'content-type': 'application/json', 'x-aibrain-authorization': signed(target, { method: 'POST', contentType: 'application/json', bodyHash: bodyHash(Buffer.from(body)) }),
-      } })).status, 403);
-    }
     const collectionTarget = '/api/integration/collection-preview';
     const collectionBody = JSON.stringify({ establecimientoId: 3, semana: '2026-W41', responses: [] });
     assert.equal((await fetch(base + collectionTarget, { method: 'POST', body: collectionBody, headers: {

@@ -135,7 +135,7 @@ export type GeneratedArtifact = ImageArtifact | DocumentArtifact | BrowserArtifa
 export type TurnOptions = {
   mode: ComposerMode;
   /** Employee-facing product choice. Provider settings are resolved server-side. */
-  experience?: ComposerExperience;
+  experience?: ComposerExperience | "fast";
   model: string | null;
   effort: RuntimeReasoningEffort | null;
   autoApprove?: boolean;
@@ -161,9 +161,12 @@ export type ApprovalItem = {
   kind: "command" | "file" | "browser";
   title: string;
   detail: string;
+  fileReview?: { filename: string; changes: Array<{ before: string; after: string }> };
   command?: string;
   cwd?: string;
   permissionFingerprint?: string;
+  connectorAuthorizationFingerprint?: string;
+  authorizationFingerprint?: string;
   status: "pending" | "accepted" | "accepted_session" | "declined";
 };
 
@@ -221,6 +224,15 @@ export type ConnectorApprovalResolutionRequest = {
   decision: "accept" | "decline" | "cancel" | "acceptForSession";
   authorizationFingerprint: string;
 };
+
+export function approvalResolutionForItem(item: ApprovalItem, decision: ApprovalDecision): ApprovalResolutionRequest | ConnectorApprovalResolutionRequest {
+  const routing = { approvalId: item.id, threadId: item.threadId, turnId: item.turnId, itemId: item.itemId, decision };
+  if (item.connectorAuthorizationFingerprint && item.authorizationFingerprint && item.connectorAuthorizationFingerprint !== item.authorizationFingerprint) {
+    throw new Error("Conflicting connector authorization fingerprints.");
+  }
+  const fingerprint = item.connectorAuthorizationFingerprint ?? item.authorizationFingerprint;
+  return fingerprint ? { ...routing, authorizationFingerprint: fingerprint } : routing;
+}
 
 export type TurnControlRequest =
   | {
@@ -354,7 +366,7 @@ export function isChatAttachment(value: unknown): value is ChatAttachment {
     value.name.trim().length > 0 &&
     value.name.length <= 120 &&
     typeof value.mimeType === "string" &&
-    /^(?:image\/(?:png|jpeg|webp|gif)|application\/(?:pdf|vnd\.ms-excel|vnd\.openxmlformats-officedocument\.(?:wordprocessingml\.document|spreadsheetml\.sheet|presentationml\.presentation))|text\/(?:plain|markdown|csv)|application\/json)$/.test(value.mimeType) &&
+    /^(?:audio\/ogg|image\/(?:png|jpeg|webp|gif)|application\/(?:pdf|vnd\.ms-excel|vnd\.openxmlformats-officedocument\.(?:wordprocessingml\.document|spreadsheetml\.sheet|presentationml\.presentation))|text\/(?:plain|markdown|csv)|application\/json)$/.test(value.mimeType) &&
     typeof value.size === "number" &&
     Number.isSafeInteger(value.size) &&
     value.size > 0 &&
@@ -521,10 +533,20 @@ export function isApprovalItem(value: unknown): value is ApprovalItem {
     (value.kind === "command" || value.kind === "file" || value.kind === "browser") &&
     typeof value.title === "string" &&
     typeof value.detail === "string" &&
+    (!("fileReview" in value) || value.fileReview === undefined ||
+      (isRecord(value.fileReview) && typeof value.fileReview.filename === "string" && value.fileReview.filename.length > 0 && value.fileReview.filename.length <= 180 &&
+        Array.isArray(value.fileReview.changes) && value.fileReview.changes.length > 0 && value.fileReview.changes.length <= 40 &&
+        value.fileReview.changes.every((change) => isRecord(change) && typeof change.before === "string" && typeof change.after === "string") &&
+        value.fileReview.changes.reduce((length, change) => length + (change as { before: string; after: string }).before.length + (change as { before: string; after: string }).after.length, 0) <= 32_000)) &&
     hasOptionalString(value, "command") &&
     hasOptionalString(value, "cwd") &&
     (!("permissionFingerprint" in value) || value.permissionFingerprint === undefined ||
       (typeof value.permissionFingerprint === "string" && /^[0-9a-f]{64}$/u.test(value.permissionFingerprint))) &&
+    (!("connectorAuthorizationFingerprint" in value) || value.connectorAuthorizationFingerprint === undefined ||
+      (typeof value.connectorAuthorizationFingerprint === "string" && /^[0-9a-f]{64}$/u.test(value.connectorAuthorizationFingerprint))) &&
+    (!("authorizationFingerprint" in value) || value.authorizationFingerprint === undefined ||
+      (typeof value.authorizationFingerprint === "string" && /^[0-9a-f]{64}$/u.test(value.authorizationFingerprint))) &&
+    (!value.connectorAuthorizationFingerprint || !value.authorizationFingerprint || value.connectorAuthorizationFingerprint === value.authorizationFingerprint) &&
     (value.status === "pending" ||
       value.status === "accepted" ||
       value.status === "accepted_session" ||

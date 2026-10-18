@@ -17,7 +17,7 @@ import {
 } from "@/storage/schema";
 
 const appServerEventSchema: StorageSchema<AppServerEvent> = Object.freeze({
-  name: "AppServerEvent@codex-0.153.4",
+  name: "AppServerEvent@codex-0.162.1",
   parse(value: unknown) {
     return parseAppServerEvent(value);
   },

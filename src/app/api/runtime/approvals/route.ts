@@ -58,8 +58,9 @@ export async function POST(request: Request) {
       }
       if (connectorResolution.decision === "accept") {
         const result = await store.approveConnectorApprovalByLocator(locator, connectorResolution.authorizationFingerprint);
-        if (result.outcome === "approved" || result.outcome === "already-approved") {
-          return NextResponse.json({ ok: true, status: "approved" });
+        if (result.outcome === "approved" || result.outcome === "already-approved" ||
+            result.record?.status === "executed" && connector.authorizationFingerprint === connectorResolution.authorizationFingerprint) {
+          return NextResponse.json({ ok: true, status: "approved",  });
         }
         return NextResponse.json(
           { error: "Aquesta approval de connector ja no està pendent." },

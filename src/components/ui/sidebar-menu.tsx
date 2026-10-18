@@ -263,22 +263,36 @@ function useMenuScope(containerRef: RefObject<HTMLElement | null>): MenuScope {
   const popupOpen = useCallback(() => {
     const container = containerRef.current;
     if (!container) return false;
-    const root = container.closest('[data-slot="sidebar-wrapper"]') ?? container;
-    return !!root.querySelector(
+    const root = container.closest('[data-sidebar-root], [data-slot="sidebar-wrapper"]') ?? container;
+    return root.getAttribute("data-context-menu-open") === "true" || !!root.querySelector(
       '[data-sidebar="menu-button"][data-state="open"], [data-sidebar="menu-button"][data-popup-open], [data-sidebar="menu-action"][data-state="open"], [data-sidebar="menu-action"][data-popup-open]'
     );
   }, [containerRef]);
 
   const onMouseMove = useCallback(
     (e: React.MouseEvent) => {
-      if (popupOpen()) return;
-      handlers.onMouseMove(e);
+      if (popupOpen()) {
+        setActiveIndex(null);
+        return;
+      }
+      // Follow the actual row under the pointer. Proximity tracking also
+      // selected neighbours in gaps and a project when hovering its children.
+      const target = e.target as HTMLElement;
+      const button = target.closest('[data-sidebar="menu-button"], [data-sidebar="menu-sub-button"]');
+      const row = button?.closest('[data-sidebar="menu-item"], [data-sidebar="menu-sub-item"]');
+      const index = row ? orderedRowsRef.current.indexOf(row as HTMLElement) : -1;
+      setActiveIndex(index < 0 ? null : index);
     },
-    [popupOpen, handlers]
+    [popupOpen, setActiveIndex]
   );
 
   const onFocus = useCallback(
     (e: React.FocusEvent) => {
+      if (popupOpen()) {
+        setActiveIndex(null);
+        setFocusedRowEl(null);
+        return;
+      }
       const target = e.target as HTMLElement;
       // Only the row's main button drives the traveling highlight and ring —
       // actions keep their own static focus rings.
@@ -292,7 +306,7 @@ function useMenuScope(containerRef: RefObject<HTMLElement | null>): MenuScope {
       setActiveIndex(idx);
       setFocusedRowEl(target.matches(":focus-visible") ? row : null);
     },
-    [setActiveIndex]
+    [popupOpen, setActiveIndex]
   );
 
   const onPointerDown = useCallback(() => {

@@ -92,6 +92,15 @@ export async function atomicWriteFile(
   data: string | Uint8Array,
   options: AtomicWriteOptions = {},
 ) {
+  return atomicWriteFileChunks(targetPath, [data], options);
+}
+
+/** Bounded producers retain the same fsync/rename and failure cleanup boundary. */
+export async function atomicWriteFileChunks(
+  targetPath: string,
+  chunks: Iterable<string | Uint8Array> | AsyncIterable<string | Uint8Array>,
+  options: AtomicWriteOptions = {},
+) {
   const target = path.resolve(targetPath);
   const directory = path.dirname(target);
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -103,7 +112,7 @@ export async function atomicWriteFile(
   try {
     handle = await open(temporary, "wx", options.mode ?? 0o600);
     await options.onStage?.("temporary-created", temporary);
-    await handle.writeFile(data);
+    for await (const chunk of chunks) await handle.writeFile(chunk);
     await handle.sync();
     await options.onStage?.("temporary-synced", temporary);
     await handle.close();

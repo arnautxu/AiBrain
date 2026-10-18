@@ -42,5 +42,28 @@ describe("installation catalog baseline", () => {
       expect.objectContaining({ id: "installation-gmail", effect: "allow", operations: ["read"] }),
       expect.objectContaining({ id: "installation-outlook", effect: "allow", operations: ["read"] }),
     ]));
+    expect(state.resources.some(resource => resource.id === "mail")).toBe(false);
+    const mailConfig = parseInstallationConfig({ ...fixture, connectors: { mail: { enabled: true, provider: "nominalia" } } });
+    const mailStore = new FileCatalogStore(mailConfig.installationId, mailConfig.paths.dataRoot);
+    const enabled = await ensureInstallationCatalog(mailStore, mailConfig);
+    expect(enabled.rules.find(rule => rule.id === "installation-mail")?.operations).toEqual(["read", "write"]);
+    await mailStore.mutate("11111111-1111-4111-8111-111111111111", current => {
+      const rule = current.rules.find(rule => rule.id === "installation-mail")!;
+      rule.operations = ["read"];
+      return { action: "catalog.rule-set", targetId: rule.id, summary: "Restrict personal mail to read access" };
+    });
+    const restricted = await ensureInstallationCatalog(mailStore, mailConfig);
+    expect(restricted.rules.find(rule => rule.id === "installation-mail")?.operations).toEqual(["read"]);
   });
+});
+
+it('lists WORKSITEA email and Sage setup entries idempotently', async () => {
+ const root=await mkdtemp(path.join(tmpdir(),'worksitea-catalog-'));roots.push(root);
+ const fixture=JSON.parse(await readFile(path.join(process.cwd(),'config/installations/arnall.qa.example.json'),'utf8'));
+ fixture.installationId='worksitea-qa';delete fixture.connectors;fixture.paths.dataRoot=path.join(root,'data');for(const key of ['companyContextRoot','usersRoot','backupsRoot'])fixture.paths[key]=path.join(root,'data',key);
+ const installation=parseInstallationConfig(fixture);const store=new FileCatalogStore(installation.installationId,installation.paths.dataRoot);
+ const state=await ensureInstallationCatalog(store,installation);
+ expect(state.resources.map(r=>r.id)).toEqual(expect.arrayContaining(['gmail','outlook','worksitea-sage']));
+ expect(state.resources.find(r=>r.id==='worksitea-sage')?.mcp).toBeNull();
+ const again=await ensureInstallationCatalog(store,installation);expect(again.revision).toBe(state.revision);
 });

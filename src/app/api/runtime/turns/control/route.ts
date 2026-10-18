@@ -6,7 +6,6 @@ import { loadInstallationConfig } from "@/config/installation";
 import { isTurnControlRequest } from "@/lib/chat-contract";
 import { readThreadToken } from "@/runtime/thread-token";
 import { cancelPendingWorkerTurn, controlWorkerTurn, TurnControlError } from "@/runtime/turn-control";
-import { WorkbenchNotFoundError } from "@/workbench/errors";
 import { workbenchErrorResponse } from "@/workbench/http";
 import { getThreadRuntimeContext } from "@/workbench/store";
 import { FileTurnProjectionStore } from "@/workbench/turn-projection-store";
@@ -42,7 +41,15 @@ export async function POST(request: Request) {
       usersRoot: installation.paths.usersRoot,
     });
     const projection = await projections.read(body.threadId, body.assistantMessageId);
-    if (!projection) throw new WorkbenchNotFoundError("El torn no existeix.");
+    if (!projection) {
+      // Context authorization above remains mandatory. This is still a failure,
+      // with no persisted control or cancellation acknowledgement. A client that
+      // has not observed chat admission can retain its bound intent until then.
+      return NextResponse.json(
+        { error: "El torn no existeix.", code: "TURN_PROJECTION_NOT_FOUND" },
+        { status: 404 },
+      );
+    }
 
     const accepted = projection.message.activity.some((item) =>
       item.id === activityId(body.action, body.clientRequestId));

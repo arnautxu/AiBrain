@@ -15,7 +15,7 @@ import zipfile
 MAX_INPUT = 16 * 1024 * 1024
 MAX_TEXT = 2 * 1024 * 1024
 MAX_XML = 24 * 1024 * 1024
-FORMATS = {".pdf", ".docx", ".xlsx", ".xlsm", ".txt", ".csv", ".md", ".json"}
+FORMATS = {".pdf", ".pptx", ".docx", ".xlsx", ".xlsm", ".txt", ".csv", ".md", ".json"}
 SECRET = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bsk-[A-Za-z0-9_-]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/-]{20,}=*|\b(?:api[_-]?key|client[_-]?secret|access[_-]?token|password)\s*[:=]\s*[\"']?[A-Za-z0-9._~+/-]{16,}", re.I)
 
 
@@ -136,6 +136,39 @@ def spreadsheet(archive):
     return "\n".join(lines), preview
 
 
+def presentation(archive):
+    """Slide text in presentation order, without fetching links or running content."""
+    ns = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
+    drawing = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    relns = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+    targets = {}
+    for rel in xml(archive, "ppt/_rels/presentation.xml.rels"):
+        target = rel.get("Target", "")
+        if target.startswith("/ppt/"):
+            target = target[5:]
+        if rel.get("TargetMode") != "External" and re.fullmatch(r"slides/slide[0-9]+\.xml", target):
+            require(rel.get("Id") not in targets, "DUPLICATE_SLIDE_RELATIONSHIP")
+            targets[rel.get("Id")] = "ppt/" + target
+    slides = list(xml(archive, "ppt/presentation.xml").iter(ns + "sldId"))
+    require(0 < len(slides) <= 1000, "SLIDE_LIMIT")
+    lines = ["Text de les diapositives. Les imatges i els gràfics no es transcriuen; no s'executa contingut actiu."]
+    total = 0
+    for number, slide in enumerate(slides, 1):
+        target = targets.get(slide.get(relns + "id"))
+        require(target is not None, "INVALID_SLIDE_TARGET")
+        root = xml(archive, target)
+        hidden = " (oculta)" if root.get("show") == "0" else ""
+        lines.append(f"\nDiapositiva {number}{hidden}")
+        for paragraph in root.iter(drawing + "p"):
+            line = "".join((node.text or "") if node.tag == drawing + "t" else
+                           "\n" if node.tag == drawing + "br" else "" for node in paragraph.iter())
+            total += len(line.encode("utf-8")) + 1
+            require(total <= MAX_TEXT, "TEXT_TOO_LARGE")
+            if line:
+                lines.append(line)
+    return "\n".join(lines)
+
+
 def extract(source, suffix, preview_result=None):
     require(suffix in FORMATS and source.stat().st_size <= MAX_INPUT, "FORMAT_OR_SIZE_REJECTED")
     if suffix == ".pdf":
@@ -146,7 +179,7 @@ def extract(source, suffix, preview_result=None):
                        check=True, timeout=25)
         require(output.stat().st_size <= MAX_TEXT, "TEXT_TOO_LARGE")
         text = output.read_text(encoding="utf-8")
-    elif suffix in {".docx", ".xlsx", ".xlsm"}:
+    elif suffix in {".docx", ".xlsx", ".xlsm", ".pptx"}:
         with zipfile.ZipFile(source) as archive:
             infos = archive.infolist()
             require(len(infos) <= 5000 and sum(i.file_size for i in infos) <= 64 * 1024 * 1024,
@@ -159,6 +192,8 @@ def extract(source, suffix, preview_result=None):
                                          "\t" if n.tag == ns + "tab" else
                                          "\n" if n.tag in {ns + "br", ns + "cr"} else ""
                                          for n in p.iter()) for p in root.iter(ns + "p"))
+            elif suffix == ".pptx":
+                text = presentation(archive)
             else:
                 text, preview = spreadsheet(archive)
                 if preview_result is not None:

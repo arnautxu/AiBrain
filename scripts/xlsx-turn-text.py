@@ -209,9 +209,18 @@ def workbook_preview(archive):
     strings = shared_strings(archive)
     dates = date_styles(archive)
     result = {"schemaVersion": 1, "kind": "spreadsheet", "sheets": [], "truncated": False}
-    budget = MAX_PREVIEW_BYTES - 4_000
-    for sheet in listed:
-        name = sheet.attrib.get("name", "")[:100]
+    # Reserve every sheet's metadata before sampling cells. The remaining bytes
+    # are shared fairly, so early/hidden sheets cannot exhaust later sheets.
+    result["sheets"] = [{"name": sheet.attrib.get("name", "")[:100],
+                         "hidden": sheet.attrib.get("state", "visible") != "visible",
+                         "cells": [], "truncated": False} for sheet in listed]
+    wire_overhead = len(json.dumps(result, ensure_ascii=False).encode("utf-8"))
+    validation_overhead = sum(len(entry["name"].encode("utf-8")) + 100
+                              for entry in result["sheets"])
+    budget = MAX_PREVIEW_BYTES - max(wire_overhead, validation_overhead) - 1_000
+    if budget < 0:
+        raise ValueError("Workbook preview exceeds the safe output size")
+    for index, sheet in enumerate(listed):
         relation = sheet.attrib.get(f"{{{REL}}}id")
         target = rels.get(relation)
         if not target:
@@ -220,11 +229,10 @@ def workbook_preview(archive):
                                       else posixpath.join("xl", target))
         if not file_name.startswith("xl/") or file_name not in archive.namelist():
             raise ValueError("Worksheet path is invalid")
-        entry = {"name": name, "hidden": sheet.attrib.get("state", "visible") != "visible", "cells": []}
-        result["sheets"].append(entry)
-        budget -= len(json.dumps(entry, ensure_ascii=False).encode("utf-8")) + 100
+        entry = result["sheets"][index]
+        sheet_budget = budget // (len(listed) - index)
         root = part(archive, file_name)
-        sheet_truncated = False
+        cell_limit_reached = False
         for row in root.findall(f"{tag('sheetData')}/{tag('row')}"):
             for cell in row.findall(tag("c")):
                 address = cell.attrib.get("r", "")
@@ -235,13 +243,18 @@ def workbook_preview(archive):
                     continue
                 item = {"address": address, "value": value}
                 size = len(json.dumps(item, ensure_ascii=False).encode("utf-8")) + 2
-                if len(entry["cells"]) >= MAX_PREVIEW_CELLS_PER_SHEET or size > budget:
-                    result["truncated"] = True
-                    sheet_truncated = True
+                if len(entry["cells"]) >= MAX_PREVIEW_CELLS_PER_SHEET:
+                    entry["truncated"] = result["truncated"] = True
+                    cell_limit_reached = True
                     break
+                if size > sheet_budget:
+                    entry["truncated"] = result["truncated"] = True
+                    # One oversized cell must not conceal later small values.
+                    continue
                 entry["cells"].append(item)
+                sheet_budget -= size
                 budget -= size
-            if sheet_truncated:
+            if cell_limit_reached:
                 break
     return result
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ServerNotification } from "../../contracts/codex/0.153.4/types/ServerNotification";
+import type { ServerNotification } from "../../contracts/codex/0.162.1/types/ServerNotification";
 import type { AppServerEvent } from "@/runtime/transport";
 import { WeeklyTokenBudgetRuntime } from "@/usage/weekly-token-budget-runtime";
 
@@ -40,7 +40,7 @@ function usage(threadId = "thread", turnId = "turn", totalTokens = 80, lastToken
 
 function completed(threadId = "thread", turnId = "turn"): ServerNotification {
   return { method: "turn/completed", params: { threadId, turn: {
-    id: turnId, status: "completed", items: [], error: null, itemsView: "full", startedAt: null, completedAt: null, durationMs: null,
+    id: turnId, status: "completed", items: [], error: null, itemsView: "full", rootTurnId: null, startedAt: null, completedAt: null, durationMs: null,
   } } };
 }
 

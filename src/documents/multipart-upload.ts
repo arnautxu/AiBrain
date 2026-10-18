@@ -94,6 +94,9 @@ export async function parseStreamingDocumentUpload(
   try {
     parser = Busboy({
       headers: { "content-type": contentType },
+      // Browser FormData sends ordinary filename parameters as UTF-8. Latin-1
+      // decoding corrupts employee names and breaks exact attachment matching.
+      defParamCharset: "utf8",
       limits: {
         fieldNameSize: 64,
         headerPairs: 32,

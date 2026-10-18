@@ -1,3 +1,4 @@
+import { loginDemoEmployee } from "../helpers/demo-login";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const northwind = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa";
@@ -6,11 +7,7 @@ const productName = northwind ? "Northwind AI" : "Example AI";
 const primaryProject = northwind ? "Operacions" : "Espacio principal";
 
 async function login(page: Page) {
-  await page.goto("/api/auth/session");
-  await page.goto("/login");
-  await page.getByRole("button", { name: new RegExp(accountName) }).click();
-  await expect(page).toHaveURL(/\/$/, { timeout: 15_000 });
-  await expect(page.getByTestId("composer")).toBeVisible();
+  await loginDemoEmployee(page, accountName);
 }
 
 async function contentStartX(locator: Locator) {
@@ -21,6 +18,9 @@ async function contentStartX(locator: Locator) {
 }
 
 async function expectSidebarContentGuide(page: Page) {
+  const expand = page.getByTestId("sidebar-project-header").first().getByRole("button", { name: /^Expandir / });
+  if (await expand.count()) await expand.click();
+  await expect(page.getByTestId("sidebar-project-thread").first()).toBeVisible();
   const guide = await contentStartX(page.getByTestId("sidebar-brand"));
   const rows = [
     page.getByRole("navigation", { name: "Navegación principal" }).getByRole("button", { name: "Nueva conversación" }),
@@ -49,6 +49,8 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await expect(page.getByRole("button", { name: "Nueva conversación" }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: primaryProject, exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Automatizaciones" })).toBeVisible();
+  await expect(page.getByLabel("Destino de la conversación")).toHaveText("Proyecto");
+  await page.getByRole("button", { name: primaryProject, exact: true }).click();
   await expectSidebarContentGuide(page);
   await expect(page.getByRole("button", { name: "Biblioteca" })).toHaveCount(0);
   await expect(page.getByText("Centro de tareas", { exact: true })).toHaveCount(0);
@@ -107,7 +109,7 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   // loaded browser may still report the starting width at 80 ms, while reduced
   // motion may go straight to the endpoint. The observable contract is that
   // the width leaves the expanded state and settles at the collapsed rail.
-  await expect.poll(sidebarWidth).toBeLessThan(260);
+  await expect.poll(sidebarWidth).toBeLessThan(280);
   const rail = page.getByTestId("workbench-sidebar-rail");
   await expect(rail).toBeVisible();
   await expect(sidebar).toHaveAttribute("data-desktop-state", "collapsed");
@@ -115,7 +117,7 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await expect(rail.getByRole("button", { name: "Mostrar barra lateral" })).toBeFocused();
   await rail.getByRole("button", { name: "Mostrar barra lateral" }).click();
   await expect(sidebar).toHaveAttribute("data-desktop-state", "expanded");
-  await expect.poll(sidebarWidth).toBe(260);
+  await expect.poll(sidebarWidth).toBe(280);
   await expect(page.getByRole("button", { name: "Ocultar barra lateral" })).toBeFocused();
   expect(pageErrors).toEqual([]);
 });

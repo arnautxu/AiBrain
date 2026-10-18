@@ -37,8 +37,11 @@ describe("Gmail dynamic tool authorization", () => {
     mocks.search.mockResolvedValue({ messages: [], resultSizeEstimate: 0 });
   });
 
-  it("does not touch credentials unless @gmail was authorized for this exact turn", async () => {
-    await expect(handleGmailDynamicToolCall(params, { ...context, gmailSelected: false })).resolves.toMatchObject({ success: false });
+  it("reports an unavailable user connection without touching credentials, and preserves turn checks", async () => {
+    await expect(handleGmailDynamicToolCall(params, { ...context, gmailSelected: false })).resolves.toEqual({
+      success: false,
+      contentItems: [{ type: "inputText", text: "Gmail connection is not available or verified for this user." }],
+    });
     await expect(handleGmailDynamicToolCall(params, { ...context, runtimeTurnId: "another-turn" })).resolves.toMatchObject({ success: false });
     expect(mocks.access).not.toHaveBeenCalled();
   });

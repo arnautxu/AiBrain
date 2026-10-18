@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ServerNotification } from "../../contracts/codex/0.153.4/types/ServerNotification";
+import type { ServerNotification } from "../../contracts/codex/0.162.1/types/ServerNotification";
 import type { InstallationConfig } from "@/config/installation-schema";
 import type { AppServerEvent, JsonValue } from "@/runtime/transport";
 import { WeeklyTokenBudgetStore } from "@/usage/weekly-token-budget";

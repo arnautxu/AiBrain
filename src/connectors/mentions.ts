@@ -1,9 +1,13 @@
+
+
+import { instantlyCapability } from "@/connectors/instantly-service";
 import { composioCapability, composioCapabilitiesForSession } from "@/connectors/composio-service";
+
 import "server-only";
 
 import { workspacePolicyForIdentity } from "@/admin/policy-service";
 import type { CatalogPrincipal, CatalogResource } from "@/catalog/contracts";
-import { visibleCatalogResources } from "@/catalog/resolver";
+import { visibleCatalogResources, allowsCatalogOperation } from "@/catalog/resolver";
 import { FileCatalogStore } from "@/catalog/store";
 import type { AuthSession } from "@/auth/types";
 import { loadInstallationConfig } from "@/config/installation";
@@ -18,6 +22,9 @@ import { companyMailAccessForIdentity, companyMailCapabilityForSession } from "@
 import { GMAIL_CONNECTOR_ID } from "@/connectors/gmail-contracts";
 import { outlookAccessForIdentity, outlookCapabilityForSession } from "@/connectors/outlook-server-service";
 import { OUTLOOK_CONNECTOR_ID } from "@/connectors/outlook-contracts";
+import { MAIL_CONNECTOR_ID } from "@/connectors/mail-contracts";
+import { mailCapabilityForSession, mailAccessForIdentity } from "@/connectors/mail-server-service";
+import { nativeConnectionHealthForIdentity } from "@/connectors/native-connection-health";
 
 export type { ConnectorMention, ConnectorMentionStatus, ResolvedConnectorMention } from "@/connectors/mentions-contract";
 
@@ -46,21 +53,35 @@ async function catalogForIdentity(installationId: string, userId: string) {
 async function resolvedMentions(installationId: string, userId: string, session?: AuthSession) {
   const { installation, state, principal } = await catalogForIdentity(installationId, userId);
   const resources = visibleCatalogResources(state, principal)
-    .filter((resource): resource is CatalogResource & { kind: "app" | "connector" | "mcp" } => resource.kind !== "skill")
-    .sort((left, right) => left.label.localeCompare(right.label, "es"));
+    .filter((resource): resource is CatalogResource & { kind: "app" | "connector" | "mcp" } => resource.kind !== "skill");
+  resources.sort((left, right) => left.label.localeCompare(right.label, "es"));
   const connectUrls = new Map<string, string | null>();
   const health = new Map<string, { status: string; statusCode: string | null }>();
+
+  // A previously provisioned tile must fail closed if installation configuration is removed.
+
   if (session) {
-    const capabilities = await Promise.all([
-      codexManagedAppCapabilities(session),
-      composioCapabilitiesForSession(session),
-      companyMailCapabilityForSession(session).then(capability => [capability]).catch(() => []),
-      gmailCapabilityForSession(session).then((capability) => [capability]).catch(() => []),
-      outlookCapabilityForSession(session).then((capability) => [capability]).catch(() => []),
-    ]).then((groups) => groups.flat());
-    for (const connector of capabilities) {
-      if ("connectUrl" in connector) connectUrls.set(connector.connectorId, connector.connectUrl as string | null);
-      health.set(connector.connectorId, { status: connector.status, statusCode: connector.statusCode });
+    // An unavailable provider must not prevent ordinary chat or hide healthy
+    // connections belonging to another provider. Its resources fail closed.
+    const groups = [
+      { ids: ["codex-managed-app"], read: () => codexManagedAppCapabilities(session) },
+      { ids: resources.flatMap((resource) => resource.connectorId?.startsWith("composio-") ? [resource.connectorId] : []), read: () => composioCapabilitiesForSession(session) },
+      { ids: [COMPANY_MAIL_CONNECTOR_ID], read: () => companyMailCapabilityForSession(session).then((capability) => [capability]) },
+      ...(installation.connectors?.instantly?.enabled ? [{ ids: ["instantly"], read: () => instantlyCapability(installation, userId).then((capability) => [capability]) }] : []),
+      { ids: [GMAIL_CONNECTOR_ID], read: () => gmailCapabilityForSession(session).then((capability) => [capability]) },
+      { ids: [OUTLOOK_CONNECTOR_ID], read: () => outlookCapabilityForSession(session).then((capability) => [capability]) },
+      ...(installation.connectors?.mail?.enabled ? [{ ids: [MAIL_CONNECTOR_ID], read: () => mailCapabilityForSession(session).then((capability) => capability ? [capability] : []) }] : []),
+    ];
+    const results = await Promise.allSettled(groups.map((group) => group.read()));
+    for (const [index, result] of results.entries()) {
+      if (result.status === "rejected") {
+        for (const id of groups[index].ids) health.set(id, { status: "degraded", statusCode: "CONNECTOR_HEALTH_UNAVAILABLE" });
+        continue;
+      }
+      for (const connector of result.value) {
+        if ("connectUrl" in connector) connectUrls.set(connector.connectorId, connector.connectUrl as string | null);
+        health.set(connector.connectorId, { status: connector.status, statusCode: connector.statusCode });
+      }
     }
   } else {
     // Turn-time revalidation has no browser session object. It still verifies
@@ -70,10 +91,19 @@ async function resolvedMentions(installationId: string, userId: string, session?
       const capability = await composioCapability(installation, userId, toolkit.slug).catch(() => null);
       if (capability) health.set(capability.connectorId, capability);
     }
+    if (installation.connectors?.instantly?.enabled) {
+      try {
+        const capability = await instantlyCapability(installation, userId);
+        health.set(capability.connectorId, capability);
+      } catch {
+        health.set("instantly", { status: "degraded", statusCode: "CONNECTOR_HEALTH_UNAVAILABLE" });
+      }
+    }
     const checks = [
       resources.some(resource => resource.connectorId === COMPANY_MAIL_CONNECTOR_ID) ? { id: COMPANY_MAIL_CONNECTOR_ID, access: () => companyMailAccessForIdentity(installation, userId), fallback: "MAIL_LOGIN_REQUIRED" } : null,
       resources.some((resource) => resource.connectorId === GMAIL_CONNECTOR_ID) ? { id: GMAIL_CONNECTOR_ID, access: () => gmailAccessForIdentity(installation, userId), fallback: "GMAIL_REAUTH_REQUIRED" } : null,
       resources.some((resource) => resource.connectorId === OUTLOOK_CONNECTOR_ID) ? { id: OUTLOOK_CONNECTOR_ID, access: () => outlookAccessForIdentity(installation, userId), fallback: "OUTLOOK_REAUTH_REQUIRED" } : null,
+      resources.some((resource) => resource.connectorId === MAIL_CONNECTOR_ID) ? { id: MAIL_CONNECTOR_ID, access: () => mailAccessForIdentity(installation, userId), fallback: "MAIL_REAUTH_REQUIRED" } : null,
     ].filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null);
     for (const check of checks) {
       try {
@@ -85,6 +115,9 @@ async function resolvedMentions(installationId: string, userId: string, session?
       }
     }
   }
+  for (const [id, capability] of await nativeConnectionHealthForIdentity(installationId, userId, resources)) {
+    health.set(id, capability);
+  }
   return { resources, mentions: resources.map((resource) => ({ ...projectConnectorMention(resource, health), connectUrl: connectUrls.get(resource.connectorId ?? resource.id) ?? null })) };
 }
 
@@ -93,39 +126,33 @@ export async function connectorMentionsForSession(session: AuthSession) {
   return { schemaVersion: 1 as const, mentions };
 }
 
-/**
- * Re-resolves client supplied IDs from the authenticated catalog immediately
- * before thread start. This makes a rendered @ chip an authority reference,
- * not decorative text: revoked, role-hidden or unconnected resources fail
- * closed even if the browser has stale autocomplete data.
- */
-export async function resolveConnectorMentionsForTurn(
+/** Every connected resource is available to the assistant. Optional composer
+ * hints never grant access or restrict the rest of this fresh inventory. */
+export async function resolveAvailableConnectorsForTurn(
   installationId: string,
   userId: string,
-  resourceIds: readonly string[],
+  resourceIds: readonly string[] = [],
   session?: AuthSession,
 ) {
   if (resourceIds.length > 20 || new Set(resourceIds).size !== resourceIds.length) {
-    throw new ConnectorMentionError("CONNECTOR_MENTION_INVALID", "Las menciones de conectores no son válidas.");
+    throw new ConnectorMentionError("CONNECTOR_MENTION_INVALID", "Las referencias de conectores no son válidas.");
   }
   if (session && (session.tenant.id !== installationId || session.user.id !== userId)) {
     throw new ConnectorMentionError("CONNECTOR_MENTION_IDENTITY_MISMATCH", "La sesión del conector no coincide con el turno.");
   }
   const { resources, mentions } = await resolvedMentions(installationId, userId, session);
-  const byId = new Map(resources.map((resource) => [resource.id, resource]));
   const projected = new Map(mentions.map((mention) => [mention.id, mention]));
-  const selected = resourceIds.map((id) => {
-    const resource = byId.get(id);
+  // Validate client hints against current server data, even though no hint is
+  // required. A forged or revoked hint must not enable a foreign resource.
+  for (const id of resourceIds) {
     const mention = projected.get(id);
-    if (!resource || !mention) {
-      throw new ConnectorMentionError("CONNECTOR_MENTION_DENIED", "Un conector seleccionado ya no está autorizado para este usuario.");
-    }
-    if (!mention.canRead) {
-      throw new ConnectorMentionError("CONNECTOR_MENTION_NOT_CONNECTED", "El conector seleccionado requiere iniciar sesión o no está disponible.");
-    }
-    return { resource, mention };
+    if (!mention) throw new ConnectorMentionError("CONNECTOR_MENTION_DENIED", "La conexión indicada no está disponible para este usuario.");
+    if (!mention.canRead) throw new ConnectorMentionError("CONNECTOR_MENTION_NOT_CONNECTED", "La conexión indicada requiere iniciar sesión o no está disponible.");
+  }
+  return resources.flatMap((resource) => {
+    const mention = projected.get(resource.id);
+    return mention?.canRead ? [{ resource, mention }] : [];
   });
-  return selected;
 }
 
 /** Returns only catalog resources that are both currently visible and

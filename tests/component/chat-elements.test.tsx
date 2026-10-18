@@ -41,11 +41,32 @@ describe("chat registry adapters", () => {
     const { rerender } = render(<PermissionGrant approval={approval} connectorApproval onResolve={onResolve} />);
     expect(screen.queryByRole("button", { name: "Durante esta tarea" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /always|siempre/i })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Permitir" }));
-    expect(onResolve).toHaveBeenCalledWith("accept");
+    expect(screen.queryByRole("button", { name: "Permitir" })).not.toBeInTheDocument();
+    expect(onResolve).not.toHaveBeenCalled();
     rerender(<PermissionGrant approval={approval} readOnly onResolve={onResolve} />);
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.getByText("Esperando la decisión de un editor del proyecto")).toBeInTheDocument();
+  });
+
+  it("keeps the exact frozen email preview inspectable without reviving a permission action", () => {
+    const body = "Approved details " + "x".repeat(1600) + " END_OF_BODY";
+    const preview = {
+      operation: "mail_draft",
+      input: { type: "create_draft", request: { subject: "Original" } },
+      prepared: { action: { mailbox: "owner@example.test", request: {
+        toRecipients: ["client@example.test"], ccRecipients: ["copy@example.test"],
+        bccRecipients: ["private@example.test"], subject: "Frozen subject", content: body,
+        attachments: ["quote.pdf"],
+      } } },
+    };
+    const onResolve = vi.fn();
+    render(<PermissionGrant approval={{ id: "mail", threadId: "thread", turnId: "turn", itemId: "item", kind: "command", title: "Correo preparado", detail: JSON.stringify(preview), status: "pending", authorizationFingerprint: "frozen-request" }} onResolve={onResolve} />);
+    for (const value of ["owner@example.test", "client@example.test", "copy@example.test", "private@example.test", "Frozen subject", body, "quote.pdf"]) {
+      expect(screen.getByText(value, { exact: value !== "quote.pdf" && !value.includes("@") })).toBeInTheDocument();
+    }
+    expect(screen.getByText("Confirma la acción en el chat")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(onResolve).not.toHaveBeenCalled();
   });
 
   it("renders only supplied memories and exposes forgetting only when bound", () => {

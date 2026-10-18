@@ -103,7 +103,7 @@ const locationSchema = defineVersionedSchema<LibraryResourceLocation>({
         pattern: /^[^\u0000-\u001f\u007f]+$/u,
       }),
       size: expectInteger(record.size, context.at("size"), {
-        minimum: 1,
+        minimum: 0,
         maximum: MAXIMUM_INDEXED_RESOURCE_BYTES,
       }),
       sha256: expectString(record.sha256, context.at("sha256"), { pattern: SHA256 }),

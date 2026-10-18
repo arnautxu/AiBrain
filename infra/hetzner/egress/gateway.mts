@@ -64,7 +64,13 @@ export type EgressGatewayConfig = Readonly<{
   workerHosts: ReadonlySet<string>;
   /** Only the server channel may CONNECT to these exact hosts on IMAPS/993. */
   mailHosts?: ReadonlySet<string>;
+  installationId?: string;
+  /** Optional exact HTTPS CMS origin; only transportexample-demo's server channel may use it. */
+  transportexampleCmsOrigin?: string;
   supabaseHostname: string;
+  serverConnectorHosts?: ReadonlySet<string>;
+  /** Exact Nominalia TLS mail endpoints, server channel only. */
+  serverMailTargets?: ReadonlySet<string>;
   maxHeaderBytes: number;
   maxConnections: number;
   maxAddresses: number;
@@ -406,6 +412,7 @@ class ConnectedSocketAgent extends Agent {
 
 export class EgressGateway {
   private readonly config: EgressGatewayConfig;
+  private readonly transportexampleCmsHostname: string | undefined;
   private readonly lookup: GatewayLookup;
   private readonly connector: GatewayConnector;
   private readonly tokens: ReadonlyMap<Channel, Buffer>;
@@ -416,6 +423,8 @@ export class EgressGateway {
 
   constructor(options: EgressGatewayOptions) {
     this.config = validateConfig(options.config);
+    this.transportexampleCmsHostname = this.config.transportexampleCmsOrigin === undefined
+      ? undefined : new URL(this.config.transportexampleCmsOrigin).hostname;
     this.lookup = options.lookup ?? systemLookup as GatewayLookup;
     this.connector = options.connect ?? defaultConnector;
     const browser = validateToken("browserToken", this.config.browserToken);
@@ -515,12 +524,13 @@ export class EgressGateway {
       return { hostname, address, family, port, channel };
     }
     const imaps = channel === "server" && port === 993 && this.config.mailHosts?.has(hostname);
-    if (port !== 443 && !imaps) throw new EgressGatewayError("CHANNEL_REJECTED", "Worker and server egress require HTTPS port 443.");
+    const mailTarget = channel === "server" && this.config.serverMailTargets?.has(`${hostname}:${port}`);
+    if (port !== 443 && !imaps && !mailTarget) throw new EgressGatewayError("CHANNEL_REJECTED", "Destination port is not configured for this channel.");
     if (isIP(hostname)) throw new EgressGatewayError("TARGET_REJECTED", "Worker and server channels require configured DNS hostnames.");
     if (channel === "worker" && !this.config.workerHosts.has(hostname)) {
       throw new EgressGatewayError("CHANNEL_REJECTED", "Worker destination is not configured.");
     }
-    if (channel === "server" && !imaps && hostname !== this.config.supabaseHostname && hostname !== "backend.composio.dev") {
+    if (channel === "server" && !imaps && !mailTarget && hostname !== this.config.supabaseHostname && hostname !== "backend.composio.dev" && hostname !== "api.instantly.ai" && hostname !== this.transportexampleCmsHostname && !this.config.serverConnectorHosts?.has(hostname)) {
       throw new EgressGatewayError("CHANNEL_REJECTED", "Server destination is not an approved authentication or connector API host.");
     }
     const results = validateDnsResults(await this.lookup(hostname, { all: true, verbatim: true }), this.config.maxAddresses);
@@ -685,6 +695,29 @@ export class EgressGateway {
   }
 }
 
+function normalizeTransportexampleCmsOrigin(value: string, installationId: string | undefined) {
+  if (installationId !== "transportexample-demo") {
+    throw new EgressGatewayError("CONFIG_INVALID", "CMS egress is exclusive to transportexample-demo.");
+  }
+  // Validate the raw origin too: URL parsing alone hides empty query/fragment,
+  // dot-segment paths, escaped hosts and surrounding whitespace.
+  if (typeof value !== "string" || !/^https:\/\/[A-Za-z0-9.-]+(?::443)?\/?$/u.test(value)) {
+    throw new EgressGatewayError("CONFIG_INVALID", "CMS egress requires one credential-free root HTTPS DNS origin on port 443.");
+  }
+  try {
+    const origin = new URL(value);
+    const hostname = normalizeHostname(origin.hostname);
+    if (origin.protocol !== "https:" || origin.port || origin.username || origin.password ||
+        origin.pathname !== "/" || origin.search || origin.hash || isIP(hostname) || !hostname.includes(".")) {
+      throw new Error("Invalid CMS origin");
+    }
+    rejectLocalHostname(hostname);
+    return `https://${hostname}`;
+  } catch (error) {
+    throw new EgressGatewayError("CONFIG_INVALID", "CMS egress requires one exact public DNS HTTPS origin.", { cause: error });
+  }
+}
+
 export function validateConfig(config: EgressGatewayConfig): EgressGatewayConfig {
   if (config.listenHost !== "0.0.0.0") throw new EgressGatewayError("CONFIG_INVALID", "listenHost must be 0.0.0.0 inside the sidecar.");
   boundedInteger("port", config.port, 0, 65_535);
@@ -702,6 +735,13 @@ export function validateConfig(config: EgressGatewayConfig): EgressGatewayConfig
     if (normalizeHostname(hostname) !== hostname || isIP(hostname)) throw new EgressGatewayError("CONFIG_INVALID", "Worker allowlist must contain normalized DNS hostnames.");
     rejectLocalHostname(hostname);
   }
+  if (config.serverConnectorHosts !== undefined) {
+    if (!(config.serverConnectorHosts instanceof Set) || config.serverConnectorHosts.size > 16) throw new EgressGatewayError("CONFIG_INVALID", "Server connector allowlist must contain at most 16 exact hosts.");
+    for (const hostname of config.serverConnectorHosts) {
+      if (normalizeHostname(hostname) !== hostname || isIP(hostname)) throw new EgressGatewayError("CONFIG_INVALID", "Server connector allowlist must contain normalized DNS hostnames.");
+      rejectLocalHostname(hostname);
+    }
+  }
   if (config.mailHosts !== undefined) {
     if (!(config.mailHosts instanceof Set) || config.mailHosts.size > 10) throw new EgressGatewayError("CONFIG_INVALID", "Invalid IMAPS allowlist.");
     for (const hostname of config.mailHosts) {
@@ -709,10 +749,18 @@ export function validateConfig(config: EgressGatewayConfig): EgressGatewayConfig
       rejectLocalHostname(hostname);
     }
   }
+  if (config.serverMailTargets !== undefined) {
+    const supported = new Set(["pop.securemail.pro:993", "authsmtp.securemail.pro:587"]);
+    if (!(config.serverMailTargets instanceof Set) || [...config.serverMailTargets].some(target => !supported.has(target))) {
+      throw new EgressGatewayError("CONFIG_INVALID", "Mail targets must be reviewed exact Nominalia TLS endpoints.");
+    }
+  }
   const supabaseHostname = normalizeHostname(config.supabaseHostname);
   if (supabaseHostname !== config.supabaseHostname || isIP(supabaseHostname)) throw new EgressGatewayError("CONFIG_INVALID", "Supabase hostname must be normalized DNS.");
   rejectLocalHostname(supabaseHostname);
-  return config;
+  if (config.transportexampleCmsOrigin === undefined) return config;
+  const transportexampleCmsOrigin = normalizeTransportexampleCmsOrigin(config.transportexampleCmsOrigin, config.installationId);
+  return Object.freeze({ ...config, transportexampleCmsOrigin });
 }
 
 function envInteger(name: string, fallback: number) {
@@ -742,7 +790,11 @@ export function configFromEnvironment(): EgressGatewayConfig {
     serverToken: process.env.AIBRAIN_EGRESS_SERVER_TOKEN ?? "",
     healthToken: process.env.AIBRAIN_EGRESS_HEALTH_TOKEN ?? "",
     workerHosts,
+    serverConnectorHosts: new Set((process.env.AIBRAIN_EGRESS_SERVER_CONNECTOR_HOSTS ?? "").split(",").filter(Boolean)),
+    serverMailTargets: new Set((process.env.AIBRAIN_EGRESS_SERVER_MAIL_TARGETS ?? "").split(",").filter(Boolean)),
     mailHosts: new Set((process.env.AIBRAIN_EGRESS_MAIL_HOSTS ?? "").split(",").map(v => v.trim()).filter(Boolean)),
+    installationId: process.env.AIBRAIN_INSTALLATION_ID,
+    transportexampleCmsOrigin: process.env.AIBRAIN_EGRESS_TRANSPORTEXAMPLE_CMS_ORIGIN || undefined,
     supabaseHostname: normalizeHostname(supabase.hostname),
     maxHeaderBytes: envInteger("AIBRAIN_EGRESS_MAX_HEADER_BYTES", 32 * 1_024),
     maxConnections: envInteger("AIBRAIN_EGRESS_MAX_CONNECTIONS", 128),

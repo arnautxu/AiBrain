@@ -67,3 +67,12 @@ test('Madrid calendar comparison handles midnight, both DST changes and invalid 
   assert.equal(templateDeadlineMatches(template, '2026-10-09T11:00:00Z', '2026-10-08T22:30:00Z'), false);
   assert.equal(templateDeadlineMatches(template, 'invalid'), false);
 });
+test('relative deadline follows the installation timezone instead of a fixed source timezone', () => {
+  const previous = process.env.TZ;
+  try {
+    process.env.TZ = 'America/New_York';
+    assert.equal(templateDeadlineMatches({ relativeDeadline: 'tomorrow' }, '2026-10-09T12:00:00Z', '2026-10-09T01:00:00Z'), true);
+  } finally {
+    if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous;
+  }
+});

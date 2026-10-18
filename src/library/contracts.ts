@@ -134,12 +134,12 @@ function withDownload(url: string) {
 
 function uploadPreviewUrl(threadId: string, attachment: { id: string; name: string; mimeType: string }) {
   const supported = attachment.mimeType.startsWith("image/") || attachment.mimeType.startsWith("text/") ||
-    attachment.mimeType === "application/json" || attachment.mimeType === "application/pdf" ||
+    attachment.mimeType === "application/json" || attachment.mimeType === "application/pdf" || attachment.mimeType === "audio/ogg" ||
     attachment.mimeType.startsWith("application/vnd.openxmlformats-officedocument.");
   if (!supported) return null;
   const previewName = attachment.mimeType.startsWith("image/")
     ? `preview${attachment.name.slice(attachment.name.lastIndexOf(".")).toLocaleLowerCase()}`
-    : attachment.mimeType.startsWith("text/") || attachment.mimeType === "application/json"
+    : attachment.mimeType.startsWith("text/") || attachment.mimeType === "application/json" || attachment.mimeType === "audio/ogg"
       ? "preview.txt"
       : "document.pdf";
   return `/api/threads/${encodeURIComponent(threadId)}/documents/${encodeURIComponent(attachment.id)}/preview/${encodeURIComponent(previewName)}`;

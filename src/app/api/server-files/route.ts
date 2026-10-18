@@ -9,6 +9,7 @@ const headers = { "Cache-Control": "private, no-store" };
 export async function GET(request: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "No autenticado." }, { status: 401, headers });
+  if (session.tenant.id === "officeexample-production") return NextResponse.json({ available: false, warning: "Esta instalación no utiliza archivos de servidor." }, { status: 403, headers });
   const url = new URL(request.url);
   const projectId = url.searchParams.get("projectId") ?? "";
   const query = url.searchParams.get("query") ?? "server:/";

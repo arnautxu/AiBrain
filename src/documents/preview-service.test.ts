@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, readdir, rm, symlink, truncate, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DocumentPreviewService,
@@ -148,6 +149,30 @@ describe("document preview service", () => {
     await expect(new SystemDocumentToolRunner().run(process.execPath, ["-e", "process.exit(134)"], {
       cwd: root, env: {}, timeoutMs: 5_000,
     })).rejects.toMatchObject({ code: "DOCUMENT_TOOL_FAILED", exitCode: 134, spawnCode: null });
+  });
+
+  it.each(["client work", "données # 100%"])("keeps the Office profile URL inside a work directory containing %s", async (name) => {
+    const generated = await generateLocalDocument({ format: "xlsx", title: "Synthetic", content: "QA", rows: [["Code"], ["00123"]] });
+    const staged = await new FileDocumentStagingStore(stagingRoot, locks).stage({
+      threadId: THREAD_ID, uploadId: UPLOAD_ID, data: generated.data,
+      validated: validateUploadedDocument({ fileName: "synthetic.xlsx", declaredMimeType: generated.mimeType, data: generated.data }),
+    });
+    const runner: DocumentToolRunner = {
+      async run(command, args, options) {
+        if (command.endsWith("soffice")) {
+          const argument = args.find((arg) => arg.startsWith("-env:UserInstallation="))!;
+          const profileUrl = argument.slice("-env:UserInstallation=".length);
+          expect(profileUrl).not.toMatch(/[\s#]/u);
+          expect(fileURLToPath(profileUrl)).toBe(path.join(options.cwd, "lo-profile"));
+          await writeFile(path.join(options.cwd, "input.pdf"), "%PDF-1.7\n%%EOF\n");
+        }
+        if (command.endsWith("pdftoppm")) await writeFile(`${args.at(-1)}.png`, generatedPngFixture());
+        return { stdout: "Pages: 1\nEncrypted: no\n", stderr: "" };
+      },
+    };
+    const service = new DocumentPreviewService({ stagingRoot, previewRoot: path.join(root, name, "previews"), lockManager: locks,
+      runner, tools: { soffice: "/tools/soffice", pdfinfo: "/tools/pdfinfo", pdftoppm: "/tools/pdftoppm" }, requireQpdf: false });
+    expect((await service.create(staged)).pages).toBe(1);
   });
 
   it("creates an idempotent text preview without invoking external tools", async () => {

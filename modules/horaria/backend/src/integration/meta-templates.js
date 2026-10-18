@@ -1,3 +1,4 @@
+import { zonaHoraria } from '../utils/zonaHoraria.js';
 // Read-only provider evidence. Never return credentials, paging URLs or raw errors.
 export async function readMetaTemplates() {
   const id = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID;
@@ -29,7 +30,7 @@ export function templateDeadlineMatches(template, deadline, now = new Date()) {
   const day = value => {
     const date = new Date(value);
     if (!Number.isFinite(date.getTime())) return NaN;
-    const parts = new Intl.DateTimeFormat('en', { timeZone: 'Europe/Madrid', year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(date);
+    const parts = new Intl.DateTimeFormat('en', { timeZone: zonaHoraria(), year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(date);
     const part = type => Number(parts.find(p => p.type === type)?.value);
     return Date.UTC(part('year'), part('month') - 1, part('day')) / 86400000;
   };

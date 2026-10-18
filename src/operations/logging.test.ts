@@ -7,6 +7,36 @@ import {
 } from "@/operations/logging";
 
 describe("operational structured logging", () => {
+  it.each([
+    "https://brain.example.test/auth/recover?code=one-time-secret&type=recovery",
+    "https://brain.example.test/auth/recover?token_hash=one-time-secret&type=recovery",
+    "https://brain.example.test/#access_token=one-time-secret&expires_in=3600",
+    "/auth/recover?type=recovery&refresh_token=one-time-secret",
+    "https://brain.example.test/auth/recover?TOKEN_HASH=one-time-secret",
+    "https://brain.example.test/auth/recover?type=recovery&amp;code=one-time-secret",
+    "https://brain.example.test/auth/recover?code_verifier=one-time-secret",
+    "https://brain.example.test/auth/recover?code_challenge=one-time-secret",
+  ])("redacts recovery credentials from URLs while preserving diagnostics: %s", (url) => {
+    const attributes = redactOperationalAttributes({ url, status: 400, code: "INVALID_RECOVERY" });
+    expect(JSON.stringify(attributes)).not.toContain("one-time-secret");
+    expect(attributes).toMatchObject({ status: 400, code: "INVALID_RECOVERY" });
+    expect(attributes.url).toContain("[REDACTED]");
+  });
+
+  it("redacts structured recovery proofs without treating diagnostic codes as credentials", () => {
+    expect(redactOperationalAttributes({
+      recoveryId: "private-recovery-id",
+      code_verifier: "private-verifier",
+      codeChallenge: "private-challenge",
+      code: "INVALID_RECOVERY",
+    })).toEqual({
+      recoveryId: "[REDACTED]",
+      code_verifier: "[REDACTED]",
+      codeChallenge: "[REDACTED]",
+      code: "INVALID_RECOVERY",
+    });
+  });
+
   it("recursively redacts credentials, paths, tokens in strings, and error stacks", () => {
     const circular: Record<string, unknown> = {};
     circular.self = circular;

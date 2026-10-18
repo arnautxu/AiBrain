@@ -29,11 +29,13 @@ export function LoginForm({
   branding,
   mode,
   remotePreview,
+  returnTo = "/",
 }: {
   accounts: DemoAccount[];
   branding: PublicInstallationBranding;
   mode: AuthMode;
   remotePreview: boolean;
+  returnTo?: "/" | "/?settings=connectors" | "/?settings=memory";
 }) {
   const t = useUiText();
   const router = useRouter();
@@ -42,6 +44,7 @@ export function LoginForm({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
+  const [showPasswords, setShowPasswords] = useState(false);
   const [passwordChangeRequired, setPasswordChangeRequired] = useState(false);
   const [recovering, setRecovering] = useState(false);
   const [sent, setSent] = useState(false);
@@ -77,7 +80,7 @@ export function LoginForm({
         );
       }
       setEntering(true);
-      router.replace("/");
+      router.replace(returnTo);
       router.refresh();
     } catch (currentError) {
       setError(currentError instanceof Error ? currentError.message : t("Error desconocido."));
@@ -116,7 +119,7 @@ export function LoginForm({
         return;
       }
       setEntering(true);
-      router.replace("/");
+      router.replace(returnTo);
       router.refresh();
     } catch (currentError) {
       setError(currentError instanceof Error ? currentError.message : t("Error desconocido."));
@@ -152,7 +155,7 @@ export function LoginForm({
         );
       }
       setEntering(true);
-      router.replace("/");
+      router.replace(returnTo);
       router.refresh();
     } catch (currentError) {
       const message = currentError instanceof Error ? currentError.message : t("Error desconocido.");
@@ -197,7 +200,7 @@ export function LoginForm({
     <main data-testid="login-transition" role="status" aria-live="polite"
       className="fixed inset-0 z-50 grid min-h-[100dvh] place-items-center bg-white px-6 text-[#181816]">
       <p className="text-center text-[clamp(20px,3vw,30px)] font-medium tracking-[-0.035em]">
-        <DecryptedText text="Carregant Arnall AI" />
+        <DecryptedText text={`${t("Cargando página…")} · ${branding.productName}`} />
       </p>
     </main>
   );
@@ -313,7 +316,7 @@ export function LoginForm({
                 <span className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]">{t("Contraseña nueva")}</span>
                 <TextField
                   id="initial-password"
-                  type="password"
+                  type={showPasswords ? "text" : "password"}
                   autoComplete="new-password"
                   required
                   minLength={12}
@@ -327,7 +330,7 @@ export function LoginForm({
                 <span className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]">{t("Repite la contraseña")}</span>
                 <TextField
                   id="initial-password-confirmation"
-                  type="password"
+                  type={showPasswords ? "text" : "password"}
                   autoComplete="new-password"
                   required
                   minLength={12}
@@ -337,6 +340,7 @@ export function LoginForm({
                   aria-describedby="initial-password-requirements"
                 />
               </label>
+              <button type="button" aria-pressed={showPasswords} aria-controls="initial-password initial-password-confirmation" onClick={() => setShowPasswords(shown => !shown)} className="min-h-11 rounded-lg px-2 text-[12px] font-semibold">{t(showPasswords ? "Ocultar contraseñas" : "Mostrar contraseñas")}</button>
               <p id="initial-password-requirements" className="text-[11px] leading-5 text-[var(--text-muted)]">{t("Entre 12 y 128 caracteres, con al menos una letra y un número.")}</p>
               <Button type="submit" variant="primary" disabled={loading !== null} className="w-full">
                 {loading ? t("Actualizando…") : t("Actualizar y entrar")}
@@ -357,6 +361,7 @@ export function LoginForm({
               <span className="grid size-9 place-items-center rounded-[var(--radius-sm)] bg-[var(--positive-soft)] text-[var(--positive)]"><EnvelopeSimple size={17} /></span>
               <p className="mt-4 text-[13px] font-semibold">{t("Revisa tu correo")}</p>
               <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{t("Si la cuenta existe, recibirás instrucciones para crear una contraseña nueva.")}</p>
+              <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{t("Abre el enlace en este mismo navegador y dispositivo.")}</p>
               <Button
                 type="button"
                 size="sm"

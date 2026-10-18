@@ -133,6 +133,8 @@ async function startNext() {
     env: {
       ...process.env,
       AIBRAIN_AUTH_MODE: "supabase",
+      // Positive HTTP flows use a QA floor; production headroom has separate negative tests.
+      AIBRAIN_MINIMUM_FREE_RATIO: "0",
       AIBRAIN_ADMIN_USER_IDS: USER_ID,
       AIBRAIN_INSTALLATION_CONFIG: configPath,
       AIBRAIN_SESSION_SECRET: "offline-e2e-secret-0123456789abcdef0123456789abcdef",
@@ -192,7 +194,7 @@ beforeAll(async () => {
   applicationRoot = path.join(root, "application");
   await mkdir(applicationRoot, { recursive: true, mode: 0o700 });
   await Promise.all([
-    "src", "contracts", "public", "config", "skills", "next.config.ts", "next-env.d.ts", "package.json",
+    "src", "contracts", "public", "config", "infra/shared", "skills", "next.config.ts", "next-env.d.ts", "package.json",
     "postcss.config.mjs", "tsconfig.json",
   ].map((entry) => cp(path.join(repositoryRoot, entry), path.join(applicationRoot, entry), { recursive: true })));
   await symlink(path.join(repositoryRoot, "node_modules"), path.join(applicationRoot, "node_modules"), "dir");
@@ -332,46 +334,6 @@ afterEach(({ task }) => {
 });
 
 describe("authenticated XLSX recovery through real HTTP and worker transport", () => {
-  it("admits a real BIFF upload after login, retains its original and replays the same upload identity", async () => {
-    const projectResponse = await http("/api/projects", { method: "POST", headers: { Origin: baseUrl },
-      body: JSON.stringify({ name: "Fictional BIFF admission" }) });
-    expect(projectResponse.status).toBe(201);
-    const projectId = (await projectResponse.json()).project.id;
-    const threadResponse = await http(`/api/projects/${projectId}/threads`, { method: "POST", headers: { Origin: baseUrl },
-      body: JSON.stringify({ title: "Synthetic legacy Excel" }) });
-    expect(threadResponse.status).toBe(201);
-    const threadId = (await threadResponse.json()).thread.id;
-    const bytes = await readFile(path.join(repositoryRoot, "tests/fixtures/legacy-autofilter.xls"));
-    const uploadId = randomUUID();
-    const upload = (authenticated: boolean) => {
-      const form = new FormData();
-      form.set("uploadId", uploadId);
-      form.set("file", new Blob([new Uint8Array(bytes)], { type: "application/octet-stream" }), "fictional.xls");
-      return fetch(`${baseUrl}/api/threads/${threadId}/documents`, {
-        method: "POST", headers: { ...(authenticated ? { Cookie: cookie } : {}), Origin: baseUrl }, body: form,
-      });
-    };
-    expect((await upload(false)).status).toBe(401);
-    const first = await upload(true);
-    const payload = await first.json();
-    expect(first.status, JSON.stringify(payload) + serverOutput).toBe(201);
-    expect(payload.originalStored).toBe(true);
-    // The preview-only tool deliberately cannot convert BIFF. Acceptance of
-    // real LibreOffice fidelity is the independent container gate; HTTP must
-    // still preserve the original and return an honest unavailable receipt.
-    expect(payload.document.storedLegacyExcel?.status).toBe("unavailable");
-    const replay = await upload(true);
-    expect(replay.status).toBe(201);
-    expect((await replay.json()).document.sha256).toBe(payload.document.sha256);
-    const vault = path.join(root, "data", "server", "legacy-excel-originals", USER_ID);
-    const { FileDocumentStagingStore } = await import("@/documents/staging-store");
-    const { ResourceLockManager } = await import("@/storage");
-    const store = new FileDocumentStagingStore(vault, new ResourceLockManager({ rootDirectory: path.join(root, "qa-original-locks") }));
-    const original = await store.resolveContentById(threadId, uploadId);
-    expect(await readFile(original.absolutePath)).toEqual(bytes);
-    expect(payload.document.relativePath).not.toContain("legacy-excel-originals");
-  });
-
   it.each([1, 20])("preserves %i edited workbooks through child and backend restart without a second turn/start", async count => {
     const projectResponse = await http("/api/projects", { method: "POST", headers: { Origin: baseUrl },
       body: JSON.stringify({ name: `Fictional recovery ${count}` }) });

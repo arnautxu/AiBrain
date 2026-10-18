@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { lstat, chmod, mkdir, open, realpath } from "node:fs/promises";
+import { lstat, chmod, mkdir, open, realpath, readFile, unlink } from "node:fs/promises";
+import { installationOwnerAuthSocket } from "@/runtime/installation-owner-auth";
 import path from "node:path";
 import type { InstallationConfig } from "@/config/installation-schema";
 import {
@@ -179,7 +180,7 @@ const workerManifestSchema: StorageSchema<WorkerProvisioningManifest> = defineVe
 
 type SharedCodexAuthReceipt = {
   schemaVersion: 1;
-  scope: "shared-qa";
+  scope: "shared-qa" | "installation-owner";
   userId: string;
   credentialFingerprint: string;
   synchronizedAt: string;
@@ -194,9 +195,9 @@ const sharedCodexAuthReceiptSchema: StorageSchema<SharedCodexAuthReceipt> = defi
       schemaVersion: 1,
       scope: expectString(record.scope, context.at("scope"), {
         minLength: 9,
-        maxLength: 9,
-        pattern: /^shared-qa$/,
-      }) as "shared-qa",
+        maxLength: 18,
+        pattern: /^(shared-qa|installation-owner)$/,
+      }) as "shared-qa" | "installation-owner",
       userId: expectString(record.userId, context.at("userId"), {
         minLength: 36,
         maxLength: 36,
@@ -213,11 +214,12 @@ const sharedCodexAuthReceiptSchema: StorageSchema<SharedCodexAuthReceipt> = defi
 });
 
 export type SharedCodexAuth = Readonly<{
-  scope: "shared-qa";
+  scope: "shared-qa" | "installation-owner";
   sourcePath: string;
 }>;
 
 function configuredSharedCodexAuth(
+  installationId: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): SharedCodexAuth | null {
   const scope = environment.AIBRAIN_CODEX_AUTH_SCOPE?.trim() || "per-user";
@@ -226,18 +228,19 @@ function configuredSharedCodexAuth(
     if (sourcePath) {
       throw new WorkerProvisioningError(
         "WORKER_SHARED_AUTH_CONFIG_INVALID",
-        "Shared Codex auth source requires AIBRAIN_CODEX_AUTH_SCOPE=shared-qa.",
+        "Shared Codex auth source requires an explicit authorization scope.",
       );
     }
     return null;
   }
-  if (scope !== "shared-qa" || !sourcePath || !path.isAbsolute(sourcePath)) {
+  if (!["shared-qa", "installation-owner"].includes(scope) || !sourcePath || !path.isAbsolute(sourcePath)
+      || scope === "installation-owner" && (installationId !== "officeexample-production" || environment.AIBRAIN_INSTALLATION_OWNER_AUTH_ACK !== installationId)) {
     throw new WorkerProvisioningError(
       "WORKER_SHARED_AUTH_CONFIG_INVALID",
-      "Shared QA Codex auth requires an absolute source path.",
+      "Installation authentication requires a private source and explicit installation authorization.",
     );
   }
-  return Object.freeze({ scope, sourcePath });
+  return Object.freeze({ scope: scope as SharedCodexAuth["scope"], sourcePath });
 }
 
 async function assertDirectory(directory: string) {
@@ -326,8 +329,11 @@ export class WorkerProvisioner {
     });
     this.now = options.now ?? Date.now;
     this.sharedCodexAuth = options.sharedCodexAuth === undefined
-      ? configuredSharedCodexAuth()
+      ? configuredSharedCodexAuth(this.config.installationId)
       : options.sharedCodexAuth;
+    if (this.sharedCodexAuth?.scope === "installation-owner" && this.config.installationId !== "officeexample-production") {
+      throw new WorkerProvisioningError("WORKER_SHARED_AUTH_CONFIG_INVALID", "Owner service authentication is authorized only for this installation.");
+    }
   }
 
   async provision(userId: string): Promise<WorkerProvisioningManifest> {
@@ -386,6 +392,26 @@ export class WorkerProvisioner {
   private async synchronizeSharedCodexAuth(roots: WorkerRoots, userId: string) {
     const shared = this.sharedCodexAuth;
     if (!shared) return;
+    const ownerSocket = installationOwnerAuthSocket(this.config.installationId);
+    if (ownerSocket && shared.scope === "installation-owner") {
+      const targetPath = path.join(roots.codexHome, "auth.json");
+      try {
+        const target = await lstat(targetPath);
+        const receipt = JSON.parse(await readFile(path.join(roots.auditRoot, "codex-auth-scope.json"), "utf8"));
+        if (!target.isFile() || target.isSymbolicLink() || target.nlink !== 1
+            || target.uid !== process.geteuid?.() || (target.mode & 0o077) !== 0
+            || receipt.scope !== "installation-owner" || receipt.userId !== userId) {
+          throw new WorkerProvisioningError("WORKER_SHARED_AUTH_SOURCE_UNSAFE", "Owner credential migration cannot replace unrelated credentials.");
+        }
+        await unlink(targetPath);
+      } catch (error) { if (!isNodeError(error, "ENOENT")) throw error; }
+      await atomicWriteJson(path.join(roots.auditRoot, "codex-auth-scope.json"), {
+        schemaVersion: 1, scope: shared.scope, userId,
+        credentialFingerprint: createHash("sha256").update(`external-access:${ownerSocket}`).digest("hex"),
+        synchronizedAt: new Date(this.now()).toISOString(),
+      }, sharedCodexAuthReceiptSchema, { mode: 0o600 });
+      return;
+    }
     const dataRoot = path.resolve(this.config.paths.dataRoot);
     const sourcePath = path.resolve(/* turbopackIgnore: true */ shared.sourcePath);
     if (
@@ -463,11 +489,21 @@ export class WorkerProvisioner {
     }
 
     const targetPath = path.join(roots.codexHome, "auth.json");
+    const fingerprint = createHash("sha256").update(authBytes).digest("hex");
+    if (shared.scope === "installation-owner") {
+      // Preserve provider refreshes in each private home. An operator source
+      // rotation explicitly replaces credentials; routine provisioning does not.
+      try {
+        const receipt = JSON.parse(await readFile(path.join(roots.auditRoot, "codex-auth-scope.json"), "utf8"));
+        const target = await lstat(targetPath);
+        if (receipt.scope === shared.scope && receipt.userId === userId && receipt.credentialFingerprint === fingerprint && target.isFile() && !target.isSymbolicLink() && target.nlink === 1 && (target.mode & 0o077) === 0 && target.uid === process.geteuid?.()) return;
+      } catch (error) { if (!isNodeError(error, "ENOENT")) throw error; }
+    }
     if (path.resolve(targetPath) !== sourcePath) {
-      // Only the private broker owns the renewable session. Workers log in
-      // over the non-journaled external-token lane; erase stale copied tokens
-      // so no child can accidentally fall back to independent renewal.
-      await atomicWriteFile(targetPath, "{}", { mode: 0o600 });
+      // Shared-QA workers use the external broker lane. The existing private
+      // installation-owner mode retains its per-home rotation contract when
+      // no owner socket is configured; the socket migration returned above.
+      await atomicWriteFile(targetPath, shared.scope === "installation-owner" ? authBytes : "{}", { mode: 0o600 });
     }
     await chmod(targetPath, 0o600);
     await atomicWriteJson(
@@ -476,7 +512,7 @@ export class WorkerProvisioner {
         schemaVersion: 1,
         scope: shared.scope,
         userId,
-        credentialFingerprint: createHash("sha256").update(authBytes).digest("hex"),
+        credentialFingerprint: fingerprint,
         synchronizedAt: new Date(this.now()).toISOString(),
       },
       sharedCodexAuthReceiptSchema,

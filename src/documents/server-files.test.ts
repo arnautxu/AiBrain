@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:net";
 import path from "node:path";
@@ -222,4 +223,18 @@ it("keeps an unconfigured installation's navigation empty without inventing a cu
   const { files, roots, requests } = await fixture();
   await expect(files.navigation(roots)).resolves.toMatchObject({ available: true, navigation: true, results: [] });
   expect(requests).toEqual([]);
+});
+
+it("verifies original bytes and digest, rejects tampering and applies the same scope gate", async () => {
+  const bytes=Buffer.alloc(300_000,65), target="server-arnall/Y/test.pdf";
+  const result={available:true,sourceChecked:true,checkedAt:new Date().toISOString(),scope:"company",path:target,base64:bytes.toString("base64"),size:bytes.length,sha256:createHash("sha256").update(bytes).digest("hex")};
+  const f=await fixture(true,()=>result);
+  expect(await f.files.readOriginal(f.roots,{scope:"company",path:target})).toMatchObject({available:true,size:300_000});
+  expect(f.requests[0]).toMatchObject({operation:"read",input:{path:target,format:"original"}});
+  const bad=await fixture(true,()=>({...result,sha256:"0".repeat(64)}));
+  expect(await bad.files.readOriginal(bad.roots,{scope:"company",path:target})).toMatchObject({available:false});
+  const denied=await fixture(false,()=>result);
+  expect(await denied.files.readOriginal(denied.roots,{scope:"company",path:target})).toBeNull();
+  expect(denied.requests).toHaveLength(0);
+  await expect(f.files.readOriginal(f.roots,{scope:"company",path:target+"?part=1"})).rejects.toThrow();
 });

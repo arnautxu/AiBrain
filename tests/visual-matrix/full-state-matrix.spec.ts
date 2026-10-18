@@ -195,7 +195,6 @@ for (const viewport of viewports) {
     await expect(page.getByRole("heading", { name: "Resultado preparado" })).toBeVisible();
     const approval = page.getByRole("group", { name: "Aprobación: Ejecutar comprobación" });
     await settleAtWorkbenchBottom(page);
-    await approval.scrollIntoViewIfNeeded();
     await expect(approval).toBeInViewport();
     await screenshot(page, "turn-approval-light", viewport);
 

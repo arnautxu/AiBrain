@@ -54,7 +54,7 @@ describe("employee-facing activity sanitization", () => {
     ].join("\n"));
 
     expect(result).toContain("Identifying access issue");
-    expect(result).toContain("Arnall");
+    expect(result).toContain("entorno privado");
     expect(result).not.toMatch(/\*\*|Codex|AiBrain|\/var\/lib|company-qa|fc71a2c4/iu);
   });
 
@@ -79,9 +79,14 @@ describe("employee-facing activity sanitization", () => {
       "Arnall AI",
     );
     expect(result).toContain("## Resultado");
-    expect(result).toContain("Arnall AI Arnall archivo interno");
+    expect(result).toContain("Arnall AI entorno privado archivo interno");
     expect(result).toContain(`[Abrir](${artifactUrl})`);
     expect(result).not.toMatch(/AiBrain|company-qa|\/var\/lib/iu);
     expect(publicAssistantText("Hola ", "Arnall AI")).toBe("Hola ");
+  });
+  it("does not introduce another customer's brand into Officeexample activity", () => {
+    const result = publicAssistantText("AiBrain Instalación: officeexample-production", "Officeexample AI");
+    expect(result).toBe("Officeexample AI entorno privado");
+    expect(result).not.toContain("Arnall");
   });
 });

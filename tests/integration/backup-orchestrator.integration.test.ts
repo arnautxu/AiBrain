@@ -39,10 +39,13 @@ if (args[0] === "compose" && args.includes("stop")) {
   writeFileSync(process.env.FAKE_RUNTIME_STATE, JSON.stringify(state));
 } else if (args[0] === "compose" && args.includes("run") && args.includes("create")) {
   if (process.env.FAKE_FAIL_CREATE === "1") process.exit(2);
+  if (process.env.FAKE_BAD_PREFLIGHT === "1") process.stdout.write(JSON.stringify({ privateFilesystemAcceptance: true, syntheticFixturesOnly: false }) + "\\n");
+  if (process.env.FAKE_FILESYSTEM_PREFLIGHT === "1") process.stdout.write(JSON.stringify({ privateFilesystemAcceptance: true, syntheticFixturesOnly: true, privateReadsDenied: true, symlinkAliasDenied: true, helperReadsAllowed: true, exactWorkspaceWriteAllowed: true }) + "\\n");
   if (process.env.FAKE_PREFLIGHT === "1") process.stdout.write("Codex App Server container acceptance passed.\\n");
   process.stdout.write(JSON.stringify({ operation: "create", backupId: process.env.FAKE_BACKUP_ID, sourceFingerprint: process.env.FAKE_FINGERPRINT }));
 } else if (args[0] === "compose" && args.includes("run") && args.includes("verify")) {
   if (process.env.FAKE_KILL_ON_VERIFY === "1") process.kill(process.ppid, "SIGKILL");
+  if (process.env.FAKE_FILESYSTEM_PREFLIGHT === "1") process.stdout.write(JSON.stringify({ privateFilesystemAcceptance: true, syntheticFixturesOnly: true, privateReadsDenied: true, symlinkAliasDenied: true, helperReadsAllowed: true, exactWorkspaceWriteAllowed: true }) + "\\n");
   if (process.env.FAKE_PREFLIGHT === "1") process.stdout.write("Codex App Server container acceptance passed.\\n");
   process.stdout.write(JSON.stringify({ operation: "verify", backupId: process.env.FAKE_BACKUP_ID, sourceFingerprint: process.env.FAKE_FINGERPRINT, verified: true }));
 } else if (args[0] === "compose" && args.includes("up")) {
@@ -111,6 +114,21 @@ afterEach(async () => {
 });
 
 describe("durable host backup orchestrator", () => {
+  it("rejects incomplete or failed filesystem success reports and restores admission", async () => {
+    const input = await fixture();
+    await expect(execFileAsync(process.execPath, input.args, { env: { ...input.env,
+      FAKE_PREFLIGHT: "1", FAKE_BAD_PREFLIGHT: "1" } }))
+      .rejects.toMatchObject({ stderr: expect.stringContaining("BACKUP_OPERATION_RECOVERED") });
+    expect(input.actions).toEqual(["drain", "resume"]);
+    expect(JSON.parse(await readFile(input.runtimeState, "utf8"))).toEqual({ running: true });
+  });
+  it("accepts both exact production isolation success reports without skipping checks", async () => {
+    const input = await fixture();
+    const result = await execFileAsync(process.execPath, input.args, { env: { ...input.env,
+      FAKE_PREFLIGHT: "1", FAKE_FILESYSTEM_PREFLIGHT: "1" } });
+    expect(JSON.parse(result.stdout)).toMatchObject({ status: "verified", backupId, sourceFingerprint: fingerprint });
+    expect(input.actions).toEqual(["drain", "resume"]);
+  });
   it("accepts the real entrypoint success banner before the strict backup result", async () => {
     const input = await fixture();
     const result = await execFileAsync(process.execPath, input.args, { env: { ...input.env, FAKE_PREFLIGHT: "1" } });

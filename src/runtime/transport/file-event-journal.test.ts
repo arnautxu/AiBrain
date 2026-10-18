@@ -44,6 +44,21 @@ afterEach(async () => {
 });
 
 describe("file transport event journal", () => {
+  it("persists and replays multiline RPC errors intact after restart", async () => {
+    const journal = await createJournal();
+    const message = "Invalid request: unknown variant ``\n\tin apps._default.approvals_reviewer\r\n";
+    const source: AppServerEvent = { ...event(1), message: { kind: "rpc-response", rpc: {
+      id: "thread-start:exact", error: { code: -32600, message },
+    } } };
+    expect(await journal.append(source)).toBe(true);
+    const restarted = new FileTransportEventJournal({ filePath: journal.filePath,
+      lockManager: new ResourceLockManager({ rootDirectory: path.join(path.dirname(path.dirname(journal.filePath)), "locks") }) });
+    expect(await restarted.readUndelivered(10)).toEqual([source]);
+    await restarted.markDelivered(source);
+    expect(await restarted.readUndelivered(10)).toEqual([]);
+    expect(await restarted.readEvents()).toEqual([source]);
+  });
+
   it("persists a replay cursor across instances and dedupes exact events", async () => {
     const journal = await createJournal();
     expect(await journal.loadCursor()).toBeNull();

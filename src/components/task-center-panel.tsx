@@ -46,7 +46,7 @@ function statusIcon(status: TaskCenterItem["status"]) {
   return <WarningCircle size={17} weight="fill" />;
 }
 
-function timeLabel(value: string, locale: "en" | "es" = "es") {
+function timeLabel(value: string, locale: "en" | "es" | "ca" = "es") {
   const date = new Date(value);
   const elapsed = Date.now() - date.getTime();
   if (Number.isNaN(elapsed)) return "";

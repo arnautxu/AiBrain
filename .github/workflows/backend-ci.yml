@@ -160,6 +160,9 @@ jobs:
         env:
           BROWSER: ${{ matrix.browser }}
         run: npx playwright install --with-deps "$BROWSER"
+      - name: Build the production server used by HTTP recovery tests
+        if: matrix.suite == 'backend'
+        run: npm run build
       - name: Run isolated E2E suite
         run: ${{ matrix.command }}
       - name: Validate native composer and transport recovery
@@ -250,11 +253,36 @@ jobs:
         env:
           AIBRAIN_XLS_EDIT_TEST_PYTHON: /usr/bin/python3
         run: npm run test:documents:real
+      - name: Verify regenerated native previews and image-only PDFs
+        env:
+          AIBRAIN_REAL_DOCUMENT_MATRIX: '1'
+          AIBRAIN_REAL_IMAGE_PDF: '1'
+          AIBRAIN_PDFINFO_BIN: /usr/bin/pdfinfo
+          AIBRAIN_PDFTOPPM_BIN: /usr/bin/pdftoppm
+          AIBRAIN_PDFTOTEXT_BIN: /usr/bin/pdftotext
+        run: |
+          node node_modules/vitest/vitest.mjs run \
+            tests/integration/files-feedback-native.integration.test.ts \
+            tests/integration/image-pdf-real.integration.test.ts \
+            --reporter=default --reporter=json --outputFile.json="${RUNNER_TEMP}/native-preview-supplement.json"
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import assert from "node:assert/strict";
+            const report = JSON.parse(readFileSync(process.argv[1], "utf8"));
+            assert.equal(report.numTotalTests, 5);
+            assert.equal(report.numPassedTests, 5);
+            assert.equal(report.numFailedTests, 0);
+            assert.equal(report.numPendingTests, 0);
+            assert.equal(report.numTodoTests, 0);
+          ' "${RUNNER_TEMP}/native-preview-supplement.json"
       - name: Read legacy DOC and RTF fixtures without privileges
         run: python3 -m unittest discover -s tests/infra -p 'test_knowledge_word.py' -q
 
   containers:
-    name: Clean immutable container builds
+    name: Build once, test and stage immutable images
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -262,6 +290,17 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+      - name: Reserve space for BuildKit and the loaded runtime
+        run: bash scripts/ci/free-container-runner-space.sh
+      - name: Set up the reusable image builder
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Authenticate to the Arnau candidate registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'arnautxu/AiBrain'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
       - name: Validate Compose model without secrets
         env:
           AIBRAIN_RUNTIME_ENV_FILE: ci.env.placeholder
@@ -273,11 +312,14 @@ jobs:
             --env-file infra/hetzner/compose.env.example \
             -f infra/hetzner/compose.yaml \
             config --no-env-resolution --quiet
-      - name: Build application image from scratch
+      - name: Build the candidate application once
         run: |
-          docker build --pull --no-cache \
+          docker buildx build --load --pull \
+            --cache-from type=registry,ref=ghcr.io/arnautxu/aibrain:buildcache \
+            --cache-to type=registry,ref=ghcr.io/arnautxu/aibrain:buildcache,mode=max \
             --target runtime \
             --build-arg AIBRAIN_REVISION="${GITHUB_SHA}" \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
             --tag "aibrain-ci:${GITHUB_SHA}" .
       - name: Exercise packaged Codex App Server through its production sandbox
         run: |
@@ -329,7 +371,7 @@ jobs:
             --mount "type=bind,src=${RUNNER_TEMP}/aibrain-ci-publish,dst=/srv/aibrain/publish-rw" \
             --env NODE_ENV=production \
             --env CODEX_BIN=/usr/local/bin/aibrain-codex-worker \
-            --env AIBRAIN_CODEX_EXPECTED_VERSION=0.153.4 \
+            --env AIBRAIN_CODEX_EXPECTED_VERSION=0.162.1 \
             --env AIBRAIN_INSTALLATION_CONFIG=/etc/aibrain/installation.json \
             --env AIBRAIN_EGRESS_PROXY_URL=http://127.0.0.1:9 \
             --env AIBRAIN_EGRESS_WORKER_TOKEN=container_ci_worker_token_000000000000000000 \
@@ -372,12 +414,16 @@ jobs:
             --entrypoint node \
             "aibrain-ci:${GITHUB_SHA}" \
             /usr/local/share/aibrain/container-presentation-tool-acceptance.mjs
-      - name: Build egress gateway image from scratch
+      - name: Build the candidate gateway once
         run: |
-          docker build --pull --no-cache \
+          docker buildx build --load --pull \
+            --cache-from type=registry,ref=ghcr.io/arnautxu/aibrain-egress:buildcache \
+            --cache-to type=registry,ref=ghcr.io/arnautxu/aibrain-egress:buildcache,mode=max \
             --target egress-gateway \
             --build-arg AIBRAIN_REVISION="${GITHUB_SHA}" \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
             --tag "aibrain-egress-ci:${GITHUB_SHA}" .
+
       - name: Verify native and passive XLS through the production isolation boundary
         run: |
           docker run --rm \
@@ -393,3 +439,31 @@ jobs:
             --env AIBRAIN_SYNTHETIC_ACCEPTANCE=1 \
             --entrypoint node "aibrain-ci:${GITHUB_SHA}" \
             /usr/local/share/aibrain/container-xls-passive-acceptance.mjs
+
+      - name: Push exactly the locally exercised images, without rebuilding
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'arnautxu/AiBrain'
+        env:
+          APP_REPOSITORY: ghcr.io/arnautxu/aibrain
+          EGRESS_REPOSITORY: ghcr.io/arnautxu/aibrain-egress
+        run: |
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(docker image inspect "aibrain-ci:${GITHUB_SHA}" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$GITHUB_SHA"
+          test "$(docker image inspect "aibrain-egress-ci:${GITHUB_SHA}" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$GITHUB_SHA"
+          docker tag "aibrain-ci:${GITHUB_SHA}" "${APP_REPOSITORY}:${GITHUB_SHA}"
+          docker tag "aibrain-egress-ci:${GITHUB_SHA}" "${EGRESS_REPOSITORY}:${GITHUB_SHA}"
+          docker push "${APP_REPOSITORY}:${GITHUB_SHA}"
+          docker push "${EGRESS_REPOSITORY}:${GITHUB_SHA}"
+          app_image="$(docker image inspect "${APP_REPOSITORY}:${GITHUB_SHA}" --format '{{json .RepoDigests}}' | jq -er --arg repo "$APP_REPOSITORY" '.[] | select(startswith($repo + "@sha256:"))')"
+          egress_image="$(docker image inspect "${EGRESS_REPOSITORY}:${GITHUB_SHA}" --format '{{json .RepoDigests}}' | jq -er --arg repo "$EGRESS_REPOSITORY" '.[] | select(startswith($repo + "@sha256:"))')"
+          [[ "$app_image" =~ ^ghcr\.io/arnautxu/aibrain@sha256:[0-9a-f]{64}$ ]]
+          [[ "$egress_image" =~ ^ghcr\.io/arnautxu/aibrain-egress@sha256:[0-9a-f]{64}$ ]]
+          jq -n --arg revision "$GITHUB_SHA" --arg image "$app_image" --arg egressImage "$egress_image" \
+            '{schemaVersion:1,revision:$revision,image:$image,egressImage:$egressImage}' > release.json
+      - name: Preserve candidate digests for the separate all-gates publication
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'arnautxu/AiBrain'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: aibrain-tested-images-${{ github.sha }}
+          path: release.json
+          if-no-files-found: error
+          retention-days: 7

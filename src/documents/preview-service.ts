@@ -1,7 +1,9 @@
+import { transcribeAudio } from "./audio-transcription";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod, lstat, mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import type { StagedDocument } from "@/documents/staging-store";
 import type { DocumentConversionAdmission } from "@/documents/conversion-gate";
 import { ensurePrivateDirectoryTree } from "@/documents/staging-store";
@@ -65,14 +67,14 @@ const previewSchema = defineVersionedSchema<DocumentPreview>({
       threadId: expectString(record.threadId, context.at("threadId"), { pattern: UUID }),
       sourceSha256: expectString(record.sourceSha256, context.at("sourceSha256"), { pattern: SHA256 }),
       status: expectOneOf(record.status, ["ready"] as const, context.at("status")),
-      kind: expectOneOf(record.kind, ["docx", "xlsx", "xls", "pptx", "pdf", "text", "image"] as const, context.at("kind")),
+      kind: expectOneOf(record.kind, ["docx", "xlsx", "xls", "pptx", "pdf", "text", "image", "audio"] as const, context.at("kind")),
       files: expectArray(record.files, context.at("files"), (value, item) =>
         expectString(value, item, { minLength: 1, maxLength: 160, pattern: /^[a-z0-9][a-z0-9._-]*$/ }), { maxLength: 2 }),
       artifacts: expectArray(record.artifacts, context.at("artifacts"), parsePreviewArtifact, { maxLength: 2 }),
       pages: record.pages === null ? null : expectInteger(record.pages, context.at("pages"), { minimum: 1, maximum: 500 }),
       createdAt: expectIsoDate(record.createdAt, context.at("createdAt")),
     };
-    const filesMatchKind = parsed.kind === "text"
+    const filesMatchKind = parsed.kind === "text" || parsed.kind === "audio"
       ? parsed.files.length === 1 && parsed.files[0] === "preview.txt"
       : parsed.kind === "image"
         ? parsed.files.length === 1 && /^preview[.](?:png|jpe?g|gif|webp)$/u.test(parsed.files[0] ?? "")
@@ -97,7 +99,7 @@ const legacyPreviewSchema = defineVersionedSchema<LegacyDocumentPreview>({
       threadId: expectString(record.threadId, context.at("threadId"), { pattern: UUID }),
       sourceSha256: expectString(record.sourceSha256, context.at("sourceSha256"), { pattern: SHA256 }),
       status: expectOneOf(record.status, ["ready"] as const, context.at("status")),
-      kind: expectOneOf(record.kind, ["docx", "xlsx", "xls", "pptx", "pdf", "text", "image"] as const, context.at("kind")),
+      kind: expectOneOf(record.kind, ["docx", "xlsx", "xls", "pptx", "pdf", "text", "image", "audio"] as const, context.at("kind")),
       files: expectArray(record.files, context.at("files"), (value, item) =>
         expectString(value, item, { minLength: 1, maxLength: 160, pattern: /^[a-z0-9][a-z0-9._-]*$/ }), { maxLength: 2 }),
       pages: record.pages === null ? null : expectInteger(record.pages, context.at("pages"), { minimum: 1, maximum: 500 }),
@@ -237,6 +239,8 @@ export type DocumentToolchain = {
   pdfinfo: string;
   pdftoppm: string;
   qpdf?: string;
+  ffprobe?: string;
+  audioTranscriber?: string;
 };
 
 function validateToolPath(name: string, value: string | undefined, required: boolean) {
@@ -283,7 +287,7 @@ function isPng(bytes: Uint8Array) {
 
 export class DocumentPreviewService {
   readonly previewRoot: string;
-  private readonly tools: Required<Omit<DocumentToolchain, "qpdf">> & { qpdf?: string };
+  private readonly tools: DocumentToolchain;
 
   constructor(options: {
     stagingRoot: string;
@@ -292,6 +296,8 @@ export class DocumentPreviewService {
     runner?: DocumentToolRunner;
     tools: DocumentToolchain;
     conversionGate?: DocumentConversionAdmission;
+    audioGate?: DocumentConversionAdmission;
+    audioTranscribe?: (document: StagedDocument, source: Buffer, signal?: AbortSignal) => Promise<string>;
     requireQpdf?: boolean;
     spreadsheetLayout?: "whole-sheet" | "print";
     now?: () => number;
@@ -304,6 +310,8 @@ export class DocumentPreviewService {
     this.lockManager = options.lockManager;
     this.runner = options.runner ?? new SystemDocumentToolRunner();
     this.conversionGate = options.conversionGate ?? null;
+    this.audioGate = options.audioGate ?? null;
+    this.audioTranscribe = options.audioTranscribe;
     if (!this.conversionGate && process.env.NODE_ENV === "production") {
       throw new StorageError(
         "DOCUMENT_CONVERSION_GATE_MISSING",
@@ -313,6 +321,8 @@ export class DocumentPreviewService {
     this.now = options.now ?? Date.now;
     this.spreadsheetLayout = options.spreadsheetLayout ?? "whole-sheet";
     this.tools = {
+      ffprobe: validateToolPath("ffprobe", options.tools.ffprobe, false),
+      audioTranscriber: validateToolPath("audioTranscriber", options.tools.audioTranscriber, false),
       soffice: validateToolPath("soffice", options.tools.soffice, true)!,
       pdfinfo: validateToolPath("pdfinfo", options.tools.pdfinfo, true)!,
       pdftoppm: validateToolPath("pdftoppm", options.tools.pdftoppm, true)!,
@@ -324,6 +334,8 @@ export class DocumentPreviewService {
   private readonly lockManager: ResourceLockManager;
   private readonly runner: DocumentToolRunner;
   private readonly conversionGate: DocumentConversionAdmission | null;
+  private readonly audioTranscribe: ((document: StagedDocument, source: Buffer, signal?: AbortSignal) => Promise<string>) | undefined;
+  private readonly audioGate: DocumentConversionAdmission | null;
   private readonly now: () => number;
   private readonly spreadsheetLayout: "whole-sheet" | "print";
 
@@ -385,7 +397,8 @@ export class DocumentPreviewService {
     return this.lockManager.withLock(`document-preview:${metadataPath}`, async () => {
       try {
         const existing = await this.readMetadata(metadataPath);
-        if (existing.sourceSha256 !== document.sha256) {
+        if (existing.sourceSha256 !== document.sha256 || existing.kind !== document.kind ||
+            existing.threadId !== document.threadId || existing.uploadId !== document.uploadId) {
           throw new StorageError("DOCUMENT_PREVIEW_CONFLICT", "Preview id already belongs to different source content.");
         }
         if (existing.schemaVersion === 2) {
@@ -411,12 +424,28 @@ export class DocumentPreviewService {
           throw new StorageError("DOCUMENT_OPERATION_ABORTED", "Document preview was aborted.");
         }
         const inputPath = path.join(work, `input${path.extname(document.fileName).toLowerCase()}`);
-        await atomicWriteFile(inputPath, source, { mode: 0o600 });
+        if (document.kind !== "audio" || !this.audioTranscribe) {
+          await atomicWriteFile(inputPath, source, { mode: 0o600 });
+        }
         const files: string[] = [];
         const artifacts: DocumentPreview["artifacts"] = [];
         let pages: number | null = null;
 
-        if (document.kind === "text" || document.kind === "image") {
+        if (document.kind === "audio") {
+          if (!this.audioGate) throw new StorageError("DOCUMENT_AUDIO_UNAVAILABLE", "Audio transcription requires installation-wide admission.");
+          await this.audioGate.run(async () => {
+            const transcript = this.audioTranscribe
+              ? await this.audioTranscribe(document, source, options.signal)
+              : await transcribeAudio({
+              source, inputPath, work, tools: this.tools, runner: this.runner, signal: options.signal,
+            });
+            if (options.signal?.aborted) throw new StorageError("DOCUMENT_OPERATION_ABORTED", "Audio transcription was aborted.");
+            const bytes = Buffer.from(transcript, "utf8");
+            await atomicWriteFile(path.join(directory, "preview.txt"), bytes, { mode: 0o600 });
+            files.push("preview.txt");
+            artifacts.push(artifactFor("preview.txt", bytes));
+          }, { signal: options.signal });
+        } else if (document.kind === "text" || document.kind === "image") {
           const name = `preview.${outputExtension(document)}`;
           await atomicWriteFile(path.join(directory, name), source, { mode: 0o600 });
           files.push(name);
@@ -440,7 +469,7 @@ export class DocumentPreviewService {
               : "pdf";
             const conversionStarted = performance.now();
             const convert = (filter: string) => this.runner.run(this.tools.soffice, [
-              `-env:UserInstallation=file://${path.join(work, "lo-profile")}`,
+              `-env:UserInstallation=${pathToFileURL(path.join(work, "lo-profile")).href}`,
               "--headless", "--invisible", "--nologo", "--nodefault", "--nofirststartwizard",
               "--norestore", "--safe-mode", "--convert-to", filter, "--outdir", work, inputPath,
             ], { cwd: work, env: environment,

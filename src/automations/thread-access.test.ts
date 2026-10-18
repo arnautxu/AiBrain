@@ -11,7 +11,8 @@ import { loadInstallationConfig } from "@/config/installation";
 import type { ChatMessage } from "@/lib/chat-contract";
 import { getTaskCenter } from "@/task-center/server-service";
 import { UserProvisioner } from "@/users/provisioner";
-import { beginThreadTurn, createProject, createThread, finishThreadTurn, getThread, updateProject } from "@/workbench/store";
+import { beginThreadTurn, createProject, createThread, finishThreadTurn, getThread, getThreadRuntimeContext, prepareThreadTurn, updateProject } from "@/workbench/store";
+import { FileWorkbenchStore } from "@/workbench/filesystem-store";
 import { loadSharedWorkbench, resolveThreadAccess } from "@/workbench/shared-access";
 
 vi.mock("server-only", () => ({}));
@@ -173,6 +174,16 @@ describe("automation result thread audience", () => {
     expect(await automationRunsForSession(memberSession, automation.id)).toHaveLength(1);
     expect((await listAutomationTasks(ownerSession)).tasks).toMatchObject([{ id: automation.id, access: { canManage: true, canViewResults: true } }]);
     await expect(resolveThreadAccess(ownerSession, thread.id)).resolves.toMatchObject({ role: "owner" });
+    const readSpy = vi.spyOn(FileWorkbenchStore.prototype as unknown as { read: (userId: string) => unknown }, "read");
+    const runtime = await getThreadRuntimeContext(ownerSession, thread.id);
+    expect(runtime.visibleProjects).toContainEqual({ id: project.id, name: project.name });
+    expect(readSpy.mock.calls).toHaveLength(1);
+    readSpy.mockClear();
+    const prepared = await prepareThreadTurn(ownerSession, thread.id);
+    expect(prepared.rebootstrapHistory).toContain("Informe preparado.");
+    expect(prepared.context.visibleProjects).toEqual(runtime.visibleProjects);
+    expect(readSpy.mock.calls).toHaveLength(1);
+    readSpy.mockRestore();
     expect((await getTaskCenter(ownerSession)).tasks).toHaveLength(1);
     expect((await listAutomationTasks(outsiderSession)).tasks).toEqual([]);
     await expect(resolveThreadAccess(outsiderSession, thread.id)).rejects.toThrow("Fil no trobat");
@@ -186,7 +197,11 @@ describe("automation result thread audience", () => {
       group.updatedAt = new Date(Math.max(Date.now(), Date.parse(group.createdAt)) + 1).toISOString();
       return { action: "group.updated", targetType: "group", targetId: group.id, summary: "Miembro retirado." };
     });
+    const revokedReadSpy = vi.spyOn(FileWorkbenchStore.prototype as unknown as { read: (userId: string) => unknown }, "read");
     await expect(resolveThreadAccess(memberSession, thread.id)).rejects.toThrow("Fil no trobat");
+    await expect(getThreadRuntimeContext(memberSession, thread.id)).rejects.toThrow("Fil no trobat");
+    expect(revokedReadSpy.mock.calls.map(([userId]) => userId)).not.toContain(ownerId);
+    revokedReadSpy.mockRestore();
     expect((await getTaskCenter(memberSession)).tasks).toEqual([]);
     expect((await listAutomationTasks(memberSession)).tasks).toEqual([]);
     await expect(automationRunsForSession(memberSession, automation.id))

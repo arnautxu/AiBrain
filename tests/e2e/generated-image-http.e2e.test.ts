@@ -179,6 +179,8 @@ async function startNext() {
     env: {
       ...process.env,
       AIBRAIN_AUTH_MODE: "supabase",
+      // Positive HTTP flows use a QA floor; production headroom has separate negative tests.
+      AIBRAIN_MINIMUM_FREE_RATIO: "0",
       AIBRAIN_INSTALLATION_CONFIG: configPath,
       AIBRAIN_SESSION_SECRET: "image-http-e2e-secret-0123456789abcdef0123456789abcdef",
       NEXT_PUBLIC_SUPABASE_URL: providerUrl,
@@ -229,7 +231,7 @@ beforeAll(async () => {
   applicationRoot = path.join(temporaryRoot, "application");
   await mkdir(applicationRoot, { recursive: true, mode: 0o700 });
   await Promise.all([
-    "src", "contracts", "public", "config", "next.config.ts", "next-env.d.ts", "package.json",
+    "src", "contracts", "public", "config", "infra/shared", "next.config.ts", "next-env.d.ts", "package.json",
     "postcss.config.mjs", "tsconfig.json",
   ].map((entry) => cp(path.join(repositoryRoot, entry), path.join(applicationRoot, entry), { recursive: true })));
   await symlink(path.join(repositoryRoot, "node_modules"), path.join(applicationRoot, "node_modules"), "dir");

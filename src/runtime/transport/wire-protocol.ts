@@ -101,6 +101,15 @@ function requiredString(value: unknown, context: string, maxLength = 256) {
   return value;
 }
 
+/** Diagnostic RPC text may contain JSON-escaped line breaks, unlike identities. */
+function requiredErrorMessage(value: unknown, context: string) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 2048 ||
+      /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value)) {
+    throw new TransportProtocolError(`${context} must be bounded safe diagnostic text.`);
+  }
+  return value;
+}
+
 function requestId(value: unknown, context: string) {
   if (typeof value === "string") return requiredString(value, context);
   if (typeof value === "number" && Number.isSafeInteger(value)) return value;
@@ -147,7 +156,7 @@ function rpcSuccessOrFailure(value: unknown, context: string): JsonRpcSuccess | 
   if (!isRecord(value.error)) throw new TransportProtocolError(`${context}.error must be an object.`);
   exactKeys(value.error, ["code", "message", "data"], `${context}.error`);
   if (!Number.isSafeInteger(value.error.code)) throw new TransportProtocolError(`${context}.error.code must be an integer.`);
-  requiredString(value.error.message, `${context}.error.message`, 2048);
+  requiredErrorMessage(value.error.message, `${context}.error.message`);
   if (value.error.data !== undefined) jsonValue(value.error.data, `${context}.error.data`);
   return value as JsonRpcFailure;
 }
@@ -238,7 +247,7 @@ export function parseServerFrame(raw: unknown): WorkerServerFrame {
     if (!isRecord(value.error)) throw new TransportProtocolError("rejected.error must be an object.");
     exactKeys(value.error, ["code", "message", "retryable", "retryAfterMs"], "rejected.error");
     if (!Number.isSafeInteger(value.error.code)) throw new TransportProtocolError("rejected.error.code must be an integer.");
-    requiredString(value.error.message, "rejected.error.message", 2048);
+    requiredErrorMessage(value.error.message, "rejected.error.message");
     if (typeof value.error.retryable !== "boolean") throw new TransportProtocolError("rejected.error.retryable must be boolean.");
     if (value.error.retryAfterMs !== undefined) nonNegativeInteger(value.error.retryAfterMs, "rejected.error.retryAfterMs");
   } else if (value.type === "overloaded") {

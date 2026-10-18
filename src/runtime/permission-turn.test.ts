@@ -257,7 +257,10 @@ describe("server turn permission preflight", () => {
     expect(webInstructions).toContain("inclou enllaços");
     expect(webInstructions).toContain("La navegació web ordinària");
     expect(webInstructions).toContain("no necessita aprovació");
-    expect(webInstructions).toContain("Demana aprovació només abans d'un efecte extern sensible");
+    expect(webInstructions).toContain("sense botons d'aprovació");
+    expect(webInstructions).toContain("Una petició directa i concreta de l'usuari autoritza");
+    expect(webInstructions).toContain("To/Cc/Bcc");
+    expect(webInstructions).toContain("Espera una confirmació explícita posterior");
 
     const mismatchedRequest = chatRequest("bb2bbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
     expect(() => assertCodexTurnPermissionBinding(

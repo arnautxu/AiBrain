@@ -1,5 +1,7 @@
+import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createLocalAuthService } from "@/auth/auth-context";
+import { setPasswordRecoveryCookie } from "@/auth/session-cookie";
 import { getPublicOrigin } from "@/auth/public-url";
 import { isSameOriginMutation } from "@/auth/request-security";
 import { authRateLimitSubject } from "@/auth/rate-limit";
@@ -7,7 +9,11 @@ import { checkAuthRateLimit } from "@/auth/rate-limit-context";
 
 export const runtime = "nodejs";
 
-function accepted() {
+async function accepted(recovery?: { recoveryId: string; expiresAt: number }) {
+  // Always emit the same cookie shape, including rejected/malformed/limited
+  // requests. A dummy opaque handle has no server record or authentication rights
+  // and must not turn the cookie header into an account/limiter side channel.
+  await setPasswordRecoveryCookie(recovery?.recoveryId ?? randomBytes(32).toString("base64url"));
   return NextResponse.json(
     { accepted: true },
     { status: 202, headers: { "Cache-Control": "private, no-store" } },
@@ -32,13 +38,14 @@ export async function POST(request: Request) {
     // Fail closed without exposing whether the subject, limiter or provider exists.
     return accepted();
   }
+  let recovery: { recoveryId: string; expiresAt: number } | undefined;
   try {
-    await (await createLocalAuthService()).requestPasswordRecovery(
+    recovery = await (await createLocalAuthService()).requestPasswordRecovery(
       email,
       `${await getPublicOrigin()}/auth/recovery`,
     );
   } catch {
     // Deliberately indistinguishable for unknown, disabled, malformed and unavailable accounts.
   }
-  return accepted();
+  return accepted(recovery);
 }

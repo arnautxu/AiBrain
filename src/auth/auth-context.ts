@@ -1,6 +1,7 @@
 import "server-only";
 
 import path from "node:path";
+import { FilePasswordRecoveryStore } from "@/auth/password-recovery-store";
 import { LocalAuthService } from "@/auth/auth-service";
 import { FileLocalAuthChallengeStore } from "@/auth/local-auth-challenge-store";
 import { FileLocalSessionStore } from "@/auth/local-session-store";
@@ -28,5 +29,7 @@ export async function createLocalAuthService() {
     users,
     sessions,
     challenges,
+    new FilePasswordRecoveryStore({ rootDirectory: path.join(installation.paths.dataRoot, "password-recovery") }),
+    new URL(installation.publicUrl).origin,
   );
 }

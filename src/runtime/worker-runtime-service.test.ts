@@ -179,6 +179,17 @@ describe("worker App Server client", () => {
     expect(transport.sent.some(request => request.kind === "rpc-request" && request.rpc.method === "thread/start")).toBe(false);
   });
 
+  it("recovers a completed thread creation rejection with exact RPC provenance and no new creation", async () => {
+    const transport = new FakeTransport();
+    const purpose = "thread-start:00000000-0000-4000-8000-000000000041";
+    const message = "Invalid request: unknown variant ``\nin apps._default.approvals_reviewer";
+    const recoverResponse = vi.fn(async () => ({ id: purpose, error: { code: -32600, message } }));
+    const client = new WorkerAppServerClient(handle(Object.assign(transport, { recoverResponse })));
+    await expect(client.recoverThreadStart({}, purpose)).rejects.toMatchObject({ name: "AppServerRpcResponseError", method: "thread/start", requestId: purpose, code: -32600, message });
+    expect(transport.sent.some(request => request.kind === "rpc-request" && request.rpc.method === "thread/start")).toBe(false);
+    await client.router.close();
+  });
+
   it("never dispatches when the recovery receipt is missing or mismatched", async () => {
     const transport = new FakeTransport();
     const recoverResponse = vi.fn(async (): Promise<{ id: string; result: JsonValue } | null> => null);

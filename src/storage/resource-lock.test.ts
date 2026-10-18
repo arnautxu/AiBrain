@@ -3,7 +3,8 @@ import { hostname, tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { mkdtemp } from "node:fs/promises";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as incarnation from "@/storage/process-incarnation";
 import {
   ResourceLockManager,
   ResourceLockTimeoutError,
@@ -23,6 +24,7 @@ describe("resource lock manager", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await rm(root, { recursive: true, force: true });
   });
 
@@ -106,6 +108,8 @@ describe("resource lock manager", () => {
   it.skipIf(process.platform !== "linux")("recovers a different kernel process identity without stealing the current identity", async () => {
     const locks = manager({ staleAfterMs: 100, heartbeatIntervalMs: 90 });
     const lease = await locks.acquire("kernel-generation");
+    // Reproduce a lock written by the older sidecar-only release.
+    await rm(path.join(lease.lockPath, "process.json"));
     const identityPath = path.join(lease.lockPath, "process-identity.json");
     const identity = JSON.parse(await readFile(identityPath, "utf8"));
     const old = new Date(Date.now() - 5_000);
@@ -141,6 +145,96 @@ describe("resource lock manager", () => {
       .rejects.toBeInstanceOf(ResourceLockTimeoutError);
     await lease.assertHeld();
     await lease.release();
+  });
+
+  const originalIdentity = "linux:12345678-1234-1234-1234-123456789abc:4:100:200";
+  const reusedIdentity = "linux:12345678-1234-1234-1234-123456789abc:4:101:900";
+
+  async function abandonedWithLivePid(sidecar: "valid" | "missing" | "wrong-token" | "malformed") {
+    vi.spyOn(incarnation, "readProcessIncarnation").mockResolvedValue(originalIdentity);
+    const locks = manager({ staleAfterMs: 100, heartbeatIntervalMs: 90 });
+    const seed = await locks.acquire("reused-pid");
+    const owner = JSON.parse(await readFile(path.join(seed.lockPath, "owner.json"), "utf8"));
+    // Finish the seed lease, then recreate its abandoned on-disk record. The
+    // recorded PID deliberately remains alive, reproducing container PID reuse.
+    await seed.release();
+    await mkdir(seed.lockPath);
+    await writeFile(path.join(seed.lockPath, "owner.json"), JSON.stringify(owner));
+    if (sidecar !== "missing") {
+      await writeFile(path.join(seed.lockPath, "process.json"), sidecar === "malformed" ? "{" : JSON.stringify({
+        schemaVersion: 1,
+        token: sidecar === "wrong-token" ? "00000000-0000-4000-8000-000000000000" : owner.token,
+        identity: originalIdentity,
+      }));
+    }
+    const staleTime = new Date(Date.now() - 5_000);
+    await utimes(seed.lockPath, staleTime, staleTime);
+    return { locks, owner };
+  }
+
+  it("recovers a stale lock whose PID is alive but belongs to a different incarnation", async () => {
+    const { locks, owner } = await abandonedWithLivePid("valid");
+    vi.mocked(incarnation.readProcessIncarnation).mockResolvedValue(reusedIdentity);
+    const successor = await locks.acquire("reused-pid", { timeoutMs: 20 });
+    expect(successor.token).not.toBe(owner.token);
+    await successor.assertHeld();
+    await successor.release();
+  });
+
+  it("keeps concurrent contenders exclusive while recovering an old incarnation", async () => {
+    const { locks } = await abandonedWithLivePid("valid");
+    vi.mocked(incarnation.readProcessIncarnation).mockResolvedValue(reusedIdentity);
+    let inside = 0;
+    let maximumInside = 0;
+    await Promise.all(Array.from({ length: 6 }, async () => {
+      // acquire directly to exercise the filesystem protocol, independently of
+      // withLock's extra in-process queue.
+      const lease = await locks.acquire("reused-pid", { timeoutMs: 1_000 });
+      try {
+        inside += 1;
+        maximumInside = Math.max(maximumInside, inside);
+        await delay(5);
+        await lease.assertHeld();
+      } finally {
+        inside -= 1;
+        await lease.release();
+      }
+    }));
+    expect(maximumInside).toBe(1);
+  });
+
+  it("does not steal a stale lock from the same live incarnation", async () => {
+    const { locks } = await abandonedWithLivePid("valid");
+    await expect(locks.acquire("reused-pid", { timeoutMs: 20 }))
+      .rejects.toBeInstanceOf(ResourceLockTimeoutError);
+  });
+
+  it("fails closed when the current live PID identity cannot be inspected", async () => {
+    const { locks } = await abandonedWithLivePid("valid");
+    vi.mocked(incarnation.readProcessIncarnation).mockResolvedValue(null);
+    await expect(locks.acquire("reused-pid", { timeoutMs: 20 }))
+      .rejects.toBeInstanceOf(ResourceLockTimeoutError);
+  });
+
+  it.each(["missing", "wrong-token", "malformed"] as const)(
+    "preserves a live PID owner with a %s incarnation sidecar",
+    async (sidecar) => {
+      const { locks } = await abandonedWithLivePid(sidecar);
+      vi.mocked(incarnation.readProcessIncarnation).mockResolvedValue(reusedIdentity);
+      await expect(locks.acquire("reused-pid", { timeoutMs: 20 }))
+        .rejects.toBeInstanceOf(ResourceLockTimeoutError);
+    },
+  );
+
+  it("keeps a live boot-aware owner despite conflicting legacy identity metadata", async () => {
+    const { locks, owner } = await abandonedWithLivePid("valid");
+    await writeFile(path.join(locks.lockPathFor("reused-pid"), "process-identity.json"), JSON.stringify({
+      token: owner.token, processId: owner.processId, startTicks: "0", namespace: "pid:[0]",
+    }));
+    const old = new Date(Date.now() - 5_000);
+    await utimes(locks.lockPathFor("reused-pid"), old, old);
+    await expect(locks.acquire("reused-pid", { timeoutMs: 20 }))
+      .rejects.toBeInstanceOf(ResourceLockTimeoutError);
   });
 
   it("supports cancellation while waiting and idempotent release", async () => {

@@ -60,6 +60,7 @@ vi.mock("@/runtime/approval-store", () => ({
 
 vi.mock("@/runtime/thread-token", () => ({
   CURRENT_THREAD_TOOLSET_REVISION: "aibrain-tools-test",
+  currentThreadToolsetRevision: () => "aibrain-tools-test",
   readThreadTokenContext: vi.fn(() => null),
 }));
 
@@ -204,12 +205,23 @@ describe("chat turn transport lifecycle", () => {
       }
       expect(received).toEqual(Array.from({ length: 64 }, (_, index) => `${index + 1} `));
       expect(mocked.persistProjection).toHaveBeenCalledOnce();
+      // Foreground product tools require the authenticated runtime identity,
+      // independently of the permission to create automation definitions.
+      const runtimeArgs = mocked.runWorkerCodexTurn.mock.calls[0];
+      expect(runtimeArgs[17]).toEqual({ tenant: { id: "qa-company" }, user: { id: "00000000-0000-4000-8000-000000000001" } });
+      expect(runtimeArgs[17]).toBe(runtimeArgs[16]);
     } finally {
       persistence.resolve();
       completion.resolve();
       await reader.cancel();
     }
     await vi.waitFor(() => expect(mocked.releaseMaintenance).toHaveBeenCalledOnce());
+    // Foreground tools need the authenticated identity as well as the existing
+    // automation-management capability. Neither argument is a background grant.
+    const turnArguments = mocked.runWorkerCodexTurn.mock.calls[0];
+    expect(turnArguments[16]).toMatchObject({ tenant: { id: "qa-company" } });
+    expect(turnArguments[17]).toBe(turnArguments[16]);
+    expect(turnArguments[18]).toBe(false);
   });
 
   it("re-bootstraps stale toolsets while preserving current runtime threads", () => {

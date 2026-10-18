@@ -6,6 +6,7 @@
   "additionalProperties": false,
   "properties": {},
   "$defs": {
+    "WORKSITEAAppsResponse": {"anyOf": [{"type": "object"}, {"type": "array", "items": {"type": "object", "required": ["id", "title", "owner", "revision", "latestVersion", "publishedVersion", "shared"], "properties": {"id": {"type": "string", "format": "uuid"}, "title": {"type": "string"}, "owner": {"type": "string"}, "revision": {"type": "integer", "minimum": 1}, "latestVersion": {"type": "integer", "minimum": 1}, "publishedVersion": {"type": ["integer", "null"]}, "shared": {"type": "boolean"}}, "additionalProperties": false}}]},
     "CompanyMailConnectionResponse": {
       "type": "object", "additionalProperties": false,
       "required": ["status", "accountEmail", "connectionVersion"],
@@ -172,6 +173,16 @@
         "command": { "type": "string" },
         "cwd": { "type": "string" },
         "permissionFingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "fileReview": {
+          "type": "object", "additionalProperties": false, "required": ["filename", "changes"],
+          "properties": {
+            "filename": { "type": "string", "minLength": 1, "maxLength": 180 },
+            "changes": { "type": "array", "minItems": 1, "maxItems": 40, "items": {
+              "type": "object", "additionalProperties": false, "required": ["before", "after"],
+              "properties": { "before": { "type": "string", "maxLength": 32000 }, "after": { "type": "string", "maxLength": 32000 } }
+            } }
+          }
+        },
         "status": { "enum": ["pending", "accepted", "accepted_session", "declined"] }
       }
     },
@@ -188,6 +199,80 @@
         "effectiveOperations": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 160 } },
         "approvalRequiredOperations": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 160 } }
       }
+    },
+    "PersonalConnectorSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "status", "statusCode", "statusDetail", "accountEmail", "scopes", "connectUrl", "disconnectUrl", "connectionVersion"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "status": { "enum": ["connected", "requires_login", "admin_setup_required", "unavailable"] },
+        "statusCode": { "type": ["string", "null"], "maxLength": 160 },
+        "statusDetail": { "type": "string", "maxLength": 8000 },
+        "accountEmail": { "type": ["string", "null"], "minLength": 3, "maxLength": 320 },
+        "scopes": { "type": "array", "maxItems": 100, "items": { "type": "string", "minLength": 1, "maxLength": 256 } },
+        "connectUrl": { "type": ["string", "null"], "minLength": 1 },
+        "disconnectUrl": { "type": ["string", "null"], "minLength": 1 },
+        "connectionVersion": { "type": ["integer", "null"], "minimum": 1 },
+        "connectionMethod": { "const": "password" }
+      }
+    },
+    "MailErrorResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "error": { "type": "string", "minLength": 1, "maxLength": 8000 }
+      }
+    },
+    "MailConnectionCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connectorId", "label", "status", "statusCode", "checkedAt", "effectiveOperations", "approvalRequiredOperations", "accountEmail", "connectUrl", "disconnectUrl", "connectionVersion"],
+      "properties": {
+        "connectorId": { "const": "mail" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "status": { "enum": ["connected", "degraded", "reauth_required", "revoked", "not_configured"] },
+        "statusCode": { "type": ["string", "null"], "maxLength": 160 },
+        "checkedAt": { "oneOf": [{ "$ref": "#/$defs/IsoDate" }, { "type": "null" }] },
+        "effectiveOperations": { "type": "array", "maxItems": 10, "uniqueItems": true, "items": { "enum": ["folders", "list", "search", "read", "attachment", "draft", "prepare_send", "send", "flags", "move"] } },
+        "approvalRequiredOperations": { "type": "array", "const": [] },
+        "accountEmail": { "type": "string", "minLength": 3, "maxLength": 320 },
+        "connectUrl": { "const": "/api/connectors/mail/connect" },
+        "disconnectUrl": { "enum": ["/api/connectors/mail/disconnect", null] },
+        "connectionVersion": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "MailCapabilityResponse": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/MailConnectionCapability" }, { "$ref": "#/$defs/MailErrorResponse" }]
+    },
+    "MailConnectResponse": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["connected", "accountEmail", "connectionVersion"],
+          "properties": {
+            "connected": { "const": true },
+            "accountEmail": { "type": "string", "minLength": 3, "maxLength": 320 },
+            "connectionVersion": { "type": "integer", "minimum": 1 }
+          }
+        },
+        { "$ref": "#/$defs/MailErrorResponse" }
+      ]
+    },
+    "MailDisconnectResponse": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": { "status": { "const": "revoked" } }
+        },
+        { "$ref": "#/$defs/MailErrorResponse" }
+      ]
     },
     "ConnectorCapabilitiesResponse": {
       "type": "object",
@@ -668,7 +753,7 @@
             "threadId": { "$ref": "#/$defs/Uuid" },
             "fileName": { "type": "string", "minLength": 1, "maxLength": 120 },
             "relativePath": { "type": "string", "pattern": "^threads/" },
-            "kind": { "enum": ["docx", "xlsx", "xls", "pptx", "pdf", "text", "image"] },
+            "kind": { "enum": ["docx", "xlsx", "xls", "pptx", "pdf", "text", "image", "audio"] },
             "mediaType": { "type": "string", "minLength": 1, "maxLength": 180 },
             "size": { "type": "integer", "minimum": 1, "maximum": 52428800 },
             "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
@@ -693,7 +778,7 @@
             "threadId": { "$ref": "#/$defs/Uuid" },
             "sourceSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
             "status": { "enum": ["ready", "unavailable"] },
-            "kind": { "enum": ["docx", "xlsx", "xls", "pptx", "pdf", "text", "image"] },
+            "kind": { "enum": ["docx", "xlsx", "xls", "pptx", "pdf", "text", "image", "audio"] },
             "files": {
               "type": "array",
               "minItems": 0,
@@ -749,6 +834,26 @@
         "result": { "type": ["object", "null"] },
         "createdAt": { "$ref": "#/$defs/IsoDate" },
         "updatedAt": { "$ref": "#/$defs/IsoDate" }
+      }
+    },
+    "PublicationRecoveryResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["publications"],
+      "properties": {
+        "publications": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["operation", "confirmationToken"],
+            "properties": {
+              "operation": { "$ref": "#/$defs/PublicationOperation" },
+              "confirmationToken": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            }
+          }
+        }
       }
     },
     "PublicationFreezeResponse": {
@@ -1339,8 +1444,31 @@
     }
   },
   "x-examples": [
+    { "schema": "MailCapabilityResponse", "value": null },
+    { "schema": "MailCapabilityResponse", "value": { "connectorId": "mail", "label": "Correo Nominalia", "status": "connected", "statusCode": null, "checkedAt": null, "effectiveOperations": ["folders", "list", "search", "read", "attachment", "draft", "prepare_send", "send", "flags", "move"], "approvalRequiredOperations": [], "accountEmail": "employee@example.test", "connectUrl": "/api/connectors/mail/connect", "disconnectUrl": "/api/connectors/mail/disconnect", "connectionVersion": 1 } },
+    { "schema": "MailCapabilityResponse", "value": { "connectorId": "mail", "label": "Correo Nominalia", "status": "reauth_required", "statusCode": "MAIL_LOGIN_REQUIRED", "checkedAt": null, "effectiveOperations": [], "approvalRequiredOperations": [], "accountEmail": "employee@example.test", "connectUrl": "/api/connectors/mail/connect", "disconnectUrl": null, "connectionVersion": null } },
+    { "schema": "MailConnectResponse", "value": { "connected": true, "accountEmail": "employee@example.test", "connectionVersion": 1 } },
+    { "schema": "MailConnectResponse", "value": { "error": "No se ha podido conectar el correo.", "code": "MAIL_AUTH_FAILED" } },
+    { "schema": "MailConnectResponse", "value": { "code": "MAIL_RATE_LIMITED" } },
+    { "schema": "MailDisconnectResponse", "value": { "status": "revoked" } },
+    { "schema": "MailDisconnectResponse", "value": { "code": "ORIGIN_REQUIRED" } },
+    { "schema": "PersonalConnectorSettings", "value": { "id": "mail", "label": "Correo Nominalia", "status": "requires_login", "statusCode": "MAIL_LOGIN_REQUIRED", "statusDetail": "Conecta tu cuenta de correo.", "accountEmail": "employee@example.test", "scopes": ["mail.read", "mail.write", "mail.send"], "connectUrl": "/api/connectors/mail/connect", "disconnectUrl": null, "connectionVersion": null, "connectionMethod": "password" } },
+    { "schema": "PersonalConnectorSettings", "value": { "id": "gmail", "label": "Google", "status": "requires_login", "statusCode": "GMAIL_LOGIN_REQUIRED", "statusDetail": "Conecta tu cuenta de Google.", "accountEmail": null, "scopes": ["https://www.googleapis.com/auth/gmail.readonly"], "connectUrl": "/api/connectors/gmail/oauth/start", "disconnectUrl": null, "connectionVersion": null } },
+    { "schema": "PublicationRecoveryResponse", "value": { "publications": [] } },
     { "schema": "CompanyMailConnectionResponse", "value": { "status": "connected", "accountEmail": "invoices@example.test", "connectionVersion": 1 } },
     { "schema": "CompanyMailDisconnectResponse", "value": { "status": "revoked", "localCredentialDeleted": true } },
+    {
+      "schema": "WeeklyTokenBudgetResponse",
+      "value": { "budget": { "weekStart": "2026-09-20T22:00:00.000Z", "resetAt": "2026-09-27T22:00:00.000Z", "remainingPercent": 75, "threshold": 25, "initialized": true } }
+    },
+    {
+      "schema": "WeeklyTokenBudgetResponse",
+      "value": { "budget": null }
+    },
+    {
+      "schema": "WeeklyTokenBudgetResponse",
+      "value": { "budget": { "weekStart": "2026-09-20T22:00:00.000Z", "resetAt": "2026-09-27T22:00:00.000Z", "remainingPercent": null, "threshold": 0, "initialized": false } }
+    },
     {
       "schema": "WeeklyTokenBudgetResponse",
       "value": { "budget": { "weekStart": "2026-09-20T22:00:00.000Z", "resetAt": "2026-09-27T22:00:00.000Z", "remainingPercent": 75, "threshold": 25, "initialized": true } }

@@ -11,8 +11,10 @@ import { listDemoAccounts } from "@/config/tenants";
 
 export const dynamic = "force-dynamic";
 
-export default async function LoginPage() {
-  if (await getSession()) redirect("/");
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ settings?: string }> }) {
+  const { settings } = await searchParams;
+  const returnTo: "/" | "/?settings=connectors" | "/?settings=memory" = settings === "connectors" || settings === "memory" ? `/?settings=${settings}` : "/";
+  if (await getSession()) redirect(returnTo);
   const installation = await loadInstallationConfig();
   const mode = getAuthMode();
 
@@ -20,6 +22,7 @@ export default async function LoginPage() {
     <LoginForm
       accounts={mode === "demo" ? listDemoAccounts() : []}
       branding={publicInstallationBranding(installation)}
+      returnTo={returnTo}
       mode={mode}
       remotePreview={isVercelPreviewDemoEnabled()}
     />

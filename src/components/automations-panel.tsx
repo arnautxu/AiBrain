@@ -14,12 +14,14 @@ import {
   SpinnerGap,
   Trash,
 } from "@phosphor-icons/react";
-import type { AutomationAudienceDirectory, AutomationRun, AutomationSchedule, AutomationTask, AutomationTaskView } from "@/automations/contracts";
+import type { AutomationAudienceDirectory, AutomationRunHistory, AutomationSchedule, AutomationTask, AutomationTaskView } from "@/automations/contracts";
 import { AUTOMATION_TIME_ZONES } from "@/automations/contracts";
 import { describeSchedule, localMinuteToInstant, localParts } from "@/automations/schedule";
 import type { WorkbenchProject } from "@/workbench/types";
 import { STANDALONE_PROJECT_SLUG } from "@/workbench/types";
 import { useModalFocus } from "@/ui/use-modal-focus";
+import { getProjectRequest } from "@/lib/workbench-api-client";
+import { AutomationResult } from "@/components/automation-result";
 
 type ScheduleKind = AutomationSchedule["kind"];
 type AutomationDraft = {
@@ -33,16 +35,17 @@ type AutomationDraft = {
   time: string;
   onceAt: string;
   selectedWeekdays: number[];
+  fortnightly: boolean;
   audienceUserIds: string[];
   audienceGroupIds: string[];
 };
 
 
 function draftSignature(draft: AutomationDraft) {
-  return JSON.stringify(draft);
+  return JSON.stringify(Object.fromEntries(Object.entries(draft).sort(([a],[b])=>a.localeCompare(b))));
 }
 
-function dateLabel(value: string | null, timeZone: string, locale: "en" | "es" = "es") {
+function dateLabel(value: string | null, timeZone: string, locale: "en" | "es" | "ca" = "es") {
   if (!value) return "—";
   return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone }).format(new Date(value));
 }
@@ -53,7 +56,7 @@ function localInput(iso: string | null, timeZone = "Europe/Madrid") {
 }
 
 function scheduleTime(task: AutomationTask | null) {
-  if (!task || (task.schedule.kind === "once" || task.schedule.kind === "interval")) return "09:00";
+  if (!task || task.schedule.kind === "once" || task.schedule.kind === "external" || task.schedule.kind === "interval") return "09:00";
   return `${String(task.schedule.hour).padStart(2, "0")}:${String(task.schedule.minute).padStart(2, "0")}`;
 }
 
@@ -64,32 +67,35 @@ const emptyDirectory: AutomationAudienceDirectory = {
   groups: [],
 };
 
-function audienceLabel(task: AutomationTask, directory: AutomationAudienceDirectory) {
+function audienceLabel(task: AutomationTask, directory: AutomationAudienceDirectory, t: ReturnType<typeof useUiText>) {
   const users = new Map(directory.users.map((user) => [user.id, user.name]));
   const groups = new Map(directory.groups.map((group) => [group.id, group.name]));
   const labels = [
-    ...task.audience.userIds.map((id) => users.get(id) ?? "Usuario no disponible"),
-    ...task.audience.groupIds.map((id) => groups.get(id) ? `Grupo: ${groups.get(id)}` : "Grupo eliminado"),
+    ...task.audience.userIds.map((id) => users.get(id) ?? t("Usuario no disponible")),
+    ...task.audience.groupIds.map((id) => groups.get(id) ? t("Grupo: {nombre}", { nombre: groups.get(id)! }) : t("Grupo eliminado")),
   ];
-  return labels.length > 2 ? `${labels.slice(0, 2).join(", ")} y ${labels.length - 2} más` : labels.join(", ");
+  return labels.length > 2 ? t("{nombres} y {cantidad} más", { nombres: labels.slice(0, 2).join(", "), cantidad: labels.length - 2 }) : labels.join(", ");
 }
 
-export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar, onBlockingSurfaceChange }: {
+export function AutomationsPanel({ open, initialCreate = false, projects, onOpenThread, onToggleSidebar, onBlockingSurfaceChange }: {
   open: boolean;
+  initialCreate?: boolean;
   projects: WorkbenchProject[];
   onOpenThread?: (threadId: string) => void;
   onToggleSidebar?: (opener?: HTMLElement | null) => void;
   onBlockingSurfaceChange?: (open: boolean) => void;
 }) {
   const locale = useUiLocale();
-  const weekdays = locale === "en" ? ["S", "M", "T", "W", "T", "F", "S"] : ["D", "L", "M", "X", "J", "V", "S"];
+  const weekdays = locale === "en" ? ["S", "M", "T", "W", "T", "F", "S"] : locale === "ca" ? ["Dg", "Dl", "Dt", "Dc", "Dj", "Dv", "Ds"] : ["D", "L", "M", "X", "J", "V", "S"];
   const t = useUiText();
   const availableProjects = useMemo(() => projects.filter((project) => project.status === "active"), [projects]);
   const [tasks, setTasks] = useState<AutomationTaskView[]>([]);
   const [audienceDirectory, setAudienceDirectory] = useState<AutomationAudienceDirectory>(emptyDirectory);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setError] = useState<string | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [editing, setEditing] = useState<AutomationTaskView | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [name, setName] = useState("");
@@ -101,14 +107,17 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
   const [timeZone, setTimeZone] = useState("Europe/Madrid");
   const [time, setTime] = useState("09:00");
   const [onceAt, setOnceAt] = useState(localInput(null));
+  const [fortnightly, setFortnightly] = useState(false);
   const [selectedWeekdays, setSelectedWeekdays] = useState([1]);
   const [audienceUserIds, setAudienceUserIds] = useState<string[]>([]);
   const [audienceGroupIds, setAudienceGroupIds] = useState<string[]>([]);
   const [historyTaskId, setHistoryTaskId] = useState<string | null>(null);
-  const [runsByTask, setRunsByTask] = useState<Record<string, AutomationRun[]>>({});
+  const [result, setResult] = useState<{ taskId: string; threadId: string } | null>(null);
+  const [runsByTask, setRunsByTask] = useState<Record<string, AutomationRunHistory[]>>({});
   const [baselineDraft, setBaselineDraft] = useState("");
   const [discardConfirmation, setDiscardConfirmation] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AutomationTaskView | null>(null);
+  const error = actionError ?? (formOpen || deleteTarget ? null : listError ?? historyError);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const discardContinueRef = useRef<HTMLButtonElement>(null);
   const discardPreviousFocusRef = useRef<HTMLElement | null>(null);
@@ -150,9 +159,10 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
     time,
     onceAt,
     selectedWeekdays,
+    fortnightly,
     audienceUserIds,
     audienceGroupIds,
-  }), [audienceGroupIds, audienceUserIds, intervalMinutes, intervalAnchorAt, kind, name, onceAt, projectId, prompt, selectedWeekdays, time, timeZone]);
+  }), [audienceGroupIds, audienceUserIds, fortnightly, intervalMinutes, intervalAnchorAt, kind, name, onceAt, projectId, prompt, selectedWeekdays, time, timeZone]);
   const formDirty = formOpen && baselineDraft !== draftSignature(currentDraft);
 
   const closeForm = useCallback(() => {
@@ -189,19 +199,25 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
       : task.projectName;
   };
 
-  const refresh = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
-    setError(null);
+  const refresh = useCallback(async (signal?: AbortSignal, silent = false) => {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+      setListError(null);
+      setHistoryError(null);
+    }
     try {
       const response = await fetch("/api/automations", { cache: "no-store", signal });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || t("No se han podido cargar las automatizaciones."));
+      if (signal?.aborted) return;
       setTasks(Array.isArray(body.tasks) ? body.tasks : []);
       setAudienceDirectory(body.audienceDirectory ?? emptyDirectory);
+      setListError(null);
     } catch (cause) {
-      if (!signal?.aborted) setError(cause instanceof Error ? cause.message : t("No se han podido cargar las automatizaciones."));
+      if (!signal?.aborted) setListError(cause instanceof Error ? cause.message : t("No se han podido cargar las automatizaciones."));
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (!silent && !signal?.aborted) setLoading(false);
     }
   }, [t]);
 
@@ -213,33 +229,40 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
   }, [open, refresh]);
 
   useEffect(() => {
-    if (!open || formOpen || saving || deleteTarget) return;
+    if (!open || formOpen || deleteTarget || saving) return;
     const controller = new AbortController();
-    let pending = false;
-    const timer = setInterval(() => {
-      if (pending || document.visibilityState === "hidden") return;
-      pending = true;
-      void (async () => {
-        try {
-          const response = await fetch("/api/automations", { cache: "no-store", signal: controller.signal });
-          if (!response.ok) return;
+    let polling = false;
+    const poll = async () => {
+      if (polling || document.visibilityState === "hidden" || controller.signal.aborted) return;
+      polling = true;
+      try {
+        await refresh(controller.signal, true);
+        if (historyTaskId && !controller.signal.aborted) {
+          const response = await fetch(`/api/automations/${historyTaskId}/runs`, {
+            cache: "no-store", signal: controller.signal,
+          });
           const body = await response.json();
-          if (controller.signal.aborted) return;
-          setTasks(Array.isArray(body.tasks) ? body.tasks : []);
-          setAudienceDirectory(body.audienceDirectory ?? emptyDirectory);
-          if (historyTaskId) {
-            const history = await fetch(`/api/automations/${historyTaskId}/runs`, { cache: "no-store", signal: controller.signal });
-            if (!history.ok) return;
-            const result = await history.json();
-            if (!controller.signal.aborted) setRunsByTask(current => ({ ...current, [historyTaskId]: Array.isArray(result.runs) ? result.runs : [] }));
+          if (!response.ok) throw new Error(body.error || t("No se ha podido leer el historial."));
+          if (!controller.signal.aborted) {
+            setRunsByTask((current) => ({ ...current, [historyTaskId]: Array.isArray(body.runs) ? body.runs : [] }));
+            setHistoryError(null);
           }
-        } catch {
-          // Keep the last visible receipt during transient transport failures.
-        } finally { pending = false; }
-      })();
-    }, 15_000);
-    return () => { clearInterval(timer); controller.abort(); };
-  }, [open, formOpen, saving, deleteTarget, historyTaskId]);
+        }
+      } catch (cause) {
+        if (!controller.signal.aborted) setHistoryError(cause instanceof Error ? cause.message : t("No se ha podido leer el historial."));
+      } finally {
+        polling = false;
+      }
+    };
+    const timer = setInterval(() => { void poll(); }, 10_000);
+    const onVisible = () => { if (document.visibilityState === "visible") void poll(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      controller.abort();
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [deleteTarget, formOpen, historyTaskId, open, refresh, saving, t]);
 
   useEffect(() => {
     if (!discardConfirmation && !restoreDraftFocusRef.current) return;
@@ -274,12 +297,13 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
       name: task?.name ?? "",
       prompt: task?.prompt ?? "",
       projectId: task?.projectId ?? availableProjects[0]?.id ?? "",
-      kind: task?.schedule.kind ?? "daily",
+      kind: task?.schedule.kind === "external" ? "daily" : task?.schedule.kind ?? "daily",
       intervalMinutes: task?.schedule.kind === "interval" ? task.schedule.minutes : 120,
       intervalAnchorAt: task?.schedule.kind === "interval" ? task.schedule.anchorAt : null,
       timeZone: task?.timeZone ?? "Europe/Madrid",
       time: scheduleTime(task),
       onceAt: localInput(task?.schedule.kind === "once" ? task.schedule.runAt : null, task?.timeZone ?? "Europe/Madrid"),
+      fortnightly: task?.schedule.kind === "weekly" && task.schedule.intervalWeeks === 2,
       selectedWeekdays: task?.schedule.kind === "weekly" ? task.schedule.weekdays : [1],
       audienceUserIds: task?.audience.userIds ?? (audienceDirectory.currentUserId ? [audienceDirectory.currentUserId] : []),
       audienceGroupIds: task?.audience.groupIds ?? [],
@@ -298,6 +322,7 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
     setTime(nextDraft.time);
     setOnceAt(nextDraft.onceAt);
     setSelectedWeekdays(nextDraft.selectedWeekdays);
+    setFortnightly(nextDraft.fortnightly);
     setAudienceUserIds(nextDraft.audienceUserIds);
     setAudienceGroupIds(nextDraft.audienceGroupIds);
     setBaselineDraft(draftSignature(nextDraft));
@@ -305,6 +330,27 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
     setError(null);
     setFormOpen(true);
   };
+
+  const openResult = async (task: AutomationTaskView, threadId: string) => {
+    // A missing sidebar entry is not an access decision. Ask the authenticated
+    // project endpoint, then retain the narrower result viewer on denial.
+    if (onOpenThread) {
+      try {
+        const authorized = projects.some(project => project.id === task.projectId)
+          || (await getProjectRequest(task.projectId)).id === task.projectId;
+        if (authorized) { onOpenThread(threadId); return; }
+      } catch { /* Result access is checked independently by the thread endpoint. */ }
+    }
+    setResult({ taskId: task.id, threadId });
+  };
+
+  const initialCreateHandled = useRef(false);
+  useEffect(() => {
+    if (open && initialCreate && !loading && audienceDirectory.currentUserId && newAutomationRef.current && !initialCreateHandled.current) {
+      initialCreateHandled.current = true;
+      openForm(null, newAutomationRef.current);
+    }
+  });
 
   const schedule = (): AutomationSchedule => {
     const [hour, minute] = time.split(":").map(Number);
@@ -316,7 +362,7 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
       return { kind, runAt: localMinuteToInstant({ year, month, day, hour: onceHour, minute: onceMinute }, timeZone).toISOString() };
     }
     if (kind === "daily") return { kind, hour, minute };
-    return { kind, weekdays: selectedWeekdays.toSorted(), hour, minute };
+    return { kind, weekdays: selectedWeekdays.toSorted(), hour, minute, ...(fortnightly ? { intervalWeeks: 2 as const, anchorDate: editing?.schedule.kind === "weekly" && editing.schedule.anchorDate || localInput(null,timeZone).slice(0,10) } : {}) };
   };
 
   const save = async () => {
@@ -390,15 +436,16 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
   };
 
   const toggleHistory = async (task: AutomationTaskView) => {
-    if (historyTaskId === task.id) { setHistoryTaskId(null); return; }
+    if (historyTaskId === task.id) { setHistoryTaskId(null); setHistoryError(null); return; }
     setHistoryTaskId(task.id);
     try {
       const response = await fetch(`/api/automations/${task.id}/runs`, { cache: "no-store" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || t("No se ha podido leer el historial."));
       setRunsByTask((current) => ({ ...current, [task.id]: Array.isArray(body.runs) ? body.runs : [] }));
+      setHistoryError(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("No se ha podido leer el historial."));
+      setHistoryError(cause instanceof Error ? cause.message : t("No se ha podido leer el historial."));
     }
   };
 
@@ -437,13 +484,14 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
       <div inert={formOpen || deleteTarget ? true : undefined} aria-hidden={formOpen || deleteTarget ? true : undefined} className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 py-5">
         {error ? <p role="alert" className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[11px] text-[var(--danger)]">{t(error)}</p> : null}
         {loading ? <div className="flex min-h-44 items-center justify-center gap-2 text-[11px] text-[var(--text-subtle)]"><SpinnerGap size={15} className="motion-safe:animate-spin" />{t("Cargando automatizaciones…")}</div> : tasks.length ? <div className="space-y-2.5">{tasks.map((task) => <article key={task.id} className="rounded-[16px] border border-[var(--border)] bg-[var(--surface)] p-4">
-          <div className="flex items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[var(--surface-muted)] text-[var(--text-secondary)]"><Clock size={16} /></span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-[13px] font-semibold text-[var(--text)]">{task.name}</h3><span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${task.state === "active" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`}>{task.state === "active" ? t("Activa") : task.state === "paused" ? t("En pausa") : t("Completada")}</span>{task.lease || task.manualRun ? <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[9px] font-semibold text-[var(--brain-accent-on-soft)]">{task.lease ? t("En curso") : t("Ejecución en cola")}</span> : null}</div><p className="mt-1 truncate text-[10px] text-[var(--text-subtle)]">{taskProjectLabel(task)} · {describeSchedule(task.schedule, task.timeZone)} · {task.timeZone}</p></div></div>
+          <div className="flex items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[var(--surface-muted)] text-[var(--text-secondary)]"><Clock size={16} /></span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-[13px] font-semibold text-[var(--text)]">{task.name}</h3><span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${task.state === "active" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`}>{task.state === "active" ? t("Activa") : task.state === "paused" ? t("En pausa") : t("Completada")}</span>{task.lease || task.manualRun ? <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[9px] font-semibold text-[var(--brain-accent-on-soft)]">{task.lease ? t("En curso") : t("Ejecución en cola")}</span> : null}</div><p className="mt-1 truncate text-[10px] text-[var(--text-subtle)]">{taskProjectLabel(task)} · {describeSchedule(task.schedule, task.timeZone, locale)} · {task.timeZone}</p></div></div>
           <p className="mt-3 line-clamp-2 text-[11px] leading-5 text-[var(--text-muted)]">{task.prompt}</p>
-          <p className="mt-2 text-[10px] leading-4 text-[var(--text-subtle)]">{t("Propietario:")}{" "}{task.owner.name} {" "}{t("· Destinatarios:")}{" "}{audienceLabel(task, audienceDirectory)}</p>
+          <p className="mt-2 text-[10px] leading-4 text-[var(--text-subtle)]">{t("Propietario:")}{" "}{task.owner.name} {" "}{t("· Destinatarios:")}{" "}{audienceLabel(task, audienceDirectory, t)}</p>
           <dl className="mt-3 grid grid-cols-2 gap-2 rounded-xl bg-[var(--surface-muted)] px-3 py-2.5 text-[10px]"><div><dt className="text-[var(--text-subtle)]">{t("Próxima")}</dt><dd className="mt-0.5 font-medium text-[var(--text)]">{dateLabel(task.nextRunAt, task.timeZone, locale)}</dd></div><div><dt className="text-[var(--text-subtle)]">{t("Última")}</dt><dd className={`mt-0.5 font-medium ${task.lastRunStatus === "failed" ? "text-[var(--danger)]" : "text-[var(--text)]"}`}>{task.lastRunAt ? `${dateLabel(task.lastRunAt, task.timeZone, locale)}${task.lastRunStatus === "failed" ? t(" · Falló") : ""}` : t("Aún no ejecutada")}</dd></div></dl>
           {task.lastRunError ? <p className="mt-2 text-[10px] leading-4 text-[var(--danger)]">{task.lastRunError}</p> : null}
-          <div className="mt-3 flex flex-wrap justify-end gap-1"><button type="button" onClick={() => void toggleHistory(task)} className="touch-target min-h-9 rounded-lg px-2 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">{t("Historial y resultados")}</button>{task.access.canManage ? <><button type="button" disabled={saving || Boolean(task.lease || task.manualRun)} onClick={() => void runNow(task)} className="touch-target min-h-9 rounded-lg px-2 text-[10px] font-semibold text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:opacity-30">{t("Ejecutar ahora")}</button><button type="button" disabled={saving || task.state === "completed"} onClick={() => void patchTask(task, { state: task.state === "active" ? "paused" : "active" })} aria-label={task.state === "active" ? `Pausar ${task.name}` : `Reanudar ${task.name}`} className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-30">{task.state === "active" ? <Pause size={14} /> : <Play size={14} />}</button><button type="button" disabled={saving} onClick={(event) => openForm(task, event.currentTarget)} aria-label={t("Editar {p0}", { p0: task.name })} className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"><PencilSimple size={14} /></button><button type="button" disabled={saving} onClick={(event) => { deleteOpenerRef.current = event.currentTarget; reportBlockingSurface(true); setError(null); setDeleteTarget(task); }} aria-label={t("Eliminar {p0}", { p0: task.name })} className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"><Trash size={14} /></button></> : null}</div>
-          {historyTaskId === task.id ? <div className="mt-3 space-y-2 rounded-xl bg-[var(--surface-muted)] p-3">{(runsByTask[task.id] ?? []).length ? (runsByTask[task.id] ?? []).slice(0, 8).map((run) => <div key={`${run.runKey}:${run.attempt}:${run.status}`} className="flex items-center gap-2 text-[10px]"><span className={run.status === "succeeded" ? "text-[var(--positive)]" : run.status === "failed" ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"}>{run.status === "succeeded" ? t("Completada") : run.status === "failed" ? t("Con error") : t("En curso")}</span><time className="text-[var(--text-subtle)]">{dateLabel(run.finishedAt ?? run.startedAt, task.timeZone, locale)}</time>{run.threadId && onOpenThread ? <button type="button" onClick={() => onOpenThread(run.threadId!)} className="ml-auto font-semibold text-[var(--brain-accent-on-soft)]">{t("Abrir resultado")}</button> : null}</div>) : <p className="text-[10px] text-[var(--text-subtle)]">{t("Aún no hay ejecuciones registradas.")}</p>}</div> : null}
+          {task.preparationBlock ? <p className="mt-2 text-[11px] text-[var(--text-muted)]">{task.preparationBlock}</p> : null}<div className="mt-3 flex flex-wrap justify-end gap-1"><button type="button" onClick={() => void toggleHistory(task)} className="touch-target min-h-9 rounded-lg px-2 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">{t("Historial y resultados")}</button>{task.schedule.kind === "external" ? <a href="/automations/host-jobs" className="touch-target min-h-9 rounded-lg px-2 py-2 text-[10px] underline">{t("Autorización operativa")}</a> : null}{task.access.canManage ? <><button type="button" disabled={saving || Boolean(task.lease || task.manualRun) || Boolean(task.preparationBlock) || task.schedule.kind === "external"} onClick={() => void runNow(task)} className="touch-target min-h-9 rounded-lg px-2 text-[10px] font-semibold text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:opacity-30">{t("Ejecutar ahora")}</button><button type="button" disabled={saving || task.state === "completed" || Boolean(task.preparationBlock)} onClick={() => void patchTask(task, { state: task.state === "active" ? "paused" : "active" })} aria-label={task.state === "active" ? t("Pausar {nombre}", { nombre: task.name }) : t("Reanudar {nombre}", { nombre: task.name })} className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-30">{task.state === "active" ? <Pause size={14} /> : <Play size={14} />}</button><button type="button" disabled={saving || task.schedule.kind === "external"} onClick={(event) => openForm(task, event.currentTarget)} aria-label={t("Editar {p0}", { p0: task.name })} className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"><PencilSimple size={14} /></button><button type="button" disabled={saving} onClick={(event) => { deleteOpenerRef.current = event.currentTarget; reportBlockingSurface(true); setError(null); setDeleteTarget(task); }} aria-label={t("Eliminar {p0}", { p0: task.name })} className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"><Trash size={14} /></button></> : null}</div>
+          {historyTaskId === task.id ? <div className="mt-3 space-y-2 rounded-xl bg-[var(--surface-muted)] p-3">{(runsByTask[task.id] ?? []).length ? (runsByTask[task.id] ?? []).slice(0, 8).map((run) => <div key={`${run.runKey}:${run.attempt}:${run.status}`} className="flex items-center gap-2 text-[10px]"><span className={run.status === "succeeded" ? "text-[var(--positive)]" : run.status === "failed" ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"}>{run.status === "succeeded" ? t("Completada") : run.status === "failed" ? t("Con error") : run.status === "interrupted" ? t("Interrumpida") : t("En curso")}</span><time className="text-[var(--text-subtle)]">{dateLabel(run.finishedAt ?? run.startedAt, task.timeZone, locale)}</time>{run.threadId && task.access.canViewResults ? <button type="button" onClick={() => { void openResult(task, run.threadId!); }} className="ml-auto font-semibold text-[var(--brain-accent-on-soft)]">{t("Abrir resultado")}</button> : null}</div>) : <p className="text-[10px] text-[var(--text-subtle)]">{t("Aún no hay ejecuciones registradas.")}</p>}</div> : null}
+          {historyTaskId === task.id && result?.taskId === task.id ? <AutomationResult key={result.threadId} threadId={result.threadId} onClose={() => setResult(null)} /> : null}
         </article>)}</div> : <div className="grid min-h-64 place-items-center px-8 text-center"><div className="workspace-empty-state"><span className="mx-auto grid size-12 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]"><CalendarBlank size={21} /></span><p className="mt-3 text-[13px] font-semibold text-[var(--text)]">{t("Aún no hay automatizaciones")}</p><p className="mt-1 text-[11px] leading-5 text-[var(--text-subtle)]">{t("Programa trabajo recurrente en un proyecto o Sin proyecto.")}</p><button ref={bindNewAutomationButton} type="button" disabled={!availableProjects.length || !audienceDirectory.currentUserId} onClick={(event) => openForm(null, event.currentTarget)} className="touch-target mx-auto mt-5 inline-flex min-h-10 items-center gap-1.5 rounded-full bg-[var(--text)] px-4 text-[11px] font-semibold text-[var(--surface)] disabled:opacity-35"><Plus size={14} />{t("Nueva")}</button></div></div>}
       </div>
 
@@ -461,6 +509,7 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
             <p className="text-[10px] leading-4 text-[var(--text-subtle)]">{t("La audiencia y pertenencia actuales se comprueban al abrir cualquier resultado, también los anteriores. Si alguien sale del grupo o se desactiva, pierde el acceso.")}</p>
           </div></fieldset>
           <fieldset><legend className="text-[11px] font-semibold text-[var(--text)]">{t("Frecuencia")}</legend><div className="mt-2 flex gap-1 rounded-xl bg-[var(--surface-muted)] p-1">{(["once", "interval", "daily", "weekly"] as const).map((option) => <button key={option} type="button" aria-pressed={kind === option} onClick={() => setKind(option)} className={`touch-target min-h-9 flex-1 rounded-lg text-[11px] font-medium ${kind === option ? "bg-[var(--surface-raised)] text-[var(--text)] shadow-[var(--shadow-sm)]" : "text-[var(--text-muted)]"}`}>{option === "once" ? t("Una vez") : option === "interval" ? t("Por intervalo") : option === "daily" ? t("Cada día") : t("Semanal")}</button>)}</div></fieldset>
+          {kind === "weekly" ? <label className="flex gap-2 text-sm"><input type="checkbox" checked={fortnightly} onChange={event=>setFortnightly(event.target.checked)} />{t("Cada dos semanas")}</label> : null}
           {kind === "weekly" ? <fieldset><legend className="text-[11px] font-semibold text-[var(--text)]">{t("Días")}</legend><div className="mt-2 flex gap-1.5">{weekdays.map((label, day) => <button key={day} type="button" aria-pressed={selectedWeekdays.includes(day)} onClick={() => setSelectedWeekdays((current) => current.includes(day) ? current.filter((item) => item !== day) : [...current, day])} className={`touch-target grid size-9 place-items-center rounded-full text-[10px] font-semibold ${selectedWeekdays.includes(day) ? "bg-[var(--text)] text-[var(--surface)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`}>{label}</button>)}</div></fieldset> : null}
           {kind === "interval" ? <label className="block text-[11px] font-semibold text-[var(--text)]">{t("Intervalo en minutos")}<input type="number" min={60} max={10080} step={1} value={intervalMinutes} onChange={event => setIntervalMinutes(Number(event.target.value))} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /><span className="mt-1 block text-[11px] font-normal text-[var(--text-subtle)]">{t("La primera ejecución será dentro del intervalo seleccionado.")}</span></label> : kind === "once" ? <div className="grid grid-cols-2 gap-3"><label className="block text-[11px] font-semibold text-[var(--text)]">{t("Fecha")}<input type="date" value={onceAt.split("T")[0] ?? ""} onChange={(event) => setOnceAt(`${event.target.value}T${onceAt.split("T")[1] ?? "09:00"}`)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label><label className="block text-[11px] font-semibold text-[var(--text)]">{t("Hora")}<input type="time" value={onceAt.split("T")[1] ?? "09:00"} onChange={(event) => setOnceAt(`${onceAt.split("T")[0] ?? ""}T${event.target.value}`)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label></div> : <label className="block text-[11px] font-semibold text-[var(--text)]">{t("Hora")}<input type="time" value={time} onChange={(event) => setTime(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label>}
           <label className="block text-[11px] font-semibold text-[var(--text)]">{t("Zona horaria")}<select value={timeZone} onChange={(event) => setTimeZone(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal">{AUTOMATION_TIME_ZONES.map((zone) => <option key={zone} value={zone}>{zone}</option>)}</select></label>

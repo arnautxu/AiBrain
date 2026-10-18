@@ -225,6 +225,20 @@ describe("server-side publication routes", () => {
     expect(await readFile(targetPath, "utf8")).toBe("official original");
   });
 
+  it("does not disclose recovered confirmations to unauthenticated or other users", async () => {
+    const { GET } = await import("@/app/api/threads/[threadId]/publications/route");
+    const request = new Request("http://localhost/publications");
+    auth.session = null;
+    expect((await GET(request, { params: Promise.resolve({ threadId }) })).status).toBe(401);
+    auth.session = session(USER_B);
+    expect((await GET(request, { params: Promise.resolve({ threadId }) })).status).toBe(404);
+    auth.session = session(USER_A);
+    expect((await GET(request, { params: Promise.resolve({ threadId: "invalid" }) })).status).toBe(400);
+    const result = await GET(request, { params: Promise.resolve({ threadId }) });
+    expect(result.headers.get("Cache-Control")).toBe("no-store");
+    expect(await result.json()).toEqual({ publications: [] }); // Other installations keep local publication unchanged.
+  });
+
   it("publishes exactly once and retains the original version", async () => {
     auth.session = session(USER_A);
     const frozen = await freeze(PUBLISH_OPERATION, "freeze-publish");

@@ -8,7 +8,7 @@ import { UserProvisioner } from "@/users/provisioner";
 import { FileWorkbenchStore } from "@/workbench/filesystem-store";
 import { FileSharedAccessIndex } from "@/workbench/shared-access-index";
 import { loadSharedWorkbench, resolveProjectAccess, resolveThreadAccess } from "@/workbench/shared-access";
-import { createProject, createThread, updateProject, updateThread } from "@/workbench/store";
+import { createProject, createThread, getThreadRuntimeContext, updateProject, updateThread } from "@/workbench/store";
 
 vi.mock("server-only", () => ({}));
 
@@ -109,19 +109,23 @@ describe("shared project visibility", () => {
       FileWorkbenchStore.prototype as unknown as { read: (userId: string) => unknown },
       "read",
     );
+    const metadataReadSpy = vi.spyOn(FileWorkbenchStore.prototype, "loadAccessSnapshot");
     const outsiderSnapshot = await loadSharedWorkbench(outsiderSession);
     expect(outsiderSnapshot.projects.some((item) => item.id === project.id)).toBe(false);
     expect(readSpy.mock.calls.map(([userId]) => userId)).not.toContain(ownerId);
 
+    metadataReadSpy.mockClear();
     readSpy.mockClear();
     await expect(resolveProjectAccess(outsiderSession, project.id)).rejects.toThrow("Projecte no trobat");
     expect(readSpy.mock.calls.map(([userId]) => userId)).not.toContain(ownerId);
 
+    expect(metadataReadSpy.mock.calls.map(([userId]) => userId)).not.toContain(ownerId);
+    metadataReadSpy.mockClear();
     readSpy.mockClear();
     const access = await resolveProjectAccess(memberSession, project.id);
     expect(access.ownerUserId).toBe(ownerId);
     expect(access.provenance).toMatchObject({ source: "shared-access-index" });
-    expect(readSpy.mock.calls.map(([userId]) => userId)).toContain(ownerId);
+    expect(metadataReadSpy.mock.calls.map(([userId]) => userId)).toContain(ownerId);
 
     const threadAccess = await resolveThreadAccess(memberSession, thread.id);
     expect(threadAccess.provenance).toMatchObject({ source: "shared-access-index" });
@@ -134,6 +138,9 @@ describe("shared project visibility", () => {
     const editorSnapshot = await loadSharedWorkbench(editorSession);
     expect(editorSnapshot.projects.find((item) => item.id === project.id)?.access)
       .toEqual({ role: "editor", canEdit: true, canManage: false });
+    expect((await getThreadRuntimeContext(editorSession, thread.id)).visibleProjects)
+      .toContainEqual({ id: project.id, name: project.name });
+    await expect(getThreadRuntimeContext(memberSession, thread.id)).rejects.toThrow("només lectura");
 
     await expect(updateThread(memberSession, thread.id, { pinned: true }))
       .resolves.toMatchObject({ id: thread.id, pinned: true, title: "Conversación visible" });
@@ -165,5 +172,6 @@ describe("shared project visibility", () => {
     const audit = await index.readAudit();
     expect(audit.some((entry) => entry.payload.action === "resolve" && entry.payload.outcome === "denied" && entry.payload.actorUserId === outsiderId)).toBe(true);
     expect(audit.some((entry) => entry.payload.action === "resolve" && entry.payload.outcome === "allowed" && entry.payload.actorUserId === memberId && entry.payload.grantFingerprint)).toBe(true);
+    metadataReadSpy.mockRestore(); readSpy.mockRestore();
   }, 15_000);
 });

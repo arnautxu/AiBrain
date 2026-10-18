@@ -41,6 +41,8 @@ FROM ${NODE_IMAGE} AS builder
 WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
+# Installation artwork never enters the reusable image.
+RUN node -e "require('node:fs').writeFileSync('config/profile-artwork.json', '[]\\n')"
 RUN npm run build && npm run build:automation-worker && npm run build:weekly-token-budget && npm run build:container-app-server-acceptance && npm run build:presentation-runtime && node scripts/build-container-presentation-tool-acceptance.mjs && node scripts/build-container-xls-passive-acceptance.mjs
 
 FROM ${NODE_IMAGE} AS runtime
@@ -66,7 +68,7 @@ ENV NODE_ENV=production \
     AIBRAIN_PDFTOPPM_BIN=/usr/local/bin/aibrain-pdftoppm \
     AIBRAIN_PDFTOTEXT_BIN=/usr/local/bin/aibrain-pdftotext \
     AIBRAIN_QPDF_BIN=/usr/local/bin/aibrain-qpdf \
-    AIBRAIN_CODEX_EXPECTED_VERSION=0.153.4 \
+    AIBRAIN_CODEX_EXPECTED_VERSION=0.162.1 \
     AIBRAIN_INTERNAL_AGENT_CONTEXT_ROOT=/usr/local/share/aibrain/internal-agent-context \
     HOME=/var/lib/aibrain/data/app-home \
     XDG_CACHE_HOME=/var/lib/aibrain/data/server/xdg/cache \
@@ -117,7 +119,7 @@ RUN printf '%s\n' \
     restic \
     tini \
   && rm -rf /var/lib/apt/lists/* \
-  && npm install --global --omit=dev "@openai/codex@0.153.4" "tsx@4.20.6" \
+  && npm install --global --omit=dev "@openai/codex@0.162.1" "tsx@4.20.6" \
   && mv /usr/local/bin/codex /usr/local/bin/codex-real \
   && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
   && groupadd --system --gid "${AIBRAIN_GID}" aibrain \
@@ -149,6 +151,7 @@ RUN install -d -m 0555 -o root -g root /work
 COPY --from=builder --chown=root:root /app/dist/pptxgenjs.cjs /usr/local/share/aibrain/pptxgenjs.cjs
 COPY --chown=root:root scripts/container-document-conversion-acceptance.mjs /usr/local/share/aibrain/container-document-conversion-acceptance.mjs
 COPY --chown=root:root scripts/xlsx-turn-text.py /usr/local/share/aibrain/xlsx-turn-text.py
+COPY --chown=root:root scripts/nominalia-mail.py /usr/local/share/aibrain/nominalia-mail.py
 COPY --chown=root:root scripts/xls-passive-read.py /usr/local/share/aibrain/xls-passive-read.py
 COPY --chown=root:root docs/PRESENTATION_AUTHORING.md /usr/local/share/aibrain/presentations.md
 

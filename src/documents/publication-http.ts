@@ -6,6 +6,12 @@ import { StorageError } from "@/storage";
 export function publicationDecisionError(error: unknown) {
   const code = error instanceof StorageError ? error.code : "PUBLICATION_UNAVAILABLE";
   operationalLogger.warn("publication.decision_rejected", { code });
+  if (code === "PUBLICATION_REMOTE_UNCERTAIN") {
+    return NextResponse.json({ code, error: "No se ha confirmado el guardado. Comprueba el estado de esta misma operación; no prepares otra copia todavía." }, { status: 503 });
+  }
+  if (code === "PUBLICATION_REMOTE_DISABLED") {
+    return NextResponse.json({ code, error: "El guardado en el servidor todavía no está habilitado." }, { status: 503 });
+  }
   if (error instanceof PublicationStorageBackpressureError) {
     return NextResponse.json(
       { error: "El volum documental necessita marge abans de publicar.", code, retryable: true },

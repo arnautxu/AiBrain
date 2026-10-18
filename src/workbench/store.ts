@@ -38,7 +38,7 @@ import { STANDALONE_PROJECT_SLUG } from "@/workbench/types";
 import type { AgentThreadRuntimeContext, ThreadRuntimeContext } from "@/workbench/internal";
 import {
   loadSharedWorkbench,
-  loadSharedWorkbenchForResolvedThread,
+  loadVisibleProjectsForResolvedThread,
   normalizeProjectMembers,
   resolveProjectAccess,
   resolveThreadAccess,
@@ -189,7 +189,7 @@ export async function getWritableProject(session: AuthSession, projectId: string
   if (access.role === "viewer") {
     throw new WorkbenchConflictError("No tienes permisos para crear trabajo en este proyecto compartido.");
   }
-  return access.store.getProject(access.ownerUserId, projectId);
+  return access.project;
 }
 
 export async function listThreads(
@@ -341,11 +341,12 @@ export async function getThreadRuntimeContext(
 ): Promise<AgentThreadRuntimeContext> {
   if (mode(session) === "filesystem") {
     assertFilesystemWorkbenchId(threadId);
-    const access = await resolveThreadAccess(session, threadId);
+    const access = await resolveThreadAccess(session, threadId, { includeTurnContext: true });
     if (access.role === "viewer") throw new WorkbenchConflictError("Aquest projecte compartit és de només lectura.");
+    if (!access.turnContext) throw new WorkbenchNotFoundError("Fil o projecte actiu no trobat.");
     return withVisibleProjects(
-      await access.store.getThreadRuntimeContext(access.ownerUserId, threadId),
-      await loadSharedWorkbench(session),
+      access.turnContext.context,
+      await loadVisibleProjectsForResolvedThread(access),
     );
   }
   assertWorkbenchId(threadId);
@@ -368,21 +369,20 @@ export async function prepareThreadTurn(session: AuthSession, threadId: string) 
     throw new WorkbenchPersistenceError("La preparació persistent requereix un workbench local.");
   }
   assertFilesystemWorkbenchId(threadId);
-  const access = await resolveThreadAccess(session, threadId);
+  const access = await resolveThreadAccess(session, threadId, { includeTurnContext: true });
   if (access.role === "viewer") {
     throw new WorkbenchConflictError("Aquest projecte compartit és de només lectura.");
   }
-  const [runtimeContext, visibleSnapshot, rebootstrapHistory] = await Promise.all([
-    access.store.getThreadRuntimeContext(access.ownerUserId, threadId),
-    loadSharedWorkbenchForResolvedThread(access),
-    access.store.getThreadConversationHistory(access.ownerUserId, threadId),
-  ]);
+  if (!access.turnContext) throw new WorkbenchNotFoundError("Fil o projecte actiu no trobat.");
+  const { context: runtimeContext, rebootstrapHistory } = access.turnContext;
+  const visibleSnapshot = await loadVisibleProjectsForResolvedThread(access);
+  const { store, ownerUserId } = access;
   return {
     context: withVisibleProjects(runtimeContext, visibleSnapshot),
     rebootstrapHistory,
     begin(userMessage: ChatMessage, assistantMessage: ChatMessage) {
-      return access.store.beginThreadTurn(
-        access.ownerUserId,
+      return store.beginThreadTurn(
+        ownerUserId,
         threadId,
         userMessage,
         assistantMessage,

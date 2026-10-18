@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   atomicTemporaryPath,
   atomicWriteFile,
+  atomicWriteFileChunks,
   atomicWriteJson,
   listAtomicTemporaryFiles,
   readValidatedJson,
@@ -44,6 +45,22 @@ describe("atomic file storage", () => {
 
   afterEach(async () => {
     await rm(root, { recursive: true, force: true });
+  });
+
+  it("writes bounded chunks through the same atomic stages", async () => {
+    const stages: AtomicWriteStage[] = [];
+    async function* chunks() { yield "first — €\n"; yield new TextEncoder().encode("last\n"); }
+    await atomicWriteFileChunks(target, chunks(), { onStage: (stage) => { stages.push(stage); } });
+    expect(await readFile(target, "utf8")).toBe("first — €\nlast\n");
+    expect(stages).toEqual(["temporary-created", "temporary-synced", "renamed", "directory-synced"]);
+  });
+
+  it("keeps the previous canonical file and removes a partial temporary when a chunk producer fails", async () => {
+    await atomicWriteFile(target, "previous canonical");
+    async function* chunks() { yield "partial replacement"; throw new Error("bounded producer failed"); }
+    await expect(atomicWriteFileChunks(target, chunks())).rejects.toThrow("bounded producer failed");
+    expect(await readFile(target, "utf8")).toBe("previous canonical");
+    expect(await listAtomicTemporaryFiles(target)).toEqual([]);
   });
 
   it("syncs the temporary before rename and the directory after rename", async () => {

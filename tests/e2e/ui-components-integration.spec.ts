@@ -18,7 +18,7 @@ for (const [name, viewport] of Object.entries({ desktop: { width: 1440, height: 
     await page.getByTestId("composer").locator("textarea").fill("Prova visual del botó");
     await expect(send).toBeEnabled();
     await send.focus();
-    expect(await send.evaluate((element) => getComputedStyle(element).backgroundImage)).toContain("radial-gradient");
+    expect(await send.evaluate((element) => getComputedStyle(element).backgroundImage)).toBe("none");
     await page.screenshot({ path: `.impeccable/review/landing-stars-${name}.png`, fullPage: true });
     const backdrop = await page.getByTestId("composer").evaluate((element) => ({
       filter: getComputedStyle(element).backdropFilter,
@@ -66,23 +66,20 @@ for (const [name, viewport] of Object.entries({ desktop: { width: 1440, height: 
       const rect = element.getBoundingClientRect();
       return { x: rect.x, y: rect.y, bottom: rect.bottom, radius: getComputedStyle(element).borderRadius };
     });
-    if (name === "desktop") {
-      expect(panelGeometry).toEqual({ x: 12, y: 12, bottom: viewport.height - 12, radius: "20px" });
-    } else {
-      expect(panelGeometry.x).toBe(0);
-      expect(panelGeometry.y).toBe(0);
-    }
+    // The Codex-style sidebar is flush to the viewport in both layouts.
+    expect(panelGeometry).toEqual({ x: 0, y: 0, bottom: viewport.height, radius: "0px" });
     const newConversation = sidebar.getByRole("button", { name: "Nueva conversación", exact: true });
-    expect(await newConversation.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe("none");
+    expect(await newConversation.evaluate((element) => getComputedStyle(element).boxShadow)).toBe("none");
     await page.evaluate(() => document.fonts.ready);
     expect(await page.locator("body").evaluate((element) => getComputedStyle(element).fontFamily)).toContain("-apple-system");
     if (name === "mobile") await page.screenshot({ path: ".impeccable/review/integrated-mobile-sidebar.png", fullPage: true });
     await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
-    // Primary surfaces invert in dark mode; a literal text-white would
-    // make the governed action unreadable even though its handler still works.
-    const approvalColors = await page.getByRole("button", { name: "Permitir", exact: true }).evaluate((element) => {
+    // Chat confirmation guidance remains readable in dark mode.
+    const permissionCard = page.locator('[data-slot="permission-grant"]');
+    await expect(permissionCard.getByRole("button")).toHaveCount(0);
+    const approvalColors = await permissionCard.getByRole("status").evaluate((element) => {
       const style = getComputedStyle(element);
-      return { foreground: style.color, background: style.backgroundColor };
+      return { foreground: style.color, background: getComputedStyle(element.closest('[data-slot="permission-grant"]')!).backgroundColor };
     });
     expect(approvalColors.foreground).not.toBe(approvalColors.background);
     await page.screenshot({ path: `.impeccable/review/integrated-${name}-dark.png`, fullPage: true });

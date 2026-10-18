@@ -36,7 +36,7 @@ describe("production Codex App Server acceptance gate", () => {
     const [dockerfile, entrypoint, workflow, readiness, appArmor] = await Promise.all([
       readFile(path.join(repositoryRoot, "Dockerfile"), "utf8"),
       readFile(path.join(repositoryRoot, "infra/hetzner/app/entrypoint.sh"), "utf8"),
-      readFile(path.join(repositoryRoot, ".github/workflows/backend-ci.yml"), "utf8"),
+      readFile(path.join(repositoryRoot, ".github/workflows/candidate-validation.yml"), "utf8"),
       readFile(path.join(repositoryRoot, "src/operations/runtime-readiness.ts"), "utf8"),
       readFile(path.join(repositoryRoot, "infra/hetzner/apparmor/aibrain-container"), "utf8"),
     ]);

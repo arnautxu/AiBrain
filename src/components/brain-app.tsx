@@ -1,5 +1,8 @@
+import workspaceLayout from "@/components/workspace-layout.module.css";
 "use client";
 import { MAX_FILES_PER_MESSAGE } from "@/lib/chat-attachment-limits";
+import { continuingDocumentUploads } from "@/lib/continuing-document-uploads";
+
 import { useUiText } from "@/i18n/provider";
 
 import { isServerReferenceList, type ServerReference } from "@/documents/server-reference-contract";
@@ -8,6 +11,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { AuthSession } from "@/auth/types";
 import { ChatWorkspace } from "@/components/chat-workspace";
+
+import { MAX_COMPOSER_TEXT_CHARS as MAX_COMPOSER_DRAFT_CHARS } from "@/lib/chat-input-limits";
 import { LiveAnswerStore } from '@/ui/live-answer-store';
 import { BrowserPanel } from "@/components/browser-panel";
 import { CommandPalette } from "@/components/command-palette";
@@ -15,6 +20,7 @@ import { CustomizationPanel } from "@/components/customization-panel";
 import { DetailsPanel } from "@/components/details-panel";
 import { DocumentPreviewPanel } from "@/components/document-preview-panel";
 import { ProjectPanel } from "@/components/project-panel";
+
 import { AutomationsPanel } from "@/components/automations-panel";
 import { TaskCenterPanel } from "@/components/task-center-panel";
 import { isEditableShortcutTarget, isTaskCenterShortcut } from "@/components/use-task-center-shortcut";
@@ -33,6 +39,7 @@ import {
 } from "@/config/brain";
 import {
   applyChatStreamEvent,
+  approvalResolutionForItem,
   type ApprovalDecision,
   type ApprovalItem,
   type ChatMessage,
@@ -53,6 +60,7 @@ import {
   consumeRecoverableChatStream,
   type ChatStreamRecoveryState,
 } from "@/ui/recoverable-chat-stream";
+import { PendingTurnStop, stopControlAccepted } from "@/ui/pending-turn-stop";
 import { createChatReattachRequest } from "@/ui/chat-reattach-request";
 import { useStoredResponse } from "@/ui/use-stored-response";
 import { useRuntimeStatus } from "@/ui/use-runtime-status";
@@ -68,6 +76,7 @@ import {
 import {
   decideDocumentPublication,
   freezeDocumentPublication,
+  recoverDocumentPublications,
   type DocumentPublicationDraft,
 } from "@/ui/publication-ui-adapter";
 import {
@@ -93,6 +102,7 @@ import {
 import {
   isWorkbenchSnapshot,
   STANDALONE_PROJECT_SLUG,
+  workbenchProjectAccess,
   workbenchThreadAccess,
   type BranchThreadInput,
   type UpdateProjectInput,
@@ -177,6 +187,7 @@ type ConfirmDialogState =
   | { kind: "undo-result"; message: ChatMessage };
 
 type StreamRecoveryNotice = {
+  admissionUnconfirmed?: boolean;
   threadId: string;
   assistantMessageId: string;
   attempt: number | null;
@@ -298,10 +309,6 @@ function publicationTarget(fileName: string) {
 function byPriority<Item extends { pinned: boolean; updatedAt: string }>(a: Item, b: Item) {
   if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
   return b.updatedAt.localeCompare(a.updatedAt);
-}
-
-function firstActiveProject(projects: WorkbenchProject[]) {
-  return projects.filter((project) => project.status === "active").sort(byPriority)[0] ?? null;
 }
 
 function firstActiveThread(threads: WorkbenchThread[], projectId: string) {
@@ -507,7 +514,6 @@ export function newThreadDestination(
 }
 
 const MAX_COMPOSER_DRAFTS = 50;
-const MAX_COMPOSER_DRAFT_CHARS = 20_000;
 
 export function composerDraftKey(projectId: string | null, threadId: string | null) {
   return projectId ? `${projectId}:${threadId ?? "new"}` : "none:new";
@@ -558,17 +564,24 @@ export function BrainApp({
   manifest,
   session,
   initialWorkbench,
+  transportexampleWorkspaceAccess = false,
+  transportexampleSourcingAccess = false,
+  transportexampleOutreachAccess = false,
 }: {
   branding: Readonly<PublicInstallationBranding>;
   manifest: BrainManifest;
   session: AuthSession;
   initialWorkbench: WorkbenchSnapshot;
+  transportexampleWorkspaceAccess?: boolean;
+  transportexampleSourcingAccess?: boolean;
+  transportexampleOutreachAccess?: boolean;
 }) {
   const t = useUiText();
   const defaultPreferences = useMemo(() => preferencesFromManifest(manifest), [manifest]);
   const preferencesKey = `aibrain.${session.tenant.id}.preferences.v3`;
   const previewKey = `aibrain.${session.tenant.id}.${session.user.id}.workbench.preview.v1`;
-  const selectionKey = `aibrain.${session.tenant.id}.${session.user.id}.selection.v1`;
+  // WORKSITEA v1 also persisted inferred defaults; do not treat those as an explicit choice.
+  const selectionKey = `aibrain.${session.tenant.id}.${session.user.id}.selection.${"v1"}`;
   const composerDraftsKey = `aibrain.${session.tenant.id}.${session.user.id}.composer-drafts.v1`;
   const threadReadKey = `aibrain.${session.tenant.id}.${session.user.id}.thread-read.v1`;
   const taskCenterKey = `aibrain.${session.tenant.id}.${session.user.id}.task-center.v1`;
@@ -632,11 +645,20 @@ export function BrainApp({
   const taskCenterGateRef = useRef(createTaskCenterResponseGate());
   const taskCenterOpenRef = useRef(false);
   const [automationsOpen, setAutomationsOpen] = useState(false);
+  const [newAutomationRequested, setNewAutomationRequested] = useState(false);
+  const [productView, setProductView] = useState<"production" | "apps" | "reception" | null>(null);
+  const [transportexamplePanel, setTransportexamplePanel] = useState<"cms" | "pricing" | "directory" | null>(null);
+  const [outreachOpen, setOutreachOpen] = useState(false);
+  const [outreachCompactView, setOutreachCompactView] = useState<'chat'|'outreach'>('outreach');
+
+  const [transportexampleCMSDirty, setTransportexampleCMSDirty] = useState(false);
+  const canLeaveTransportexampleCMS = useCallback(() => !transportexampleCMSDirty || window.confirm("Discard unsaved website content changes?"), [transportexampleCMSDirty]);
   const [automationsBlockingSurfaceOpen, setAutomationsBlockingSurfaceOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsSnapshot | null>(null);
   const [networkOnline, setNetworkOnline] = useState(true);
   const initializedSelectionKey = useRef<string | null>(null);
+  const initializedWorkbenchSnapshot = useRef<WorkbenchSnapshot | null>(null);
   const [runtimeRetry, setRuntimeRetry] = useState(0);
   const runtimeStatus = useRuntimeStatus({ hydrated, online: networkOnline, projectId: activeProjectId, retry: runtimeRetry });
   const [mobileSidebarRestoreFocus, setMobileSidebarRestoreFocus] = useState(false);
@@ -657,8 +679,11 @@ export function BrainApp({
   const turnControllersRef = useRef(new Map<string, {
     assistantMessageId: string;
     controller: AbortController;
+    stop: PendingTurnStop;
   }>());
-  const turnReservationsRef = useRef(new Set<string>());
+  // Each reservation owns its cleanup. A cancelled creation may resolve after
+  // a replacement send has reserved the same draft key.
+  const turnReservationsRef = useRef(new Map<string, { cancelled: boolean }>());
   const promptRef = useRef("");
   const composerDraftsRef = useRef<Record<string, string>>({});
   const selectionGenerationRef = useRef(0);
@@ -725,20 +750,57 @@ export function BrainApp({
   useEffect(() => {
     // A server-component refresh may supply a new snapshot object while a turn
     // is attached. Initialize once per identity/mount; only a fresh page resets
-    // navigation to the landing page. Never discard a live turn on a soft refresh.
-    if (initializedSelectionKey.current === selectionKey) return;
+    // navigation to the landing page. A fresh server snapshot still revokes
+    // removed projects, while an authorized live conversation stays attached.
+    if (initializedSelectionKey.current === selectionKey) {
+      if (initialWorkbench.persistence === "filesystem" && initializedWorkbenchSnapshot.current !== initialWorkbench) {
+        initializedWorkbenchSnapshot.current = initialWorkbench;
+        const visibleIds = new Set(initialWorkbench.projects.map(project => project.id));
+        const refreshedProjects = new Map(initialWorkbench.projects.map(project => [project.id, project]));
+        const refreshedThreads = new Map(initialWorkbench.threads.map(thread => [thread.id, thread]));
+        const activeIds = new Set(initialWorkbench.projects.filter(project => project.status === "active").map(project => project.id));
+        setProjects(initialWorkbench.projects);
+        setThreads(current => current.filter(thread => visibleIds.has(thread.projectId)).map((thread): WorkbenchThread => {
+          const project = refreshedProjects.get(thread.projectId);
+          const access = workbenchThreadAccess(refreshedThreads.get(thread.id) ?? thread, project);
+          const projectAccess = workbenchProjectAccess(project);
+          // Refresh only authority; keep the attached turn and its streamed messages.
+          return { ...thread, access: {
+            role: access.role === "viewer" || projectAccess.role === "viewer" ? "viewer" : access.role === "owner" && projectAccess.role === "owner" ? "owner" : "editor",
+            canEdit: access.canEdit && projectAccess.canEdit,
+            canManage: access.canManage && projectAccess.canManage,
+          } };
+        }));
+        const selectedId = activeSelectionRef.current.projectId;
+        if (selectedId && !activeIds.has(selectedId)) {
+          const standalone = newThreadDestination(initialWorkbench.projects);
+          delete threadByProjectRef.current[selectedId];
+          selectionGenerationRef.current += 1;
+          promptRef.current = "";
+          activeSelectionRef.current = { projectId: standalone?.id ?? null, threadId: null };
+          setActiveProjectId(standalone?.id ?? null); setActiveThreadId(null);
+          setSelectedMessageId(null); setPendingRuntimeContext(null);
+          setPrompt(""); setAttachments([]); setDocuments([]);
+          documentUploadEpochRef.current += 1;
+          for (const controller of documentUploadControllersRef.current.values()) controller.abort();
+          documentUploadControllersRef.current.clear(); setDocumentUploading(false);
+        }
+      }
+      return;
+    }
     initializedSelectionKey.current = selectionKey;
+    initializedWorkbenchSnapshot.current = initialWorkbench;
     const snapshot = initialWorkbench.persistence === "browser-preview"
       ? loadPreviewSnapshot(previewKey, initialWorkbench)
       : initialWorkbench;
     const savedSelection = loadSelection(selectionKey);
     const preferredProject = snapshot.projects.find((project) =>
       project.id === savedSelection.activeProjectId && project.status === "active");
-    const project = preferredProject ?? firstActiveProject(snapshot.projects);
+    const project = preferredProject ?? newThreadDestination(snapshot.projects);
 
     setProjects(snapshot.projects);
     setThreads(snapshot.threads);
-    // A fresh page opens the project home; conversations require explicit selection.
+    // A project is opened only after this employee explicitly selected it.
     setActiveProjectId(project?.id ?? null);
     setActiveThreadId(null);
     try {
@@ -755,7 +817,7 @@ export function BrainApp({
     composerDraftsRef.current = storedDrafts;
     promptRef.current = restoredPrompt;
     setComposerDrafts(storedDrafts);
-    setPrompt((current) => current || restoredPrompt);
+    setPrompt(restoredPrompt);
     setPreferences(loadPreferences(preferencesKey, defaultPreferences));
     setThreadReadMarkers(loadThreadReadMarkers(threadReadKey, snapshot.threads));
     if (initialWorkbench.persistence === "browser-preview") {
@@ -799,8 +861,6 @@ export function BrainApp({
       .catch(() => { if (!controller.signal.aborted) { setConnectorMentions([]); setConnectorCatalogStatus("error"); } });
     return () => controller.abort();
   }, [hydrated, initialWorkbench.persistence, connectorCatalogAttempt, customizationOpen]);
-
-
 
   useEffect(() => {
     if (!hydrated || initialWorkbench.persistence !== "browser-preview") return;
@@ -871,6 +931,7 @@ export function BrainApp({
       window.history.replaceState(null, "", window.location.pathname);
     }
   }, [hydrated]);
+
   useEffect(() => {
     if (hydrated) localStorage.setItem(connectorDraftsKey, JSON.stringify(connectorDrafts));
   }, [hydrated, connectorDrafts, connectorDraftsKey]);
@@ -889,6 +950,8 @@ export function BrainApp({
     setThreads(current => updateThreadMessage(current, threadId, message.id, previous =>
       applyChatStreamEvent(previous, { type: "snapshot", message })));
     if (message.status !== "streaming") {
+      const run = turnControllersRef.current.get(threadId);
+      if (run?.assistantMessageId === message.id) run.stop.observeTerminal();
       streamRetryRef.current.get(threadId)?.();
       setStreamRecoveryNotice(current => current?.threadId === threadId ? null : current);
     }
@@ -1127,11 +1190,11 @@ export function BrainApp({
   }, [activeThread]);
 
   useEffect(() => () => {
-    for (const run of turnControllersRef.current.values()) run.controller.abort();
+    for (const run of turnControllersRef.current.values()) { run.stop.dispose(); run.controller.abort(); }
     turnControllersRef.current.clear();
+    for (const reservation of turnReservationsRef.current.values()) reservation.cancelled = true;
     turnReservationsRef.current.clear();
   }, []);
-
 
   useEffect(() => {
     if (!hydrated) return;
@@ -1250,6 +1313,10 @@ export function BrainApp({
     setMobileSidebarOpen(false);
   }, [cancelDocumentUploads, switchComposerSelection, threads, t]);
 
+  const welcomeSelectionRef = useRef(selectThread);
+  useEffect(() => { welcomeSelectionRef.current = selectThread; }, [selectThread]);
+  const welcomeRequestRef = useRef<Promise<{ threadId?: string; created?: boolean }> | null>(null);
+
   const startNewThread = useCallback((projectId?: string) => {
     const destination = newThreadDestination(projects, projectId);
     if (!destination) {
@@ -1311,7 +1378,7 @@ export function BrainApp({
           name: file.name,
           mimeType: file.type || "application/octet-stream",
           size: file.size,
-          kind: "text",
+          kind: /\.(ogg|opus)$/i.test(file.name) ? "audio" : "text",
           previewFiles: [],
           pages: null,
           status: "uploading",
@@ -1356,9 +1423,11 @@ export function BrainApp({
 
   const requestDocumentPublication = useCallback((attachment: ChatAttachment, turnId: string) => {
     if (!activeThread) return;
-    setPublications((current) => [
-      ...current.filter((candidate) => candidate.uploadId !== attachment.id),
-      { id: attachment.id, threadId: activeThread.id, turnId, uploadId: attachment.id,
+    setPublications((current) => current.some((candidate) => candidate.threadId === activeThread.id &&
+      candidate.uploadId === attachment.id && ["ready", "freezing", "awaiting_confirmation", "uncertain", "deciding"].includes(candidate.phase))
+      ? current : [
+      ...current,
+      { id: crypto.randomUUID(), threadId: activeThread.id, turnId, uploadId: attachment.id,
         fileName: attachment.name, size: attachment.size, targetRelativePath: publicationTarget(attachment.name),
         phase: "ready", operation: null, confirmationToken: null, permissionFingerprint: null, error: null },
     ]);
@@ -1374,7 +1443,7 @@ export function BrainApp({
       const receipt = await freezeDocumentPublication(draft, targetRelativePath);
       setPublications((current) => current.map((candidate) => candidate.id === draftId ? {
         ...candidate,
-        targetRelativePath,
+        targetRelativePath: receipt.operation.targetRelativePath,
         phase: "awaiting_confirmation",
         operation: receipt.operation,
         confirmationToken: receipt.confirmationToken,
@@ -1393,14 +1462,14 @@ export function BrainApp({
 
   const decidePublication = useCallback(async (draftId: string, action: "confirm" | "decline") => {
     const draft = publications.find((candidate) => candidate.id === draftId);
-    if (!draft || draft.phase !== "awaiting_confirmation") return;
+    if (!draft || !["awaiting_confirmation", "uncertain"].includes(draft.phase)) return;
     setPublications((current) => current.map((candidate) => candidate.id === draftId
       ? { ...candidate, phase: "deciding", error: null }
       : candidate));
     try {
       const receipt = await decideDocumentPublication(draft, action);
       const phase = receipt.operation.status === "publishing"
-        ? "deciding"
+        ? ("deciding")
         : receipt.operation.status;
       setPublications((current) => current.map((candidate) => candidate.id === draftId ? {
         ...candidate,
@@ -1426,6 +1495,7 @@ export function BrainApp({
     signal: AbortSignal,
     performance: ClientTurnPerformance,
     startedAt: number,
+    pendingStop: PendingTurnStop,
   ) => {
     let accumulated = '';
     const liveKey = liveAnswers.key(threadId, assistantMessageId);
@@ -1451,22 +1521,25 @@ export function BrainApp({
         request,
         signal,
         startedAt,
+        pendingStop,
         onEvent: dispatcher.dispatch,
         onMeasurement: (measurement) => performance.transportMeasured(measurement),
         waitForRetry: (retrySignal) => new Promise<void>((resolve, reject) => {
           const cleanup = () => {
-            window.removeEventListener("online", resume);
+            window.removeEventListener("online", online);
             retrySignal.removeEventListener("abort", abort);
             if (streamRetryRef.current.get(threadId) === resume) streamRetryRef.current.delete(threadId);
           };
           const resume = () => { cleanup(); resolve(); };
+          const online = () => { if (!pendingStop.retriesPaused) resume(); };
           const abort = () => { cleanup(); reject(retrySignal.reason ?? new DOMException("Aborted", "AbortError")); };
           streamRetryRef.current.set(threadId, resume);
-          window.addEventListener("online", resume, { once: true });
+          window.addEventListener("online", online);
           retrySignal.addEventListener("abort", abort, { once: true });
           if (retrySignal.aborted) abort();
         }),
         onAccepted: () => {
+          pendingStop.confirmAdmission();
           dispatcher.dispatch({
             type: "activity",
             item: {
@@ -1480,7 +1553,7 @@ export function BrainApp({
         },
         onRecoveryState: (state: ChatStreamRecoveryState) => {
           if (state.state === "paused") {
-            setStreamRecoveryNotice({ threadId, assistantMessageId, attempt: null });
+            setStreamRecoveryNotice({ threadId, assistantMessageId, attempt: null, admissionUnconfirmed: state.admissionUnconfirmed });
             return;
           }
           if (state.state === "recovering") {
@@ -1522,9 +1595,10 @@ export function BrainApp({
     };
     const selectionGenerationAtStart = selectionGenerationRef.current;
     const selectionDraftKey = composerDraftKey(selectionAtStart.projectId, selectionAtStart.threadId);
-    const reservationKey = initialThreadId ?? `project:${activeProject.id}:new`;
+    let reservationKey = initialThreadId ?? `project:${activeProject.id}:new`;
     if (turnReservationsRef.current.has(reservationKey)) return;
-    turnReservationsRef.current.add(reservationKey);
+    const reservation = { cancelled: false };
+    turnReservationsRef.current.set(reservationKey, reservation);
     const sendIntentAt = performance.now();
     if (!initialThreadId) {
       setStartingDraftKeys((current) => new Set(current).add(selectionDraftKey));
@@ -1543,6 +1617,19 @@ export function BrainApp({
           ? localThread(activeProject.id, title)
           : await createThreadRequest(activeProject.id, title);
         setThreads((current) => [thread as WorkbenchThread, ...current]);
+        // No chat POST exists yet, so local cancellation is definitive for this
+        // send. Preserve the empty server-created thread without adopting it or
+        // consuming its draft/files. The rest of the handoff is synchronous up
+        // to registering PendingTurnStop, which owns every submitted turn.
+        if (reservation.cancelled) return false;
+        // The created thread now owns this reservation; another new draft in
+        // the same project has a separate Stop target and may send in parallel.
+        turnReservationsRef.current.delete(reservationKey);
+        reservationKey = thread.id;
+        turnReservationsRef.current.set(reservationKey, reservation);
+        if (!initialThreadId) setStartingDraftKeys(current => {
+          const next = new Set(current); next.delete(selectionDraftKey); return next;
+        });
         ownsVisibleComposer = selectionGenerationRef.current === selectionGenerationAtStart &&
           activeSelectionRef.current.projectId === selectionAtStart.projectId &&
           activeSelectionRef.current.threadId === selectionAtStart.threadId;
@@ -1564,6 +1651,10 @@ export function BrainApp({
       if (selectedConnectorMentionIds.length) userMessage.connectorMentions = selectedConnectorMentionIds;
       if (selectedServerReferences.length) userMessage.serverReferences = selectedServerReferences;
       const readyDocuments = documents.filter((document) => document.status === "ready");
+      const documentUploadIds = readyDocuments.length
+        ? readyDocuments.map(document => document.uploadId)
+        : attachments.length || initialWorkbench.persistence === "browser-preview" || workbenchProjectAccess(activeProject).role !== "owner"
+          ? [] : continuingDocumentUploads(thread.messages, thread.lineage ? thread.createdAt : undefined);
       userMessage.attachments = [
         ...attachments.map(({ dataUrl: _dataUrl, ...attachment }) => attachment),
         ...readyDocuments.map(({ uploadId: _uploadId, threadId: _threadId, kind: _kind, previewFiles: _previewFiles, pages: _pages, status: _status, error: _error, passive: _passive, processingUnavailable: _processingUnavailable, previewUnavailable: _previewUnavailable, ...attachment }) => attachment),
@@ -1632,10 +1723,43 @@ export function BrainApp({
       }
 
       controller = new AbortController();
-      turnControllersRef.current.set(threadId, {
-        assistantMessageId: assistantId,
-        controller,
+      const stopRequestId = crypto.randomUUID();
+      const pendingStop = new PendingTurnStop({
+        sendControl: async ({ admissionConfirmed }) => {
+          try {
+            const response = await fetch("/api/runtime/turns/control", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "stop", threadId, assistantMessageId: assistantId, clientRequestId: stopRequestId }),
+              signal: AbortSignal.timeout(10_000),
+            });
+            const payload: unknown = await response.json().catch(() => null);
+            const acceptedControl = response.ok && stopControlAccepted(payload);
+            // A bound Stop can reach the authorized thread before /api/chat
+            // creates its projection. Admission retries the same control identity;
+            // only that pre-admission absence is provisional, never a stopped turn.
+            const awaitingProjection = !admissionConfirmed && response.status === 404 &&
+              payload && typeof payload === "object" && "code" in payload &&
+              payload.code === "TURN_PROJECTION_NOT_FOUND";
+            if (!acceptedControl && !awaitingProjection) {
+              if (turnControllersRef.current.get(threadId)?.stop === pendingStop) {
+                const text = payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
+                  ? payload.error : t("No s’ha pogut confirmar l’aturada amb el runtime.");
+                setNotice(workbenchNotice(text, "error"));
+              }
+            }
+            return acceptedControl;
+          } catch {
+            if (turnControllersRef.current.get(threadId)?.stop === pendingStop) setNotice(workbenchNotice(t("S’ha perdut la connexió mentre s’aturava el torn."), "error"));
+            return false;
+          }
+        },
+        onPause: () => setStreamRecoveryNotice({ threadId, assistantMessageId: assistantId, attempt: null, admissionUnconfirmed: true }),
+        onBusy: busy => {
+          if (turnControllersRef.current.get(threadId)?.stop !== pendingStop) return;
+          setStoppingThreadIds(current => { const next = new Set(current); if (busy) next.add(threadId); else next.delete(threadId); return next; });
+        },
       });
+      turnControllersRef.current.set(threadId, { assistantMessageId: assistantId, controller, stop: pendingStop });
       const streamRequestedAt = performance.now();
       // This serialized request is deliberately reused verbatim for every
       // reattach, preserving the server's idempotency key and turn identity.
@@ -1662,12 +1786,13 @@ export function BrainApp({
           ...(selectedConnectorMentionIds.length ? { connectorMentions: selectedConnectorMentionIds } : {}),
           attachments,
           ...(selectedServerReferences.length ? { serverReferences: selectedServerReferences } : {}),
-          ...(readyDocuments.length ? { documentUploadIds: readyDocuments.map((document) => document.uploadId) } : {}),
+          ...(documentUploadIds.length ? { documentUploadIds } : {}),
         },
       });
-      await handleStream(createChatReattachRequest(chatRequest), threadId, assistantId, controller.signal, clientTurnPerformance, streamRequestedAt);
+      await handleStream(createChatReattachRequest(chatRequest), threadId, assistantId, controller.signal, clientTurnPerformance, streamRequestedAt, pendingStop);
       succeeded = true;
     } catch (error) {
+      if (reservation.cancelled) return false;
       if (thread && assistantMessage) {
         const stopped = controller?.signal.aborted === true;
         clientTurnPerformance?.terminalStateApplied(stopped ? "stopped" : "error");
@@ -1692,7 +1817,9 @@ export function BrainApp({
       if (thread) {
         const threadId = thread.id;
         if (controller && turnControllersRef.current.get(threadId)?.controller === controller) {
+          turnControllersRef.current.get(threadId)?.stop.dispose();
           turnControllersRef.current.delete(threadId);
+          setStoppingThreadIds(current => { const next = new Set(current); next.delete(threadId); return next; });
         }
         setRunningThreadIds((current) => {
           if (!current.has(threadId)) return current;
@@ -1701,14 +1828,16 @@ export function BrainApp({
           return next;
         });
       }
-      turnReservationsRef.current.delete(reservationKey);
-      if (!initialThreadId) {
-        setStartingDraftKeys((current) => {
-          if (!current.has(selectionDraftKey)) return current;
-          const next = new Set(current);
-          next.delete(selectionDraftKey);
-          return next;
-        });
+      if (turnReservationsRef.current.get(reservationKey) === reservation) {
+        turnReservationsRef.current.delete(reservationKey);
+        if (!initialThreadId && reservationKey === `project:${activeProject.id}:new`) {
+          setStartingDraftKeys((current) => {
+            if (!current.has(selectionDraftKey)) return current;
+            const next = new Set(current);
+            next.delete(selectionDraftKey);
+            return next;
+          });
+        }
       }
     }
     return succeeded;
@@ -1743,6 +1872,8 @@ export function BrainApp({
     updateComposerPrompt("");
     setPendingRuntimeContext(null);
   }, [activeProject, activeThread, documentUploading, documents, pendingRuntimeContext, queuedTurns, selectedServerReferences, sendMessage, sending, updateComposerPrompt, t]);
+
+  const submitOutreachMessage = submitComposerMessage;
 
   useEffect(() => {
     if (sending || actionBusy || documentUploading || dispatchingQueuedTurnId || !activeProject || !activeThread) return;
@@ -1822,6 +1953,19 @@ export function BrainApp({
   }, [actionBusy, activeThreadId, pendingBranchSend, sendMessage, sending]);
 
   const stopActiveTurn = useCallback(async () => {
+    if (!activeThread && activeProjectId) {
+      const reservationKey = `project:${activeProjectId}:new`;
+      const pendingDraft = turnReservationsRef.current.get(reservationKey);
+      if (pendingDraft) {
+        pendingDraft.cancelled = true;
+        turnReservationsRef.current.delete(reservationKey);
+        const draftKey = composerDraftKey(activeProjectId, null);
+        setStartingDraftKeys(current => {
+          const next = new Set(current); next.delete(draftKey); return next;
+        });
+        return;
+      }
+    }
     const activeRun = activeThread ? turnControllersRef.current.get(activeThread.id) : null;
     const controller = activeRun?.controller;
     const activeAssistant = activeThread
@@ -1829,6 +1973,10 @@ export function BrainApp({
           message.role === "assistant" && message.status === "streaming" &&
           (!activeRun || message.id === activeRun.assistantMessageId))
       : null;
+    if (initialWorkbench.persistence === "filesystem" && activeThread && activeRun) {
+      if (!stoppingThreadIds.has(activeThread.id)) await activeRun.stop.requestStop();
+      return;
+    }
     if (initialWorkbench.persistence !== "filesystem" || !activeThread || !activeAssistant) {
       controller?.abort();
       return;
@@ -1866,7 +2014,7 @@ export function BrainApp({
         return next;
       });
     }
-  }, [activeThread, initialWorkbench.persistence, stoppingThreadIds, t]);
+  }, [activeProjectId, activeThread, initialWorkbench.persistence, stoppingThreadIds, t]);
 
   const resolveApproval = useCallback(async (
     messageId: string,
@@ -1904,18 +2052,18 @@ export function BrainApp({
     const response = await fetch("/api/runtime/approvals", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        approvalId: selectedApproval.id,
-        threadId: selectedApproval.threadId,
-        turnId: selectedApproval.turnId,
-        itemId: selectedApproval.itemId,
-        decision,
-      }),
+      body: JSON.stringify(approvalResolutionForItem(selectedApproval, decision)),
     });
     if (!response.ok) {
       setNotice(workbenchNotice(t("Esta aprobación ya no está pendiente."), "warning"));
       return;
     }
+    const resolved: unknown = await response.json().catch(() => null);
+    const themeResult = resolved && typeof resolved === "object" && "themeResult" in resolved
+      ? resolved.themeResult as { status?: unknown } : null;
+    const verifiedTitle = themeResult?.status === "applied" ? "Shopify draft saved and verified"
+      : themeResult?.status === "rolled_back" ? "Shopify draft restored and verified" : null;
+    if (verifiedTitle) setNotice(workbenchNotice(t(verifiedTitle), "success"));
     const status = decision === "accept"
       ? "accepted"
       : decision === "acceptForSession" ? "accepted_session" : "declined";
@@ -1926,7 +2074,7 @@ export function BrainApp({
       (message) => ({
         ...message,
         approvals: message.approvals.map((approval) =>
-          approval.id === selectedApproval.id ? { ...approval, status } : approval),
+          approval.id === selectedApproval.id ? { ...approval, status, ...(verifiedTitle ? { title: verifiedTitle } : {}) } : approval),
       }),
     ));
   }, [activeThreadId, managedAppActions, t]);
@@ -1961,11 +2109,10 @@ export function BrainApp({
       const nextProjects = projects.map((candidate) => candidate.id === project.id ? updated : candidate);
       setProjects(nextProjects);
       if (updated.status === "archived" && activeProjectId === updated.id) {
-        const next = firstActiveProject(nextProjects);
-        const nextThread = next ? firstActiveThread(threads, next.id) : null;
-        switchComposerSelection({ projectId: next?.id ?? null, threadId: nextThread?.id ?? null });
+        const next = newThreadDestination(nextProjects);
+        switchComposerSelection({ projectId: next?.id ?? null, threadId: null });
         setActiveProjectId(next?.id ?? null);
-        setActiveThreadId(nextThread?.id ?? null);
+        setActiveThreadId(null);
         setSelectedMessageId(null);
       }
       return updated;
@@ -1975,7 +2122,7 @@ export function BrainApp({
     } finally {
       setActionBusy(false);
     }
-  }, [activeProjectId, initialWorkbench.persistence, projects, switchComposerSelection, threads, t]);
+  }, [activeProjectId, initialWorkbench.persistence, projects, switchComposerSelection, t]);
 
   const persistThreadPatch = useCallback(async (
     thread: WorkbenchThread,
@@ -2144,7 +2291,8 @@ export function BrainApp({
     taskCenterOpen || automationsBlockingSurfaceOpen || Boolean(textDialog) || Boolean(confirmDialog) || Boolean(previewDocument);
   const modalSurfaceOpen = blockingModalSurfaceOpen ||
     (compactOverlayLayout && Boolean(activeSideWindow));
-  const browserAutoOpenBlocked = modalSurfaceOpen || automationsOpen;
+
+  const browserAutoOpenBlocked = modalSurfaceOpen || automationsOpen || productView !== null || Boolean(transportexamplePanel) || outreachOpen;
 
   useEffect(() => {
     if (!taskCenterRequested || modalSurfaceOpen) return;
@@ -2264,12 +2412,14 @@ export function BrainApp({
       if (commandPaletteOpen) closeCommandPalette();
       else if (taskCenterOpen) setTaskCenterOpen(false);
       else if (customizationOpen) closeCustomization();
+      else if (productView) setProductView(null);
       else if (automationsOpen) setAutomationsOpen(false);
       else if (textDialog && !actionBusy) closeTextDialog();
       else if (confirmDialog && !actionBusy) closeConfirmDialog();
       else if (previewDocument) setPreviewDocument(null);
       else if (activeSideWindow) setActiveSideWindow(null);
       else if (mobileSidebarOpen) dismissMobileSidebar();
+      else if (outreachOpen) setOutreachOpen(false);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -2286,10 +2436,14 @@ export function BrainApp({
     confirmDialog,
     customizationOpen,
     automationsOpen,
+    productView,
+    transportexamplePanel,
+    canLeaveTransportexampleCMS,
     mobileSidebarOpen,
     previewDocument,
     textDialog,
     taskCenterOpen,
+    outreachOpen,
   ]);
 
   const textDialogCopy = textDialog?.kind === "create-project"
@@ -2336,10 +2490,13 @@ export function BrainApp({
           beginSidebarOverlay("command", returnFocus);
           setCommandPaletteOpen(true);
         }}
-        onOpenAutomations={() => { setMobileSidebarOpen(false); setAutomationsOpen(true); }}
-        onSelectProject={(projectId) => { setAutomationsOpen(false); selectProject(projectId); }}
-        onSelectThread={(threadId) => { setAutomationsOpen(false); selectThread(threadId); }}
-        onNewThread={(projectId) => { setAutomationsOpen(false); startNewThread(projectId); }}
+
+        productView={productView}
+
+        onOpenAutomations={() => {  setOutreachOpen(false); setTransportexamplePanel(null); setProductView(null); setMobileSidebarOpen(false); setNewAutomationRequested(false); setAutomationsOpen(true); }}
+        onSelectProject={(projectId) => {  setTransportexamplePanel(null); setProductView(null); setAutomationsOpen(false); selectProject(projectId); }}
+        onSelectThread={(threadId) => {  setTransportexamplePanel(null); setProductView(null); setAutomationsOpen(false); selectThread(threadId); }}
+        onNewThread={(projectId) => {  setTransportexamplePanel(null); setProductView(null); setAutomationsOpen(false); startNewThread(projectId); }}
         onNewProject={(returnFocus) => {
           beginSidebarOverlay("text", returnFocus);
           setTextDialog({ kind: "create-project" });
@@ -2352,14 +2509,20 @@ export function BrainApp({
         }}
       />
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col [&>main]:min-h-0">
+      <div className={workspaceLayout.workspace}>
+      {null}
+      <div className={workspaceLayout.split}>
+      <div className={`${workspaceLayout.chat} [&>main]:min-h-0 ${''}`}>
+
       {automationsOpen ? <AutomationsPanel
         open
         projects={projects}
+        initialCreate={newAutomationRequested}
         onToggleSidebar={toggleSidebar}
         onBlockingSurfaceChange={setAutomationsBlockingSurfaceOpen}
         onOpenThread={(threadId) => { setAutomationsOpen(false); selectThread(threadId); }}
       /> : <ChatWorkspace
+        onCreateAutomation={() => { setProductView(null); setNewAutomationRequested(true); setAutomationsOpen(true); }}
         liveAnswers={liveAnswers}
         manifest={manifest}
         preferences={preferences}
@@ -2368,6 +2531,7 @@ export function BrainApp({
         projects={projects}
         userName={session.user.name}
         companyName={branding.companyName}
+        installationId={branding.installationId}
         assistantName={branding.productName}
         hydrated={hydrated}
         prompt={prompt}
@@ -2389,7 +2553,7 @@ export function BrainApp({
         runtimeStatus={effectiveRuntimeStatus}
         networkOnline={networkOnline}
         streamRecovery={streamRecoveryNotice?.threadId === activeThreadId
-          ? { attempt: streamRecoveryNotice.attempt, paused: streamRecoveryNotice.attempt === null,
+          ? { attempt: streamRecoveryNotice.attempt, paused: streamRecoveryNotice.attempt === null, admissionUnconfirmed: streamRecoveryNotice.admissionUnconfirmed,
             onRetry: () => { streamRetryRef.current.get(activeThreadId!)?.(); setStoredResponseRetry(current => current + 1); } }
           : storedResponsePhase ? { attempt: storedResponsePhase === "checking" ? 0 : null, paused: storedResponsePhase === "paused",
             onRetry: () => setStoredResponseRetry(current => current + 1) } : null}
@@ -2406,7 +2570,7 @@ export function BrainApp({
         onFreezePublication={freezePublication}
         onDecidePublication={decidePublication}
         onComposerNotice={(message, kind = "warning") => setNotice(workbenchNotice(message, kind))}
-        onSend={submitComposerMessage}
+        onSend={submitOutreachMessage}
         onStop={() => void stopActiveTurn()}
         onCancelQueuedMessage={(id) => setQueuedTurns((current) => current.filter((item) => item.id !== id))}
         sidebarOpen={desktopSidebarOpen || mobileSidebarOpen}
@@ -2419,20 +2583,26 @@ export function BrainApp({
           .map((descriptor) => managedAppActionKey(descriptor.locator))}
         onManagedAppPrepared={prepareManagedAppAction}
         onPreviewDocument={(artifact) => {
+          setOutreachOpen(false);
           setActiveSideWindow(null);
           setPreviewDocument(artifact);
         }}
         onOpenReview={(messageId) => {
+          setOutreachOpen(false);
           setPreviewDocument(null);
           setSelectedMessageId(messageId);
           setActiveSideWindow("inspector");
         }}
         onOpenBrowser={() => {
+          setOutreachOpen(false);
           setPreviewDocument(null);
           setActiveSideWindow("browser");
         }}
         readOnly={!workbenchThreadAccess(activeThread, activeProject).canEdit}
       />}
+      </div>
+      {null}
+      </div>
       </div>
 
       {previewDocument ? (

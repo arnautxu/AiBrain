@@ -1,13 +1,25 @@
+import { hostAnalysisConfig, hostAnalysisToolAllowed, type HostAnalysisPolicy } from "@/runtime/host-analysis-policy";
+import { INSTANTLY_DYNAMIC_TOOLS, INSTANTLY_NAMESPACE, handleInstantlyTool } from "@/runtime/instantly-dynamic-tools";
+import { CONNECTED_ACTION_DYNAMIC_TOOLS, CONNECTED_ACTION_NAMESPACE, handleConnectedActionDynamicToolCall } from "@/runtime/connected-action-dynamic-tools";
+import { createHash } from "node:crypto";
+import { nativeRequestWithinChatScope } from "@/runtime/native-chat-authorization";
+import { createInteractiveChatAuthorization } from "@/runtime/interactive-chat-authorization";
+
+import { instantlyReadForIdentity } from "@/connectors/instantly-service";
+
 import { rememberProjectSource } from "@/documents/remember-project-source";
 import { saveProjectPreferences } from "@/workbench/project-preferences";
 import { resolveProjectSourceDocuments } from "@/documents/project-sources";
 import { requestPagedThreadRecovery } from "@/runtime/paged-thread-recovery";
 import { DurableTurnSubmission, TurnSubmissionRecoveryRequired, turnSubmissionBinding } from "@/runtime/turn-submission-store";
 import { FileModelTurnQueue, type ModelTurnAdmission } from "@/runtime/model-turn-queue";
+import { loadHorariaConfig, registerHorariaReviewSource } from "@/horaria/client";
 import { HORARIA_NAMESPACE, HORARIA_TOOLS, handleHorariaToolCall, horariaInstructions } from "@/horaria/chat-tools";
+
+import { isWorkspaceAdmin } from "@/admin/server-service";
+
 import { requiresFictionalScheduleArtifact } from "@/horaria/fictional-schedule-delivery";
 import { arnallScheduleForPreview } from "@/horaria/schedule-template";
-import { loadHorariaConfig, registerHorariaReviewSource } from "@/horaria/client";
 import { documentServicesForUser } from "@/documents/server-service";
 import { prepareWorkspaceDocumentPreview } from "@/documents/workspace-preview";
 import { serverReferenceInputs } from "@/documents/server-reference-inputs";
@@ -18,8 +30,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { privateWorkspaceSafeText } from "@/runtime/private-workspace-text";
-import type { ServerNotification } from "../../contracts/codex/0.153.4/types/ServerNotification";
-import type { ServerRequest } from "../../contracts/codex/0.153.4/types/ServerRequest";
+import type { ServerNotification } from "../../contracts/codex/0.162.1/types/ServerNotification";
+import type { ServerRequest } from "../../contracts/codex/0.162.1/types/ServerRequest";
 import type {
   ActivityItem,
   ChatRequest,
@@ -57,14 +69,15 @@ import {
   attestQuotaToolPermissions,
   createQuotaToolPermissions,
   hasAttestedQuotaToolPermissions,
+  privateCodexToolPermissionsRequired,
   quotaToolPermissionId,
 } from "@/runtime/quota-tool-permissions";
 import { catalogRuntimeEnforcer, synchronizeCatalogSkillsForUser } from "@/catalog/access-service";
-import { resolveConnectorMentionsForTurn } from "@/connectors/mentions";
+import { resolveAvailableConnectorsForTurn } from "@/connectors/mentions";
 import { connectorMentionDeveloperInstructions } from "@/connectors/mentions-contract";
+import { connectedAppConfig, hasAppliedConnectedAppConfig, markConnectedAppConfigApplied, SERVER_APPROVALS_REVIEWER } from "@/runtime/connected-app-config";
 import {
   approvalLocatorFromItem,
-  waitForApproval,
   type FileApprovalStore,
 } from "@/runtime/approval-store";
 import {
@@ -80,6 +93,7 @@ import {
   assertCodexTurnPermissionBinding,
   buildCodexDeveloperInstructions,
   permissionAllowsGenericToolExecution,
+  resolveServerTurnPermissions,
 } from "@/runtime/permission-turn";
 import {
   loadInternalAgentProductContext,
@@ -105,6 +119,8 @@ import {
   OUTLOOK_DYNAMIC_TOOLS,
 } from "@/runtime/outlook-dynamic-tools";
 import { OUTLOOK_CONNECTOR_ID } from "@/connectors/outlook-contracts";
+import { MAIL_CONNECTOR_ID } from "@/connectors/mail-contracts";
+import { AIBRAIN_MAIL_TOOL_NAMESPACE, MAIL_DYNAMIC_TOOLS, handleMailDynamicToolCall } from "@/runtime/mail-dynamic-tools";
 import {
   issueThreadToken,
   toolsetRevisionForIssuedThreadToken,
@@ -128,7 +144,7 @@ import type { MaintenanceActivityLease } from "@/operations/maintenance";
 import { TurnTelemetry } from "@/runtime/turn-telemetry";
 import { TurnTerminalWatchdog } from "@/runtime/turn-terminal-watchdog";
 import { TurnCompletionReconciler } from "@/runtime/turn-completion-reconciler";
-import { AppServerRequestTimeoutError } from "@/runtime/transport/app-server-rpc-router";
+import { AppServerRequestTimeoutError, AppServerRpcResponseError } from "@/runtime/transport/app-server-rpc-router";
 import {
   persistGeneratedImageArtifact,
   type GeneratedImageArtifactContext,
@@ -149,6 +165,7 @@ import {
   DOCUMENT_DYNAMIC_TOOLS,
   handleLocalDocumentDynamicToolCall,
 } from "@/runtime/documents/dynamic-tools";
+import { createAttachmentReviewer, explicitPartialAttachmentReview, type AttachmentReviewer } from "@/runtime/documents/attachment-review";
 import type { AgentThreadRuntimeContext } from "@/workbench/internal";
 import {
   enqueueAutomaticMemoryExtraction,
@@ -196,11 +213,6 @@ export type WorkerCodexTurnEvent = CodexTurnEvent | {
   type: "runtimeUsage";
   tokenUsage: TokenUsageBreakdown;
 };
-
-// This is a server-owned review mode.  `autoApprove` remains accepted in the
-// wire contract while older browsers update, but it must never choose a less
-// restrictive App Server reviewer or approval/sandbox policy.
-const SERVER_APPROVALS_REVIEWER = "auto_review";
 
 type EmitEvent = (
   event: WorkerCodexTurnEvent,
@@ -273,6 +285,14 @@ async function requestWithLateResponseRecovery(
   }
 }
 
+export class WorkerThreadStartRejectedError extends Error {
+  readonly code = "THREAD_START_REJECTED";
+  constructor(cause?: unknown) {
+    super("The conversation request was rejected before it could be opened. No AI response was started.", { cause });
+    this.name = "WorkerThreadStartRejectedError";
+  }
+}
+
 export class WorkerTurnRecoveryPendingError extends Error {
   constructor(message = "El runtime s’ha desconnectat mentre el torn continuava actiu.") {
     super(message);
@@ -304,6 +324,7 @@ function readableFilesDeveloperInstructions(documentRoots: readonly EnterpriseDo
 function localDocumentDeveloperInstructions() {
   return [
     "## Generación documental local",
+    "Para revisar visualmente un PDF original adjunto de este turno, usa `aibrain_documents.inspect_attachment` con su nombre exacto y el número de página. La vista inicial solo incluye la primera página. Revisa todas las páginas necesarias, incluidas condiciones y páginas escaneadas; la extracción completa de texto no demuestra una revisión visual completa. Esta lectura usa el sandbox documental y no necesita comandos ni rutas de proyecto. No uses `render`, que corresponde a documentos nuevos redactados, para un adjunto original. Si alcanzas el límite de 50 inspecciones o 20 MiB de imágenes por turno, indica las páginas pendientes y no declares revisión completa.",
     "Para informes de texto sencillos, Word/DOCX y tablas Excel/XLSX, usa `aibrain_documents.create`; es un renderizador básico de contenido final, no otro modelo. Redacta primero el contenido final completo. Nunca envíes como `content` la petición del usuario, un prompt, instrucciones de diseño o una promesa de trabajo.",
     "Si el usuario pide un horario de Arnall con tienda y personas explícitamente ficticias, debes llamar a `aibrain_documents.create_arnall_schedule` antes de responder para rellenar la plantilla HORARI SAGARO incorporada en el servidor. No necesita adjuntar ni subir la plantilla. Incluye los siete días de cada persona, con F para días libres y horarios reales en las dos líneas de cada turno. No consultes ni des de alta personas o tiendas reales para esta simulación. La herramienta entrega el Excel privado y devuelve las horas y la cobertura calculadas de la graella final: compáralas con todas las condiciones solicitadas y no declares verificado lo que no se haya comprobado. Si falla la herramienta, explica el error concreto y no entregues una tabla como sustituto. Para tiendas y personal reales usa `aibrain_horaria.run` con `schedules.draft`.",
     "Para presentaciones, tanto PDF como PowerPoint, usa autoría local con shell y PptxGenJS, no el renderizador básico `aibrain_documents.create`. Lee primero la guía local `/usr/local/share/aibrain/presentations.md` y las skills autorizadas presentation-craft, local-documents e impeccable cuando estén disponibles y cumple la política de diseño de esta instalación. PptxGenJS está empaquetado en `/usr/local/share/aibrain/pptxgenjs.cjs`: cárgalo desde Node con require y comprueba su disponibilidad; no instales paquetes ni uses servicios externos. Si falta una herramienta o skill obligatoria, explica la limitación concreta; no sustituyas silenciosamente la presentación por diapositivas de texto básico.",
@@ -432,8 +453,6 @@ async function persistGeneratedImage(
   }, { envelope, key: `artifact:${String(item.id ?? artifact.id)}` });
 }
 
-
-
 async function projectItemEvidence(
   params: unknown,
   completed: boolean,
@@ -494,6 +513,7 @@ async function runWorkerCodexTurnAttempt(
   backgroundExecution = false,
   resumedThreadToolsetRevision: string | null = null,
   recoverExistingTurn = false,
+  hostAnalysisPolicy?: HostAnalysisPolicy,
 ) {
   let submission: DurableTurnSubmission | null = null;
   let modelAdmission: ModelTurnAdmission | null = null;
@@ -527,6 +547,10 @@ async function runWorkerCodexTurnAttempt(
     return;
   }
   const activities = new Map<string, ActivityItem>();
+  const turnController = new AbortController();
+  const turnSignal = turnController.signal;
+  let inspectAttachment: AttachmentReviewer | null = null;
+  const attachmentFinalText = (text: string) => inspectAttachment?.finalText(text) ?? text;
   let fictionalScheduleArtifactRequired = false;
   const fictionalScheduleArtifactIds = new Set<string>();
   let fictionalScheduleDeliveryFailed = false;
@@ -539,6 +563,9 @@ async function runWorkerCodexTurnAttempt(
   let publishedFinalItemId: string | null = null;
   let publishedFinalText = "";
   let terminalNeedsHydration = false;
+  let publishedModelText = "";
+
+  const publicReviewText = (text: string) => text;
   const commandOutputText = new Map<string, string>();
   const reasoningSummaryText = new Map<string, string>();
   const upsertActivity = async (item: ActivityItem, projection?: WorkerTurnProjection) => {
@@ -620,10 +647,11 @@ async function runWorkerCodexTurnAttempt(
       privateWorkspaceSafeText(rawValue, [projectWorkspace, runtime.handle.roots.workspace]),
     );
     if (!completePrefix) return;
-    const publicValue = publicAssistantText(
-      completePrefix,
+    publishedModelText = publicAssistantText(
+      attachmentFinalText(completePrefix),
       assistantName,
     );
+    const publicValue = publicReviewText(publishedModelText);
     if (!publicValue || (publishedFinalItemId === itemId && publishedFinalText === publicValue)) return;
     const previousValue = publishedFinalText;
     const sameItem = publishedFinalItemId === null || publishedFinalItemId === itemId;
@@ -643,10 +671,11 @@ async function runWorkerCodexTurnAttempt(
     if (fictionalScheduleArtifactRequired && fictionalScheduleArtifactIds.size === 0) return;
     if (agentMessagePhases.get(itemId) !== "final_answer" &&
         [...agentMessagePhases.values()].includes("final_answer")) return;
-    const publicValue = publicAssistantText(
-      privateWorkspaceSafeText(value, [projectWorkspace, runtime.handle.roots.workspace]),
+    publishedModelText = publicAssistantText(
+      attachmentFinalText(privateWorkspaceSafeText(value, [projectWorkspace, runtime.handle.roots.workspace])),
       assistantName,
     );
+    const publicValue = publicReviewText(publishedModelText);
     if (publishedFinalItemId !== itemId || publishedFinalText !== publicValue) {
       const previousValue = publishedFinalText;
       const sameItem = publishedFinalItemId === null || publishedFinalItemId === itemId;
@@ -726,6 +755,16 @@ async function runWorkerCodexTurnAttempt(
       permissions,
     });
   }
+  inspectAttachment = createAttachmentReviewer({
+    documents: turnDocuments,
+    signal: turnSignal,
+    partial: explicitPartialAttachmentReview(chatRequest.message, !backgroundExecution && !automationSession),
+    required: backgroundExecution,
+    previews: {
+      read: async (threadId, uploadId) => (await documentServicesForUser(runtime.config, authenticatedUserId)).previews.read(threadId, uploadId),
+      renderPage: async (threadId, uploadId, page, options) => (await documentServicesForUser(runtime.config, authenticatedUserId)).previews.renderPage(threadId, uploadId, page, options),
+    },
+  });
   const projectWorkspace = await resolveWorkerOwnedPath(
     runtime.handle.roots.workspace,
     path.posix.join("projects", chatRequest.projectId),
@@ -755,7 +794,7 @@ async function runWorkerCodexTurnAttempt(
   // source-ro/.git and fail on the intentionally read-only mount.
   const runtimeWorkspaceRoots = uniqueAbsoluteRoots([
     projectWorkspace,
-    ...(runtime.config.usageLimits ? [] : [runtime.handle.roots.workspace, runtime.handle.roots.artifacts]),
+    ...(privateCodexToolPermissionsRequired(runtime.config) ? [] : [runtime.handle.roots.workspace, runtime.handle.roots.artifacts]),
   ]);
   await mkdir(projectWorkspace, { recursive: true, mode: 0o700 });
   submission = await DurableTurnSubmission.open({
@@ -771,6 +810,34 @@ async function runWorkerCodexTurnAttempt(
   if (submission.runtimeThreadId) {
     if (runtimeThreadId && runtimeThreadId !== submission.runtimeThreadId) throw new Error("La conversa no coincideix amb el torn pendent.");
     runtimeThreadId = submission.runtimeThreadId;
+  }
+  if (submission.threadCreationRejected) throw new WorkerThreadStartRejectedError();
+  const settleRejectedThreadStart = async (error: unknown) => {
+    const creation = submission!.pendingThreadRequest;
+    if (error instanceof AppServerRpcResponseError && error.method === "thread/start" &&
+        creation && error.requestId === creation.id && [-32600, -32601, -32602].includes(error.code) &&
+        !submission!.runtimeThreadId && !submission!.runtimeTurnId && !submission!.hasPendingModelTurn) {
+      await submission!.rejectThreadStart(error.requestId, error.code);
+      throw new WorkerThreadStartRejectedError(error);
+    }
+  };
+  // Resolve the existing creation receipt before a queued Stop can short-circuit
+  // admission. Reading its outcome cannot start model work or replay creation.
+  if (submission.needsRecovery && !runtimeThreadId) {
+    const creation = submission.pendingThreadRequest;
+    if (!creation) throw new TurnSubmissionRecoveryRequired();
+    // The primary and late-response deadlines can both expire before the
+    // gateway's durable success reaches this runner. Read that exact receipt
+    // after reconnect/restart, without resending the creation or a model turn.
+    let result: JsonValue | null;
+    try { result = await runtime.client.recoverThreadStart(creation.params, String(creation.id)); }
+    catch (error) { await settleRejectedThreadStart(error); throw error; }
+    const resolvedThreadId = result ? extractThreadId(result) : null;
+    if (!resolvedThreadId) throw new TurnSubmissionRecoveryRequired();
+    await submission.bindThread(resolvedThreadId);
+    runtimeThreadId = resolvedThreadId;
+    // Continue through fresh thread/resume below. It confirms current remote
+    // state and projects the bound identity using a real response envelope.
   }
   const clientUserMessageId = submission.retryClientUserMessageId ?? chatRequest.userMessageId;
   if (typeof runtime.config.paths.dataRoot === "string") {
@@ -809,20 +876,6 @@ async function runWorkerCodexTurnAttempt(
   }
   const emitRuntimeTurn = (turnId: string) => emit({ type: "runtimeTurn", turnId,
     ...(submission!.rejectedRuntimeTurnId ? { rejectedTurnId: submission!.rejectedRuntimeTurnId } : {}) });
-  if (submission.needsRecovery && !runtimeThreadId) {
-    const creation = submission.pendingThreadRequest;
-    if (!creation) throw new TurnSubmissionRecoveryRequired();
-    // The primary and late-response deadlines can both expire before the
-    // gateway's durable success reaches this runner. Read that exact receipt
-    // after reconnect/restart, without resending the creation or a model turn.
-    const result = await runtime.client.recoverThreadStart(creation.params, String(creation.id));
-    const resolvedThreadId = result ? extractThreadId(result) : null;
-    if (!resolvedThreadId) throw new TurnSubmissionRecoveryRequired();
-    await submission.bindThread(resolvedThreadId);
-    runtimeThreadId = resolvedThreadId;
-    // Continue through fresh thread/resume below. It confirms current remote
-    // state and projects the bound identity using a real response envelope.
-  }
   const designBrandInstructions = await prepareDesignBrandAssets(runtime.config, projectWorkspace);
   // A new conversation used to wait for the optional model/skills/usage
   // catalog before it even opened its App Server thread.  The status route
@@ -876,8 +929,7 @@ async function runWorkerCodexTurnAttempt(
   // Keep the generic runtime transport unchanged; catalog filtering belongs at
   // its own inventory/action boundaries and must not weaken approvals or DENY.
   const inheritAuthorizedSkills = chatRequest.options.inheritAuthorizedSkills === true;
-  const hasConnectorMentions = (chatRequest.options.connectorMentions?.length ?? 0) > 0;
-  const catalog = chatRequest.options.skill || inheritAuthorizedSkills || hasConnectorMentions
+  const catalog = chatRequest.options.skill || inheritAuthorizedSkills
     ? await catalogRuntimeEnforcer(installationId, authenticatedUserId)
     : null;
   const runtimeSkills = await optionalTurnSkills({
@@ -904,42 +956,23 @@ async function runWorkerCodexTurnAttempt(
   if (chatRequest.options.skill && selectedSkills.length !== 1) {
     throw new Error("La skill seleccionada ja no està disponible.");
   }
-  const selectedConnectorMentions = hasConnectorMentions
-    ? await resolveConnectorMentionsForTurn(
-      installationId,
-      authenticatedUserId,
-      chatRequest.options.connectorMentions ?? [],
-      runtimeIdentitySession ?? automationSession,
-    )
-    : [];
-  const companyMailSelected = selectedConnectorMentions.some(({ resource }) => resource.connectorId === COMPANY_MAIL_CONNECTOR_ID);
+  const availableConnectors = await resolveAvailableConnectorsForTurn(
+    installationId,
+    authenticatedUserId,
+    chatRequest.options.connectorMentions ?? [],
+    runtimeIdentitySession ?? automationSession,
+  );
+  const mailSelected = availableConnectors.some(({ resource }) => resource.connectorId === MAIL_CONNECTOR_ID);
+  const companyMailSelected = availableConnectors.some(({ resource }) => resource.connectorId === COMPANY_MAIL_CONNECTOR_ID);
   const readMailInvoiceIds = new Set<string>();
-  const gmailSelected = selectedConnectorMentions.some(({ resource }) => resource.connectorId === GMAIL_CONNECTOR_ID);
-  const outlookSelected = selectedConnectorMentions.some(({ resource }) => resource.connectorId === OUTLOOK_CONNECTOR_ID);
+  const instantlySelected = availableConnectors.some(({ resource }) => resource.connectorId === "instantly");
+  const gmailSelected = availableConnectors.some(({ resource }) => resource.connectorId === GMAIL_CONNECTOR_ID);
+  const outlookSelected = availableConnectors.some(({ resource }) => resource.connectorId === OUTLOOK_CONNECTOR_ID);
   // App Server's per-thread app configuration is the enforceable toolset
   // boundary for managed apps. The catalog revalidation above supplies these
   // IDs; the browser never supplies an app ID or a tool name directly.
-  const selectedAppIds = [...new Set(selectedConnectorMentions.flatMap(({ resource }) => resource.appId ? [resource.appId] : []))];
-  const connectorAppConfig = selectedAppIds.length > 0 ? {
-    apps: {
-      _default: {
-        enabled: false,
-        approvals_reviewer: null,
-        destructive_enabled: false,
-        open_world_enabled: false,
-        default_tools_approval_mode: "writes",
-      },
-      ...Object.fromEntries(selectedAppIds.map((appId) => [appId, {
-        enabled: true,
-        approvals_reviewer: SERVER_APPROVALS_REVIEWER,
-        destructive_enabled: false,
-        open_world_enabled: false,
-        default_tools_approval_mode: "writes",
-        default_tools_enabled: true,
-        tools: null,
-      }])),
-    },
-  } : {};
+  const availableAppIds = [...new Set(availableConnectors.flatMap(({ resource }) => resource.appId ? [resource.appId] : []))];
+  const connectorAppConfig = connectedAppConfig(availableAppIds);
 
   const developerInstructions = [
     buildCodexDeveloperInstructions(chatRequest, permissions, assistantName, internalAgentContext),
@@ -951,7 +984,7 @@ async function runWorkerCodexTurnAttempt(
     synchronizedSkills.developerInstructions,
     designSkillDeveloperInstructions(runtime.config, synchronizedSkills.result),
     designBrandInstructions,
-    connectorMentionDeveloperInstructions(selectedConnectorMentions),
+    connectorMentionDeveloperInstructions(availableConnectors),
     ...(automationSession ? [await automationChatDeveloperInstructions(automationSession, {
       projectId: chatRequest.projectId,
       currentTime: new Date(),
@@ -962,14 +995,21 @@ async function runWorkerCodexTurnAttempt(
       "Este turno se ejecuta sin una sesión web abierta. Usa web, skills, archivos y conectores de lectura actualmente autorizados como en un chat normal. No solicites ni esperes aprobaciones interactivas. Si una acción sensible requiere aprobación y no existe una autorización durable previa vinculada a esta ejecución, no la intentes: explica el bloqueo en el resultado.",
     ] : []),
   ].filter(Boolean).join("\n\n");
-  const quotaToolPermissions = runtime.config.usageLimits ? createQuotaToolPermissions({
+  const quotaToolPermissions = privateCodexToolPermissionsRequired(runtime.config) ? createQuotaToolPermissions({
     workspace: projectWorkspace,
     codexHome: runtime.handle.roots.codexHome,
     transportAudit: runtime.handle.roots.transportAudit,
   }) : null;
   const quotaPermissionId = quotaToolPermissions
-    ? quotaToolPermissionId(quotaToolPermissions, effectiveSandbox(runtimeConfig, chatRequest))
+    ? quotaToolPermissionId(quotaToolPermissions, hostAnalysisPolicy ? "read-only" : effectiveSandbox(runtimeConfig, chatRequest))
     : null;
+  let analysisOverrides = {};
+  if (hostAnalysisPolicy) {
+    if (!quotaToolPermissions) throw new Error("HOST_ANALYSIS_READ_ONLY_PROFILE_REQUIRED");
+    const response = await runtime.client.request("config/read", { includeLayers: false }, `host-analysis-config:${chatRequest.assistantMessageId}`, 10_000) as { config?: { mcp_servers?: Record<string, unknown> } };
+    if (!response?.config || typeof response.config !== "object" || Array.isArray(response.config) || (response.config.mcp_servers !== undefined && (!response.config.mcp_servers || typeof response.config.mcp_servers !== "object" || Array.isArray(response.config.mcp_servers))) || Object.keys(response.config.mcp_servers ?? {}).some(name => !/^[a-zA-Z0-9_-]+$/.test(name))) throw new Error("HOST_ANALYSIS_CONFIG_UNVERIFIED");
+    analysisOverrides = hostAnalysisConfig(hostAnalysisPolicy, Object.keys(response.config.mcp_servers ?? {}));
+  }
   const commonThreadParams = {
     ...(selectedModel ? { model: selectedModel } : {}),
     cwd: projectWorkspace,
@@ -977,11 +1017,12 @@ async function runWorkerCodexTurnAttempt(
     approvalPolicy: quotaToolPermissions ? "never" as const : runtimeConfig.approvalPolicy,
     approvalsReviewer: SERVER_APPROVALS_REVIEWER,
     ...(quotaPermissionId ? { permissions: quotaPermissionId } : { sandbox: effectiveSandbox(runtimeConfig, chatRequest) }),
-    config: { web_search: "live", ...connectorAppConfig },
+    config: { web_search: "live", ...connectorAppConfig, ...analysisOverrides },
     developerInstructions,
   };
-  const reuseLoadedThread = runtimeThreadId !== null &&
+  const reuseLoadedThread = !hostAnalysisPolicy && runtimeThreadId !== null &&
     runtime.client.canReuseLoadedThread(runtimeThreadId, true) &&
+    hasAppliedConnectedAppConfig(runtime.client, runtimeThreadId, availableAppIds) &&
     (!quotaToolPermissions || hasAttestedQuotaToolPermissions(runtime.client, runtimeThreadId, quotaToolPermissions));
   let recovered: RecoveredTurn | null = null;
   let terminalPublication: Promise<void> | null = null;
@@ -996,6 +1037,7 @@ async function runWorkerCodexTurnAttempt(
     envelope: AppServerEvent,
     keyPrefix = "recovery",
   ) => {
+    inspectAttachment?.restore(recoveredTurnState.items);
     await submission!.bindTurn(recoveredTurnState.id);
     if (recoveredTurnState.status !== "inProgress") {
       await submission!.observeTerminal(recoveredTurnState.id, recoveredTurnState.status);
@@ -1010,10 +1052,10 @@ async function runWorkerCodexTurnAttempt(
       await emit(
         {
           type: "content",
-          value: publicAssistantText(
-            privateWorkspaceSafeText(text, [projectWorkspace, runtime.handle.roots.workspace]),
+          value: publicReviewText(publicAssistantText(
+            attachmentFinalText(privateWorkspaceSafeText(text, [projectWorkspace, runtime.handle.roots.workspace])),
             assistantName,
-          ),
+          )),
         },
         { envelope, key: `${keyPrefix}:content:${recoveredTurnState.id}` },
       );
@@ -1071,7 +1113,7 @@ async function runWorkerCodexTurnAttempt(
         installationId,
         authenticatedUserId,
         resolvedThreadId,
-        toolsetRevisionForIssuedThreadToken(runtimeThreadId, resumedThreadToolsetRevision),
+        toolsetRevisionForIssuedThreadToken(runtimeThreadId, resumedThreadToolsetRevision, installationId),
       ),
     });
     recovered = recoveredTurn(result, clientUserMessageId);
@@ -1080,6 +1122,8 @@ async function runWorkerCodexTurnAttempt(
   };
   const persistConfiguredThreadIdentity = async (result: JsonValue, envelope: AppServerEvent) => {
     if (quotaToolPermissions) attestQuotaToolPermissions(runtime.client, result, quotaToolPermissions);
+    const configuredThreadId = extractThreadId(result);
+    if (configuredThreadId) markConnectedAppConfigApplied(runtime.client, configuredThreadId, availableAppIds);
     await persistThreadIdentity(result, envelope);
   };
   // Each observation must read current remote state, not a cached response to
@@ -1109,7 +1153,7 @@ async function runWorkerCodexTurnAttempt(
         installationId,
         authenticatedUserId,
         runtimeThreadId,
-        toolsetRevisionForIssuedThreadToken(runtimeThreadId, resumedThreadToolsetRevision),
+        toolsetRevisionForIssuedThreadToken(runtimeThreadId, resumedThreadToolsetRevision, installationId),
       ),
     });
   } else {
@@ -1135,8 +1179,11 @@ async function runWorkerCodexTurnAttempt(
               ...(enterpriseDocumentNetwork ? COMPANY_FILES_DYNAMIC_TOOLS : []),
               ...(runtime.config.connectors?.companyMail?.enabled ? COMPANY_MAIL_DYNAMIC_TOOLS : []),
               ...GMAIL_DYNAMIC_TOOLS,
+              ...(runtime.config.connectors?.instantly?.enabled ? INSTANTLY_DYNAMIC_TOOLS : []),
               ...OUTLOOK_DYNAMIC_TOOLS,
+              ...(runtime.config.connectors?.mail?.enabled ? MAIL_DYNAMIC_TOOLS : []),
               ...(runtime.config.connectors?.composio?.toolkits.length ? COMPOSIO_DYNAMIC_TOOLS : []),
+              ...(runtime.config.connectors?.codexManagedAppAction ? CONNECTED_ACTION_DYNAMIC_TOOLS : []),
               ...(automationSession ? AUTOMATION_DYNAMIC_TOOLS : []),
       ...(runtimeIdentitySession || automationSession ? HORARIA_TOOLS : []),
             ],
@@ -1151,6 +1198,7 @@ async function runWorkerCodexTurnAttempt(
           return runtime.client.request("thread/start", params, purpose, 60_000, persistConfiguredThreadIdentity);
         })());
     } catch (error) {
+      await settleRejectedThreadStart(error);
       if (error instanceof AppServerRequestTimeoutError && error.method === "thread/start" && !runtimeThreadId) {
         await setRuntimePhase(
           "runtime-thread-recovery",
@@ -1160,7 +1208,8 @@ async function runWorkerCodexTurnAttempt(
         // A schedule calculation can leave a large durable event backlog in
         // this user's worker. Recover the original response instead of ending
         // the turn and inviting a retry of an ID still reserved by the router.
-        threadResult = await awaitLateAppServerResponse(error, 120_000);
+        try { threadResult = await awaitLateAppServerResponse(error, 120_000); }
+        catch (lateError) { await settleRejectedThreadStart(lateError); throw lateError; }
         await completeRuntimePhase("runtime-thread-recovery", {
           label: "Conversación recuperada",
           detail: "El servicio ha confirmado la apertura original",
@@ -1231,6 +1280,7 @@ async function runWorkerCodexTurnAttempt(
   recovered = recoveredTurn(threadResult, clientUserMessageId) ?? recovered;
   const recoveredState = recovered as RecoveredTurn | null;
   await submission.bindThread(threadId);
+
   if (submission.needsRecovery && !recoveredState) throw new TurnSubmissionRecoveryRequired();
   if (recoveredState && recoveredState.status !== "inProgress") {
     telemetry.bindRuntimeTurn(recoveredState.id);
@@ -1276,11 +1326,9 @@ async function runWorkerCodexTurnAttempt(
     documentToolRecoveryStartedAt = null;
   };
   let runtimeProgressRevision = 0;
-  const turnController = new AbortController();
-  const forwardExternalAbort = () => turnController.abort();
-  const turnSignal = turnController.signal;
+  const forwardExternalAbort = () => turnController.abort(signal.reason);
   const enterpriseDocumentSync = enterpriseDocumentNetwork ? new OnDemandDocumentSync(enterpriseDocumentNetwork, { signal: turnSignal }) : undefined;
-  const serverDocumentFiles = enterpriseDocumentNetwork ? new ServerDocumentFiles(enterpriseDocumentNetwork, { signal: turnSignal }) : undefined;
+  const serverDocumentFiles = enterpriseDocumentNetwork ? new ServerDocumentFiles(enterpriseDocumentNetwork, { signal: turnSignal, userId: authenticatedUserId }) : undefined;
   const knowledgeDocumentFiles = enterpriseDocumentNetwork ? new KnowledgeDocumentFiles(enterpriseDocumentNetwork, { signal: turnSignal }) : undefined;
   type FinishedTurn = { status: string | null; error: string | null };
   let terminalTurnStatus: FinishedTurn | null = null;
@@ -1876,7 +1924,14 @@ async function runWorkerCodexTurnAttempt(
         let toolOutcome: "completed" | "error" = "completed";
         try {
         if (request.method === "item/tool/call") {
+          if (hostAnalysisPolicy) turnSignal.throwIfAborted();
           if (!runtimeTurnId) throw new Error("Dynamic tool call arrived before the turn was bound.");
+          if (hostAnalysisPolicy && (!isRecord(request.params) || !hostAnalysisToolAllowed(hostAnalysisPolicy, request.params.namespace, request.params.tool))) {
+            toolOutcome = "error";
+            hostAnalysisPolicy.onViolation?.();
+            return { success: false, contentItems: [{ type: "inputText", text: "HOST_ANALYSIS_READ_ONLY: this tool is outside the authorized source-analysis scope." }] } as JsonValue;
+          }
+
           const horariaSession = runtimeIdentitySession ?? automationSession;
           if (horariaSession && isRecord(request.params) && request.params.namespace === HORARIA_NAMESPACE) {
             const horariaTurnId = runtimeTurnId;
@@ -1886,12 +1941,12 @@ async function runWorkerCodexTurnAttempt(
               sourceMessage: chatRequest.message, runtimeThreadId: threadId, runtimeTurnId: horariaTurnId,
               projectWorkspace, background: Boolean(backgroundExecution),
               preview: async (data) => {
-                if (isRecord(data) && data.artifactPurpose === "reviewed-excel") return; // The attached original is the preview; never regenerate it.
+                if (isRecord(data) && data.artifactPurpose === "reviewed-excel") return; // Preserve the attached corrected original.
                 if (!isRecord(data) || !Array.isArray(data.rows) || typeof data.title !== "string" || typeof data.previewHash !== "string") throw new Error("Previsualització d’horaris invàlida.");
                 const collection = data.artifactPurpose === "collection";
                 const arnallSchedule = collection ? undefined : arnallScheduleForPreview(runtime.config, data);
                 const result = await handleLocalDocumentDynamicToolCall({
-                  ...(request.params as never as import("../../contracts/codex/0.153.4/types/v2/DynamicToolCallParams").DynamicToolCallParams),
+                  ...(request.params as never as import("../../contracts/codex/0.162.1/types/v2/DynamicToolCallParams").DynamicToolCallParams),
                   namespace: AIBRAIN_DOCUMENT_TOOL_NAMESPACE, tool: "create",
                   arguments: { format: "xlsx", fileName: `${collection ? "disponibilidad" : "horario"}-${String(data.semana)}-${String(data.establecimientoId)}-${data.previewHash.slice(0, 12)}.xlsx`, title: data.title, content: `${data.status === "publicat" ? "Publicado" : "Borrador"}. ${String(data.note)}`, rows: data.rows } as JsonValue,
                 }, {
@@ -1961,6 +2016,10 @@ async function runWorkerCodexTurnAttempt(
               sourceThreadId: chatRequest.threadId,
               sourceTurnId: chatRequest.assistantMessageId,
               permissions,
+              inspectAttachment: inspectAttachment!,
+              assertAttachmentReviewComplete: () => inspectAttachment!.assertComplete(),
+              attachmentReviewCoverage: () => inspectAttachment!.coverage(),
+              attachmentReviewNotice: () => inspectAttachment!.finalText(""),
               rememberProjectFile: fileName => rememberProjectSource({ config: runtime.config,
                 userId: authenticatedUserId, ownerUserId: projectGuidance?.projectSourceOwnerId,
                 projectId: chatRequest.projectId, threadId: chatRequest.threadId, message: chatRequest.message,
@@ -2035,11 +2094,17 @@ async function runWorkerCodexTurnAttempt(
               runtimeTurnId,
             }) as JsonValue;
           }
+          if (isRecord(request.params) && request.params.namespace === INSTANTLY_NAMESPACE) {
+            return await handleInstantlyTool(request.params as never, {
+              config: runtime.config, installationId, userId: authenticatedUserId,
+              runtimeThreadId: threadId, runtimeTurnId, instantlySelected,
+            }) as JsonValue;
+          }
           if (isRecord(request.params) && request.params.namespace === COMPOSIO_NAMESPACE) {
             return await handleComposioTool(request.params as never, {
               config: runtime.config, installationId, userId: authenticatedUserId,
               runtimeThreadId: threadId, runtimeTurnId,
-              selectedIds: selectedConnectorMentions.map(({ resource }) => resource.id),
+              selectedIds: availableConnectors.map(({ resource }) => resource.id),
             }) as JsonValue;
           }
           if (isRecord(request.params) && request.params.namespace === COMPANY_MAIL_NAMESPACE) {
@@ -2065,6 +2130,30 @@ async function runWorkerCodexTurnAttempt(
               runtimeThreadId: threadId,
               runtimeTurnId,
               gmailSelected,
+            }) as JsonValue;
+          }
+
+          if (isRecord(request.params) && request.params.namespace === CONNECTED_ACTION_NAMESPACE) {
+            return await handleConnectedActionDynamicToolCall(request.params as never, {
+              session: runtimeIdentitySession ?? automationSession,
+              authorization: createInteractiveChatAuthorization({ session: runtimeIdentitySession ?? automationSession,
+                installationId, userId: authenticatedUserId, threadId, turnId: runtimeTurnId,
+                userMessageId: chatRequest.userMessageId, message: chatRequest.message, signal: turnSignal,
+                backgroundExecution, mode: chatRequest.options.mode, localTurnId: chatRequest.assistantMessageId, permissions }),
+              installationId, userId: authenticatedUserId, runtimeThreadId: threadId, runtimeTurnId,
+              userMessageId: chatRequest.userMessageId, message: chatRequest.message,
+              permissionFingerprint: permissions.fingerprint, backgroundExecution,
+            }) as JsonValue;
+          }
+
+          if (isRecord(request.params) && request.params.namespace === AIBRAIN_MAIL_TOOL_NAMESPACE) {
+            return await handleMailDynamicToolCall(request.params as never, {
+              config: runtime.config, installationId, userId: authenticatedUserId,
+              runtimeThreadId: threadId, runtimeTurnId, mailSelected,
+              chatAuthorization: createInteractiveChatAuthorization({ session: runtimeIdentitySession ?? automationSession,
+                installationId, userId: authenticatedUserId, threadId, turnId: runtimeTurnId,
+                userMessageId: chatRequest.userMessageId, message: chatRequest.message, signal: turnSignal,
+                backgroundExecution, mode: chatRequest.options.mode, localTurnId: chatRequest.assistantMessageId, permissions }) ?? undefined,
             }) as JsonValue;
           }
           if (isRecord(request.params) && request.params.namespace === AIBRAIN_OUTLOOK_TOOL_NAMESPACE) {
@@ -2167,26 +2256,28 @@ async function runWorkerCodexTurnAttempt(
           );
           return approval.response("decline") as JsonValue;
         }
-        const durableApproval = await approvalStore.createPending({
-          locator: approvalLocatorFromItem(installationId, authenticatedUserId, permissionBoundItem),
-          requestType: approval.requestType,
-        });
-        if (durableApproval.status === "pending") {
-          await emit(
-            { type: "approval", item: permissionBoundItem },
-            { envelope, key: `approval:pending:${approval.item.id}` },
-          );
+        const authorization = createInteractiveChatAuthorization({ session: runtimeIdentitySession ?? automationSession,
+          installationId, userId: authenticatedUserId, threadId, turnId: approval.item.turnId,
+          userMessageId: chatRequest.userMessageId, message: chatRequest.message, signal: turnSignal,
+          backgroundExecution, mode: chatRequest.options.mode, localTurnId: chatRequest.assistantMessageId, permissions });
+        if (!authorization || !isRecord(request.params) ||
+            !await nativeRequestWithinChatScope(approval.requestType, request.params, projectWorkspace, effectiveSandbox(runtimeConfig, chatRequest))) {
+          // No button can widen the execution boundary. Return a denied result
+          // so the model explains the missing policy/access in ordinary chat.
+          await emit({ type: "approval", item: resolvedApproval({ ...permissionBoundItem,
+            detail: "This action needs access outside the current chat's granted permissions. Explain the missing access in chat; no approval button can grant it." }, "decline") },
+            { envelope, key: `approval:chat-scope-denied:${approval.item.id}` });
+          return approval.response("decline") as JsonValue;
         }
-        const decision = await waitForApproval(
-          approvalStore,
-          permissionBoundItem,
-          approval.requestType,
-          turnSignal,
-        );
-        await emit(
-          { type: "approval", item: resolvedApproval(permissionBoundItem, decision) },
-          { envelope, key: `approval:resolved:${approval.item.id}` },
-        );
+        let decision: "accept" | "decline" | "cancel" = "decline";
+        try {
+          decision = await approvalStore.resolveChatApproval({ authorization,
+            locator: approvalLocatorFromItem(installationId, authenticatedUserId, permissionBoundItem),
+            requestType: approval.requestType as "command" | "file",
+            requestFingerprint: createHash("sha256").update(JSON.stringify([request.method, request.params])).digest("hex") });
+        } catch { /* A stale/replayed/cancelled request is never accepted. */ }
+        await emit({ type: "approval", item: resolvedApproval(permissionBoundItem, decision) },
+          { envelope, key: `approval:chat-resolved:${approval.item.id}` });
         return approval.response(decision) as JsonValue;
       },
       // A broken event stream is not an authoritative terminal result for the
@@ -2196,7 +2287,7 @@ async function runWorkerCodexTurnAttempt(
   );
 
   signal.addEventListener("abort", forwardExternalAbort, { once: true });
-  if (signal.aborted) turnController.abort();
+  if (signal.aborted) turnController.abort(signal.reason);
   const unregisterCancellation = registerWorkerTurnCancellation(
     authenticatedUserId,
     threadId,
@@ -2600,8 +2691,15 @@ async function runWorkerCodexTurnAttempt(
   }
   } catch (error) {
     if (error instanceof ModelCapacityRetryReady) throw error;
+    if (error instanceof WorkerThreadStartRejectedError) { telemetry.finish("error"); throw error; }
     telemetry.finish("error");
     if (error instanceof AppServerRequestTimeoutError || error instanceof TurnSubmissionRecoveryRequired || submission?.needsRecovery) {
+      // An admitted creation may finish after both response deadlines. Keep
+      // its exact durable intent recoverable instead of closing the local
+      // response and inviting a second creation or model submission.
+      if (error instanceof AppServerRequestTimeoutError && error.method === "thread/start" && !submission?.needsRecovery) {
+        throw new Error("The conversation could not be opened. No AI response was started. Please retry in a new conversation.", { cause: error });
+      }
       throw new WorkerTurnRecoveryPendingError(error instanceof Error ? error.message : undefined);
     }
     throw error;

@@ -89,7 +89,10 @@ export function parseAccount(result: unknown): CodexConnection {
     };
   }
   if (account.type === "apiKey") {
-    return { connected: false, authMode: "apiKey", planType: null, models: [], skills: [], webSearch: false, imageGeneration: false, processWarm: false, rateLimit: null, usage: null };
+    // account/read explicitly reports the API-key mode after loading the
+    // worker's private credential. Like ChatGPT mode this is account readiness,
+    // not proof of quota, model entitlement or a successful paid request.
+    return { connected: true, authMode: "apiKey", planType: null, models: [], skills: [], webSearch: false, imageGeneration: false, processWarm: false, rateLimit: null, usage: null };
   }
   if (account.type === "amazonBedrock") {
     return { connected: false, authMode: "amazonBedrock", planType: null, models: [], skills: [], webSearch: false, imageGeneration: false, processWarm: false, rateLimit: null, usage: null };

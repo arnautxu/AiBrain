@@ -813,7 +813,11 @@ export class LocalFileMemoryService implements MemoryService {
       if (longest && longest.get().length > 0) {
         const overflow = text.length - maxCharacters;
         const current = longest.get();
-        longest.set(current.slice(0, Math.max(0, current.length - Math.max(1, overflow))));
+        // Share the loss across large sources. Removing the entire overflow
+        // from one document can erase its workflow while equally long, less
+        // relevant documents remain intact.
+        const reduction = Math.min(overflow, Math.max(1, Math.ceil(current.length / 10)));
+        longest.set(current.slice(0, Math.max(0, current.length - reduction)));
         longest.mark();
         truncated = true;
       } else if (explicitMemories.length > 0) {

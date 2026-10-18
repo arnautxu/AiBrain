@@ -30,8 +30,8 @@ function withoutMarkdown(value: string) {
 
 function redactInternalDetails(value: string, assistantName = "el asistente") {
   return value
-    .replace(INSTALLATION_REFERENCE, "Arnall")
-    .replace(INSTALLATION_SLUG, "Arnall")
+    .replace(INSTALLATION_REFERENCE, "entorno privado")
+    .replace(INSTALLATION_SLUG, "entorno privado")
     .replace(FILE_URL, "archivo interno")
     .replace(ABSOLUTE_PATH, "archivo interno")
     .replace(RUNTIME_PATH, "entorno privado")
@@ -82,7 +82,7 @@ export function publicAssistantText(value: unknown, assistantName: string, maxim
   if (!normalized) return "";
   const links: string[] = [];
   const protectedText = normalized.replace(
-    /https?:\/\/[^\s<>"']+|\/api\/threads\/[0-9a-f-]{36}\/artifacts\/[0-9a-f-]{36}(?:\?[^\s<>"')\]]*)?|\/api\/(?:projects|browser|documents)\/[^\s<>"')\]]+/giu,
+    /https?:\/\/[^\s<>"']+|\/api\/threads\/[0-9a-f-]{36}\/artifacts\/[0-9a-f-]{36}(?:\?[^\s<>"')\]]*)?|\/worksitea\/apps\?id=[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?:&published=1)?(?=[\s<>"'`)\]]|$)|\/api\/(?:projects|browser|documents)\/[^\s<>"')\]]+/giu,
     (link) => {
       const index = links.push(link) - 1;
       return `SAFEURLTOKEN${index}ENDTOKEN`;
@@ -126,6 +126,8 @@ const TOOL_NAMES: Record<string, string> = {
   aibrain_outlook: "Outlook",
   aibrain_automations: "Automatizaciones",
   aibrain_memory: "Memoria",
+  aibrain_worksitea_apps: "Aplicaciones de WORKSITEA",
+  aibrain_worksitea_production: "Producción de WORKSITEA",
 };
 
 export function publicToolName(value: unknown, fallback = "Herramienta") {

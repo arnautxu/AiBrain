@@ -27,7 +27,11 @@ test("the composer grows, accepts dropped images, stops a stream and recovers af
   expect(grownComposerBox).not.toBeNull();
   expect(textareaBox).not.toBeNull();
   expect(controlsBox).not.toBeNull();
-  expect(grownComposerBox!.y).toBeLessThan(initialComposerBox!.y);
+  // Desktop landing is anchored at a steady top; it grows downwards. The
+  // conversation composer remains bottom-docked after the first message.
+  expect(grownComposerBox!.y).toBeCloseTo(initialComposerBox!.y, 0);
+  expect(grownComposerBox!.y + grownComposerBox!.height).toBeGreaterThan(initialComposerBox!.y + initialComposerBox!.height);
+  expect(grownComposerBox!.y + grownComposerBox!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
   expect(grownComposerBox!.height).toBeGreaterThan(initialComposerBox!.height);
   expect(controlsBox!.y).toBeGreaterThanOrEqual(textareaBox!.y + textareaBox!.height - 1);
   await expect(page.getByRole("button", { name: "Enviar mensaje" })).toBeEnabled();

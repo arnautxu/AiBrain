@@ -100,6 +100,24 @@ describe("streaming multipart document intake", () => {
     await expect(incomingFiles(root)).resolves.toEqual([]);
   });
 
+  it("preserves UTF-8 browser filenames without changing uploaded bytes", async () => {
+    const fileName = "VALRESA_CLIENTES_Joel_González_ñ_客户.xlsx";
+    const bytes = Buffer.from("unchanged original workbook bytes");
+    const header = Buffer.from(prefix().toString().replace('filename="notes.txt"', `filename="${fileName}"`));
+    const chunks = [header, bytes, Buffer.from(`\r\n--${BOUNDARY}--\r\n`)];
+    const parsed = await parseStreamingDocumentUpload(requestFromStream(new ReadableStream({
+      pull(controller) {
+        const chunk = chunks.shift();
+        if (chunk) controller.enqueue(chunk);
+        else controller.close();
+      },
+    })), root, locks);
+    expect(parsed.fileName).toBe(fileName);
+    expect(await readFile(parsed.temporaryPath)).toEqual(bytes);
+    await parsed.dispose();
+    await expect(incomingFiles(root)).resolves.toEqual([]);
+  });
+
   it("rejects malformed multipart and removes its partial temporary", async () => {
     const chunks = [prefix(), Buffer.from("unterminated")];
     await expect(parseStreamingDocumentUpload(requestFromStream(new ReadableStream({

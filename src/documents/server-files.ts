@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { serverUserRoots, serverPathAllowed } from "./server-user-access";
+import { randomUUID, createHash } from "node:crypto";
 import { lstat, readdir, realpath } from "node:fs/promises";
 import { createConnection } from "node:net";
 import path from "node:path";
@@ -34,7 +35,7 @@ function validatePath(value: string) {
 /** A trusted app-side client; employees never receive its socket or credentials. */
 export class ServerDocumentFiles {
   constructor(private readonly network: EnterpriseDocumentNetwork,
-    private readonly options: { ownerUid?: number; timeoutMs?: number; signal?: AbortSignal } = {}) {}
+    private readonly options: { ownerUid?: number; timeoutMs?: number; signal?: AbortSignal; userId?: string } = {}) {}
 
   /** Navigation is trusted per-installation configuration, never a cached live listing. */
   async navigation(roots: readonly EnterpriseDocumentRoot[]): Promise<ServerResult | null> {
@@ -43,6 +44,7 @@ export class ServerDocumentFiles {
     const directory = path.join(this.network.config.paths.dataRoot, "locks", "server-files");
     try {
       const owner = this.options.ownerUid ?? 0;
+      const userRoots = await serverUserRoots(this.network.config.installationId,this.network.config.paths.dataRoot,this.options.userId,owner);
       const info = await lstat(directory);
       if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== owner || (info.mode & 0o022) || await realpath(directory) !== path.resolve(directory)) return unavailable();
       const entries = (await readdir(directory)).filter(name => /^[a-z0-9][a-z0-9-]{0,62}\.json$/.test(name)).sort();
@@ -61,7 +63,7 @@ export class ServerDocumentFiles {
           if (!record(item) || typeof item.label !== "string" || !item.label.trim() || item.label.length > 60 || /\p{C}/u.test(item.label) ||
               typeof item.path !== "string" || item.path.length > 200 || item.path.includes("?") || !item.path.startsWith(`server-${connection}/`)) return unavailable();
           validatePath(item.path);
-          if (!results.some(result => result.path === item.path)) results.push({ path: item.path, name: item.label, kind: "directory", size: 0, modifiedAt: null });
+          if (serverPathAllowed(item.path,userRoots,true) && !results.some(result => result.path === item.path)) results.push({ path: item.path, name: item.label, kind: "directory", size: 0, modifiedAt: null });
         }
       }
       return { available: true, navigation: true, sourceChecked: false, results, checkedAt: null, nextQuery: null, limited: false };
@@ -90,6 +92,12 @@ export class ServerDocumentFiles {
     return this.call(roots, "read", { path: target.path });
   }
 
+  async readOriginal(roots: readonly EnterpriseDocumentRoot[], target: { scope: string; path: string }) {
+    if (target.scope !== "company" || target.path.includes("?")) throw new Error("Server original scope denied");
+    validatePath(target.path);
+    return this.call(roots, "read", { path: target.path, format: "original" });
+  }
+
   async inventory(roots: readonly EnterpriseDocumentRoot[], target: { scope: string; path: string; offset?: number }) {
     if (target.scope !== "company" || target.path.includes("?")) throw new Error("Server inventory scope denied");
     validatePath(target.path);
@@ -98,7 +106,7 @@ export class ServerDocumentFiles {
     return this.call(roots, "inventory", { path: target.path, offset });
   }
 
-  private async call(roots: readonly EnterpriseDocumentRoot[], operation: "search" | "browse" | "read" | "inventory", input: { query: string; limit: number } | { path: string; offset?: number }): Promise<ServerResult | null> {
+  private async call(roots: readonly EnterpriseDocumentRoot[], operation: "search" | "browse" | "read" | "inventory", input: { query: string; limit: number } | { path: string; offset?: number; format?: "original" }): Promise<ServerResult | null> {
     await this.network.validateSyncRoots(roots);
     // Do not read even the host descriptor for a turn without company access.
     if (!roots.some((root) => root.scope === "company" && root.scopeId === null)) return null;
@@ -122,7 +130,19 @@ export class ServerDocumentFiles {
         const socketPath = path.join(directory, `${connection}.sock`);
         const socket = await lstat(socketPath);
         if (!socket.isSocket() || socket.uid !== owner || (socket.mode & 0o007)) return unavailable();
-        return this.request(socketPath, connection, operation, input);
+        const userRoots = await serverUserRoots(this.network.config.installationId,this.network.config.paths.dataRoot,this.options.userId,owner);
+        if (userRoots?.length === 0) return unavailable();
+        if ("path" in input && !serverPathAllowed(input.path,userRoots)) return unavailable();
+        if ("query" in input && (input.query.startsWith("server:/") || /^[A-Za-z]:[\\/]/.test(input.query))) {
+          const location=input.query.startsWith("server:/") ? input.query.slice(8) : input.query[0]+"/"+input.query.slice(3).replaceAll("\\","/");
+          if (location && !serverPathAllowed(`server-${connection}/${location}`,userRoots,true)) return unavailable();
+        }
+        const result=await this.request(socketPath, connection, operation, input);
+        // Re-read revocable grants after the potentially slow Windows operation.
+        const latestRoots=await serverUserRoots(this.network.config.installationId,this.network.config.paths.dataRoot,this.options.userId,owner);
+        if (latestRoots?.length === 0 || "path" in input && !serverPathAllowed(input.path,latestRoots)) return unavailable();
+        if(Array.isArray(result.results)) result.results=result.results.filter(entry=>record(entry) && typeof entry.path==='string' && serverPathAllowed(entry.path,latestRoots,entry.kind==='directory'));
+        return result;
       }
       return null;
     } catch (error) {
@@ -134,7 +154,9 @@ export class ServerDocumentFiles {
     return new Promise((resolve) => {
       const requestId = randomUUID();
       const socket = createConnection({ path: socketPath });
-      let received = Buffer.alloc(0);
+      const chunks: Buffer[] = [];
+      let receivedBytes = 0;
+      const original = operation === "read" && "format" in input && input.format === "original";
       let finished = false;
       const finish = (result: ServerResult) => {
         if (finished) return;
@@ -155,10 +177,12 @@ export class ServerDocumentFiles {
       this.options.signal?.addEventListener("abort", abort, { once: true });
       if (this.options.signal?.aborted) abort();
       socket.on("data", (chunk: Buffer) => {
-        received = Buffer.concat([received, chunk]);
-        if (received.length > 256 * 1024) return abort();
+        receivedBytes += chunk.length;
+        if (receivedBytes > (original ? 23 * 1024 * 1024 : 256 * 1024)) return abort();
+        chunks.push(chunk);
+        if (!chunk.includes(10)) return;
+        const received = Buffer.concat(chunks);
         const end = received.indexOf(10);
-        if (end < 0) return;
         try {
           const value: unknown = JSON.parse(received.subarray(0, end).toString("utf8"));
           if (!record(value) || value.requestId !== requestId || value.connectionId !== connectionId || value.installationId !== this.network.config.installationId || typeof value.available !== "boolean") return abort();
@@ -181,7 +205,16 @@ export class ServerDocumentFiles {
                   !counts(value.directories) || !counts(value.fileTypes) || !counts(value.folders) ||
                   !(value.nextOffset === null || count(value.nextOffset) && Number(value.nextOffset) === Number((input as { offset: number }).offset) + 50)) return abort();
               }
-            } else if (typeof value.content !== "string" || Buffer.byteLength(value.content) > 120 * 1024 || value.scope !== "company" || value.path !== (input as { path: string }).path) return abort();
+            } else {
+              if (value.scope !== "company" || value.path !== (input as { path: string }).path) return abort();
+              if (original) {
+                if (value.sourceChecked !== true || typeof value.base64 !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(value.base64) ||
+                    !Number.isSafeInteger(value.size) || Number(value.size) < 1 || Number(value.size) > 16 * 1024 * 1024 ||
+                    typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256)) return abort();
+                const bytes = Buffer.from(value.base64, "base64");
+                if (bytes.length !== value.size || bytes.toString("base64") !== value.base64 || createHash("sha256").update(bytes).digest("hex") !== value.sha256) return abort();
+              } else if (typeof value.content !== "string" || Buffer.byteLength(value.content) > 120 * 1024) return abort();
+            }
           }
           const { requestId: _request, installationId: _installation, connectionId: _connection, ...result } = value;
           finish(result as ServerResult);

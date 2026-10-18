@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { lstat, mkdir, realpath, rm } from "node:fs/promises";
 import path from "node:path";
-import type { UserInput } from "../../contracts/codex/0.153.4/types/v2/UserInput";
-import type { ClientRequest } from "../../contracts/codex/0.153.4/types/ClientRequest";
+import type { UserInput } from "../../contracts/codex/0.162.1/types/v2/UserInput";
+import type { ClientRequest } from "../../contracts/codex/0.162.1/types/ClientRequest";
 import { atomicWriteFile, ResourceLockManager } from "@/storage";
 import type { ResourceLockLease } from "@/storage/resource-lock";
 import { readRegularFileWithin } from "@/security/safe-file";
@@ -217,6 +217,11 @@ export class DurableTurnSubmission {
     return this.data.phase === "dispatched" || this.data.phase === "terminal" ||
       (this.data.threadRequest !== null && this.data.runtimeThreadId === null);
   }
+  get threadCreationRejected() {
+    return this.data.terminal === "failed" && this.data.threadRequest !== null &&
+      this.data.runtimeThreadId === null && this.data.runtimeTurnId === null && this.data.turnRequest === null;
+  }
+
   get terminal() { return this.data.terminal; }
 
   private update(change: (data: RecordData) => RecordData, writeAhead = false) {
@@ -285,7 +290,7 @@ export class DurableTurnSubmission {
     for (const [index, file] of files.entries()) {
       const referenceName = typeof file?.relativePath === "string" ? path.posix.basename(file.relativePath) : "";
       const reference = file?.role === "project-reference";
-      const name = reference ? referenceName : `input-${index + 1}.xlsx`;
+      const name = reference ? referenceName : `input-${index + 1}.${typeof file?.relativePath === "string" && file.relativePath.endsWith(".pdf") ? "pdf" : "xlsx"}`;
       if (reference && !new RegExp(`^reference-${index + 1}\\.(xlsx|pdf|docx|pptx|txt)$`).test(name)) throw new Error("Invalid admitted reference path.");
       if (!file || file.relativePath !== path.posix.join(path.basename(this.data.inputDirectory), name)) {
         throw new Error("Invalid admitted workbook path.");
@@ -294,6 +299,10 @@ export class DurableTurnSubmission {
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 ||
           (metadata.mode & 0o077) !== 0 || metadata.size > 50 * 1024 * 1024) {
         throw new Error("Unsafe admitted workbook copy.");
+      }
+      if (name.endsWith(".pdf") &&
+          (!HASH.test(file.sha256 ?? "") || createHash("sha256").update(await readRegularFileWithin(this.data.inputDirectory, name, 50 * 1024 * 1024)).digest("hex") !== file.sha256)) {
+        throw new Error("Admitted PDF bytes changed.");
       }
       // Copies are editable: comparing them to the source hash here would
       // reject legitimate in-progress work. Originals stay in immutable staging.
@@ -314,6 +323,18 @@ export class DurableTurnSubmission {
       if (data.threadRequest || data.phase === "dispatched" || data.phase === "terminal") throw new TurnSubmissionRecoveryRequired();
       return { ...data, threadRequest: JSON.stringify({ method: "thread/start", id: requestId, params }) };
     }, true);
+  }
+
+  /** Only a correlated protocol rejection before creation can close this intent.
+   * Retain the exact thread request as a tombstone; never reopen or replay it. */
+  async rejectThreadStart(requestId: string | number, code: number) {
+    if (![-32600, -32601, -32602].includes(code)) throw new TurnSubmissionRecoveryRequired();
+    await this.update(data => {
+      if (!data.threadRequest || JSON.parse(data.threadRequest).id !== requestId ||
+          data.runtimeThreadId !== null || data.runtimeTurnId !== null || data.turnRequest !== null ||
+          data.phase === "dispatched" || data.phase === "terminal") throw new TurnSubmissionRecoveryRequired();
+      return { ...data, phase: "terminal", terminal: "failed", inputs: null };
+    });
   }
 
   async dispatchOnce(params: unknown, requestId: string) {

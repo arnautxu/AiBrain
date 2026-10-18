@@ -1,5 +1,10 @@
 import { beforeEach, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
+// This suite verifies source ownership; storage-pressure policy has its own negative tests.
+vi.mock("node:fs/promises", async importOriginal => ({
+  ...await importOriginal<typeof import("node:fs/promises")>(),
+  statfs: async () => ({ bsize: 4096n, bavail: 10_000_000n, blocks: 20_000_000n }),
+}));
 const mocks = vi.hoisted(() => ({ session: vi.fn(), origin: vi.fn(), access: vi.fn(), store: vi.fn(), config: vi.fn() }));
 vi.mock("@/auth/session", () => ({ getSession: mocks.session }));
 vi.mock("@/auth/request-security", () => ({ isSameOriginMutation: mocks.origin }));

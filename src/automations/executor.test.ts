@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthSession } from "@/auth/types";
 import type { InstallationConfig } from "@/config/installation-schema";
 import { DEFAULT_AUTOMATION_EXECUTION_CONTEXT, type AutomationTask } from "@/automations/contracts";
@@ -6,6 +6,7 @@ import { DEFAULT_AUTOMATION_EXECUTION_CONTEXT, type AutomationTask } from "@/aut
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  hostExecution: vi.fn(),
   runWorkerCodexTurn: vi.fn(),
   finishThreadTurn: vi.fn(),
   getThread: vi.fn(),
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   messages: [] as Array<Record<string, unknown>>,
 }));
 
+vi.mock("@/automations/host-analysis/execution", () => ({ hostExecution: mocks.hostExecution }));
 vi.mock("@/runtime/worker-codex-turn", () => ({ runWorkerCodexTurn: mocks.runWorkerCodexTurn }));
 vi.mock("@/runtime/config", () => ({
   readRuntimeConfig: () => ({ mode: "codex", approvalPolicy: "never", sandbox: "workspace-write" }),
@@ -175,6 +177,105 @@ describe("scheduled automation execution", () => {
       runKey: `${task.id}:${task.nextRunAt}:recovered-empty`,
       existingThreadId: "30000000-0000-4000-8000-000000000001",
     })).rejects.toThrow("sin un resultado visible");
+    expect(mocks.runWorkerCodexTurn).not.toHaveBeenCalled();
+  });
+});
+
+afterEach(() => vi.useRealTimers());
+
+describe("host analysis terminal boundary", () => {
+  const host = () => ({ message: "Prepared original sources", signal: new AbortController().signal,
+    policy: { webSearch: false, businessReads: false }, dispose: vi.fn(),
+    documents: vi.fn(async () => []), validate: vi.fn(async (text: string) => `restored:${text}`) });
+  it("prepares exact host input/options and validates before any terminal success", async () => {
+    const adapter = host(); mocks.hostExecution.mockResolvedValueOnce(adapter);
+    const calls: string[] = [];
+    adapter.validate.mockImplementation(async text => { calls.push("validate"); expect(mocks.finishThreadTurn).not.toHaveBeenCalled(); return `restored:${text}`; });
+    await executeScheduledTurn({ installation, session, task: { ...task, schedule: { kind: "external" } }, runKey: `${task.id}:manual:test` });
+    expect(calls).toEqual(["validate"]);
+    expect(mocks.runWorkerCodexTurn.mock.calls[0][0]).toMatchObject({ message: adapter.message, preferences: { tone: "direct", language: "es" }, options: { experience: "smart", webSearch: false, imageGeneration: false, inheritAuthorizedSkills: false, connectorMentions: [] } });
+    expect(mocks.runWorkerCodexTurn.mock.calls[0][21]).toBe(adapter.policy);
+    expect(mocks.messages[1]).toMatchObject({ status: "complete", content: "restored:TEST-AUTO-P0-OK" });
+    expect(adapter.dispose).toHaveBeenCalledOnce();
+  });
+  it("keeps exact coverage failure as an error and never persists unvalidated output as complete", async () => {
+    const adapter = host(); adapter.validate.mockRejectedValueOnce(Error("AUTOMATION_SOURCE_COVERAGE_MISMATCH")); mocks.hostExecution.mockResolvedValueOnce(adapter);
+    await expect(executeScheduledTurn({ installation, session, task: { ...task, schedule: { kind: "external" } }, runKey: `${task.id}:manual:test` })).rejects.toThrow("AUTOMATION_SOURCE_COVERAGE_MISMATCH");
+    expect(mocks.messages[1]).toMatchObject({ status: "error", content: "TEST-AUTO-P0-OK", activity: expect.arrayContaining([expect.objectContaining({ detail: "AUTOMATION_SOURCE_COVERAGE_MISMATCH", status: "failed" })]) });
+    expect(adapter.dispose).toHaveBeenCalledOnce();
+  });
+  it("preserves partial work and the actual timeout instead of calling it non-read-only", async () => {
+    const controller = new AbortController();
+    const adapter = { ...host(), signal: controller.signal };
+    mocks.hostExecution.mockResolvedValueOnce(adapter);
+    mocks.runWorkerCodexTurn.mockImplementationOnce(async (...args: unknown[]) => {
+      const emit = args[10] as (event: unknown) => Promise<void>;
+      await emit({ type: "content", value: "Partial analysis" });
+      for (let i = 0; i < 36; i++) await emit({ type: "activity", item: { id: `step-${i}`, kind: "tool", label: `Read ${i}`, status: "complete" } });
+      for (let i = 0; i < 22; i++) await emit({ type: "toolResult", item: { id: `read-${i}`, kind: "app", title: "Read", status: "complete", summary: null, output: "source", sourceIds: [], createdAt: new Date().toISOString() } });
+      controller.abort(Error("HOST_EXECUTION_TIMEOUT"));
+      await emit({ type: "stopped" });
+    });
+    await expect(executeScheduledTurn({ installation, session, task: { ...task, schedule: { kind: "external" } }, runKey: "timeout" })).rejects.toThrow("HOST_EXECUTION_TIMEOUT");
+    expect(mocks.messages[1]).toMatchObject({ status: "error", content: "Partial analysis", activity: expect.arrayContaining([expect.objectContaining({ detail: "HOST_EXECUTION_TIMEOUT", status: "failed" })]) });
+    expect(mocks.messages[1].activity).toHaveLength(37);
+    expect(mocks.messages[1].toolResults).toHaveLength(22);
+    expect(adapter.validate).not.toHaveBeenCalled();
+  });
+  it("preserves model errors separately from permission violations", async () => {
+    const adapter = host(); mocks.hostExecution.mockResolvedValueOnce(adapter);
+    mocks.runWorkerCodexTurn.mockImplementationOnce(async (...args: unknown[]) => {
+      await (args[10] as (event: unknown) => Promise<void>)({ type: "error", message: "Provider unavailable" });
+    });
+    await expect(executeScheduledTurn({ installation, session, task: { ...task, schedule: { kind: "external" } }, runKey: "model-error" })).rejects.toThrow("HOST_MODEL_ERROR");
+    expect(mocks.messages[1]).toMatchObject({ status: "error", content: "Provider unavailable", activity: expect.arrayContaining([expect.objectContaining({ detail: "HOST_MODEL_ERROR", output: "Provider unavailable" })]) });
+    expect(adapter.validate).not.toHaveBeenCalled();
+  });
+  it("still rejects an actual approval request as non-read-only", async () => {
+    const adapter = host(); mocks.hostExecution.mockResolvedValueOnce(adapter);
+    mocks.runWorkerCodexTurn.mockImplementationOnce(async (...args: unknown[]) => {
+      const emit = args[10] as (event: unknown) => Promise<void>;
+      await emit({ type: "approval", item: { id: "approval", status: "pending" } });
+      await emit({ type: "done" });
+    });
+    await expect(executeScheduledTurn({ installation, session, task: { ...task, schedule: { kind: "external" } }, runKey: "approval" })).rejects.toThrow("AUTOMATION_NON_READ_ONLY_RESULT");
+    expect(adapter.validate).not.toHaveBeenCalled();
+  });
+  it("bounds cooperative shutdown even if the runtime ignores cancellation and ignores late events", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const adapter = { ...host(), signal: controller.signal };
+    mocks.hostExecution.mockResolvedValueOnce(adapter);
+    let lateEmit!: (event: unknown) => Promise<void>;
+    let finish!: () => void;
+    mocks.runWorkerCodexTurn.mockImplementationOnce(async (...args: unknown[]) => {
+      lateEmit = args[10] as typeof lateEmit;
+      await lateEmit({ type: "content", value: "Before deadline" });
+      controller.abort(Error("HOST_EXECUTION_TIMEOUT"));
+      await new Promise<void>(resolve => { finish = resolve; });
+    });
+    const execution = executeScheduledTurn({ installation, session, task: { ...task, schedule: { kind: "external" } }, runKey: "unresponsive" });
+    const rejected = expect(execution).rejects.toThrow("HOST_EXECUTION_TIMEOUT");
+    await vi.advanceTimersByTimeAsync(5_000);
+    await rejected;
+    const saved = structuredClone(mocks.messages[1]);
+    await lateEmit({ type: "content", value: "LATE" });
+    await lateEmit({ type: "done" });
+    finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.messages[1]).toEqual(saved);
+    expect(mocks.finishThreadTurn).toHaveBeenCalledOnce();
+    expect(adapter.validate).not.toHaveBeenCalled();
+    expect(adapter.dispose).toHaveBeenCalledOnce();
+  });
+  it("revalidates already restored persisted results after recovery without inference", async () => {
+    const adapter = host(); mocks.hostExecution.mockResolvedValueOnce(adapter);
+    mocks.beginThreadTurn.mockImplementationOnce(async (_session, _threadId, userMessage, assistantMessage) => {
+      const result = { ...assistantMessage, status: "complete", content: "restored result" };
+      mocks.messages = [userMessage, result]; return { outcome: "existing", assistantMessage: result };
+    });
+    await executeScheduledTurn({ installation, session, task: { ...task, schedule: { kind: "external" } }, runKey: `${task.id}:manual:test` });
+    expect(adapter.validate).toHaveBeenCalledWith("restored result", "30000000-0000-4000-8000-000000000001", true);
     expect(mocks.runWorkerCodexTurn).not.toHaveBeenCalled();
   });
 });

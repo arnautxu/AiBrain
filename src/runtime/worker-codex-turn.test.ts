@@ -1,25 +1,38 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { FileApprovalStore } from "@/runtime/approval-store";
+import type { AuthSession } from "@/auth/types";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatRequest } from "@/lib/chat-contract";
 import type { MemoryService } from "@/memory";
 import type { ResolvedPermissions } from "@/permissions";
+import type { DynamicToolSpec } from "../../contracts/codex/0.162.1/types/v2/DynamicToolSpec";
 import type {
   MemoryTurnAuditEvent,
   WorkerTurnMemoryDependencies,
 } from "@/runtime/memory-turn";
-import { AppServerRequestTimeoutError } from "@/runtime/transport/app-server-rpc-router";
+import { AppServerRequestTimeoutError, AppServerRpcResponseError } from "@/runtime/transport/app-server-rpc-router";
 import { createQuotaToolPermissions } from "@/runtime/quota-tool-permissions";
+import { generatedPngFixture } from "../../tests/helpers/png-fixture";
 import { FileModelTurnQueue, type ModelTurnAdmission } from "@/runtime/model-turn-queue";
+import type { ResolvedConnectorMention } from "@/connectors/mentions-contract";
+import { GMAIL_CATALOG_RESOURCE } from "@/connectors/gmail-contracts";
+import { OUTLOOK_CATALOG_RESOURCE } from "@/connectors/outlook-contracts";
+import { MAIL_CATALOG_RESOURCE } from "@/connectors/mail-contracts";
+import { markConnectedAppConfigApplied } from "@/runtime/connected-app-config";
+import { cancelPendingWorkerTurn } from "@/runtime/turn-control";
+import { FileTurnProjectionStore } from "@/workbench/turn-projection-store";
 
 const mocked = vi.hoisted(() => ({
   runtime: null as unknown,
   maintenanceReleases: 0,
   maintenanceLease: null as unknown,
   cancelTurn: null as ((remoteInterruptConfirmed: boolean) => void) | null,
+  pendingCancellation: false,
   capacityWaits: null as number[] | null,
   capacityAbort: null as (() => void) | null,
+  availableConnectors: vi.fn<(...args: unknown[]) => Promise<ResolvedConnectorMention[]>>(),
 }));
 vi.mock("node:timers/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:timers/promises")>();
@@ -34,6 +47,11 @@ vi.mock("node:timers/promises", async (importOriginal) => {
   } };
 });
 vi.mock("server-only", () => ({}));
+vi.mock("@/connectors/mentions", () => ({ resolveAvailableConnectorsForTurn: mocked.availableConnectors }));
+vi.mock("@/transportexample/operator-server", () => ({
+  loadOperatorConfiguration: async () => ({ enabled: true, installationId: "transportexample-demo", storageRoot: "/unused",
+    approvedResearchOrigins: [], approvedVerificationProviders: [] }),
+}));
 vi.mock("@/auth/session", () => ({
   getSigningSecret: () => "test-signing-secret-with-at-least-thirty-two-bytes",
 }));
@@ -59,6 +77,8 @@ vi.mock("@/runtime/worker-runtime-service", () => ({
     if (fixture?.handle) fixture.handle.roots.userRoot ??= fixture.handle.roots.workspace;
     return mocked.runtime;
   },
+  cancelWorkerTurnLocally: () => false,
+  requestPendingWorkerTurnCancellation: () => { mocked.pendingCancellation = true; return true; },
   registerWorkerTurnCancellation: (
     _userId: string,
     _runtimeThreadId: string,
@@ -66,6 +86,7 @@ vi.mock("@/runtime/worker-runtime-service", () => ({
     cancel: (remoteInterruptConfirmed: boolean) => void,
   ) => {
     mocked.cancelTurn = cancel;
+    if (mocked.pendingCancellation) { mocked.pendingCancellation = false; cancel(false); }
     return () => { mocked.cancelTurn = null; };
   },
 }));
@@ -75,6 +96,8 @@ import {
   runWorkerCodexTurn,
   workerTurnTimeoutMs,
   WorkerTurnRecoveryPendingError,
+  WorkerThreadStartRejectedError,
+  type WorkerCodexTurnEvent,
 } from "@/runtime/worker-codex-turn";
 
 const installationId = "qa-company";
@@ -167,6 +190,76 @@ function projectGuidance() {
 }
 
 describe("worker Codex turn", () => {
+
+  it.each([
+    { label: "optional origin omitted", publicUrl: undefined, operatorEnabled: false },
+    { label: "optional origin invalid", publicUrl: "not-a-url", operatorEnabled: false },
+    { label: "foreign tenant with operator flags", publicUrl: undefined, operatorEnabled: true },
+    { label: "Arnall foreground", publicUrl: undefined, operatorEnabled: false },
+    { label: "Arnall background", publicUrl: undefined, operatorEnabled: false, background: true },
+  ])("assembles a unique authenticated dynamic tool catalogue and completes the synthetic model turn ($label)", async (fixture) => {
+    const { publicUrl, operatorEnabled } = fixture;
+    const background = "background" in fixture && fixture.background;
+    const turnInstallationId = "company-qa";
+    const root = await mkdtemp(path.join(tmpdir(), "aibrain-authenticated-tool-catalogue-"));
+    let handlers: { onNotification(value: unknown, envelope?: unknown): Promise<void> | void } | null = null;
+    let catalogue: readonly DynamicToolSpec[] = [];
+    const calls: string[] = [];
+    const terminal = { id: "catalogue-turn", status: "completed", error: null, items: [
+      { type: "userMessage", id: "catalogue-user", clientId: userMessageId, content: [] },
+      { type: "agentMessage", id: "catalogue-answer", phase: "final_answer", text: "Synthetic catalogue accepted" },
+    ] };
+    mocked.runtime = {
+      config: { installationId: turnInstallationId, paths: installationPaths, connectors: { companyMail: { enabled: true }, composio: { toolkits: [{ slug: "calendar" }] } }, ...(publicUrl === undefined ? {} : { publicUrl }) },
+      handle: { roots: { workspace: root, staging: root, artifacts: root } },
+      client: {
+        connectionSummary: async () => ({ connected: true }),
+        router: { registerTurn: (_thread: string, _local: string, value: typeof handlers) => {
+          handlers = value; return { bindRuntimeTurn() {}, dispose() {} };
+        } },
+        async request(method: string, params: { dynamicTools?: readonly DynamicToolSpec[] }, purpose: string, _timeout: number,
+          beforeResolve?: (value: never, event: never) => Promise<void>) {
+          calls.push(method);
+          const result = method === "thread/start" ? { thread: { id: "catalogue-thread" } }
+            : method === "turn/start" ? { turn: { id: "catalogue-turn" } }
+            : { thread: { id: "catalogue-thread", turns: [terminal] } };
+          if (method === "thread/start") catalogue = params.dynamicTools ?? [];
+          await beforeResolve?.(result as never, { eventId: `${method}-response`, sequence: calls.length,
+            occurredAt: new Date().toISOString(), message: { kind: "rpc-response", rpc: { id: purpose, result } } } as never);
+          if (method === "turn/start") queueMicrotask(() => { void handlers?.onNotification({ method: "turn/completed", params: {
+            threadId: "catalogue-thread", turn: terminal,
+          } }); });
+          return result;
+        },
+      },
+    };
+    const events: Array<{ type: string }> = [];
+    await runWorkerCodexTurn(chatRequest(), turnInstallationId, userId, null, {
+      tenantId: turnInstallationId, mode: "codex", codexBinary: "unused", codexHome: null,
+      workspace: root, model: null, approvalPolicy: "on-request", sandbox: "workspace-write",
+    }, { ...permissions(), installationId: turnInstallationId }, {} as never, memoryDependencies(), [], new AbortController().signal,
+    async event => { events.push(event); }, undefined, undefined, null, undefined, undefined, undefined,
+    { provider: "local", user: { id: userId, name: "Fixture", email: "fixture@example.test" },
+      tenant: { id: turnInstallationId, name: "Fixture" }, expiresAt: new Date(Date.now() + 60_000).toISOString() }, Boolean(background));
+    expect(catalogue.map(tool => tool.name)).toEqual(expect.arrayContaining([
+      "aibrain_browser", "aibrain_documents", "aibrain_gmail", "aibrain_outlook", "aibrain_horaria", "aibrain_company_mail", "aibrain_connected_apps",
+    ]));
+    expect(new Set(catalogue.map(tool => tool.name)).size).toBe(catalogue.length);
+    expect(catalogue.some(tool => tool.name === "transportexample_operator_local_review")).toBe(false);
+    expect(catalogue.some(tool => tool.name === "transportexample_outreach_preparation")).toBe(false);
+    const names = catalogue.flatMap(tool => tool.type === "namespace"
+      ? tool.tools.map(child => `${tool.name}.${child.name}`) : [tool.name]);
+    expect(new Set(names).size).toBe(names.length);
+    const documents = catalogue.find(tool => tool.type === "namespace" && tool.name === "aibrain_documents");
+    if (!documents || documents.type !== "namespace") throw Error("document tools missing");
+    const schedule = documents.tools.filter(tool => tool.name === "create_arnall_schedule");
+    expect(schedule).toHaveLength(1);
+    expect(JSON.stringify(schedule[0].inputSchema)).toContain('"maxWeeklyHours"');
+    expect(calls.filter(method => method === "thread/start")).toHaveLength(1);
+    expect(calls.filter(method => method === "turn/start")).toHaveLength(1);
+    expect(events).toContainEqual({ type: "done" });
+  });
+
   it.each(["recover", "recover-smart", "fallback", "fallback-smart", "fallback-exhaust", "queue-cancel", "lost-retry-ack", "exhaust", "partial", "wrong-code", "read-partial", "lost-read", "cancel"])(
     "handles capacity admission with %s without replaying partial work", async (outcome) => {
     const { mkdir, rm } = await import("node:fs/promises");
@@ -234,6 +327,9 @@ describe("worker Codex turn", () => {
         return result;
       },
     };
+    // This fixture represents an already loaded thread with the current empty
+    // managed-app inventory attested; admission retries should not reconfigure it.
+    markConnectedAppConfigApplied(client, "runtime-thread-capacity", []);
     mocked.runtime = { config: { installationId, ...(outcome === "queue-cancel" ? {} : { companySlug: "arnall" }), branding: { productName: "Arnall AI" },
       paths: { ...installationPaths, ...(outcome === "queue-cancel" ? { dataRoot: userRoot } : {}) } },
       handle: { roots: { userRoot, workspace, staging: path.join(userRoot, "staging"), artifacts: path.join(userRoot, "artifacts") } },
@@ -321,7 +417,7 @@ describe("worker Codex turn", () => {
       router: { registerTurn(_thread: string, _local: string, value: typeof handlers) {
         handlers = value;
         if (attempt > 1) setTimeout(() => { void handlers.onNotification({ method: "turn/completed",
-          params: { threadId: "fictional-existing-thread", turn: { id: "fictional-remote-turn", status: "completed", items: [{ type: "agentMessage", id: "fixture-final", phase: "final_answer", text: "Fixture completed answer." }], error: null } },
+          params: { threadId: "fictional-existing-thread", turn: { id: "fictional-remote-turn", status: "completed", items: [{ type: "agentMessage", id: "synthetic-final", phase: "final_answer", text: "Verified synthetic workbook recovery." }], error: null } },
         }, envelope()); }, 10);
         return { bindRuntimeTurn() {}, dispose() {} };
       } },
@@ -355,6 +451,7 @@ describe("worker Codex turn", () => {
         return result;
       },
     };
+    markConnectedAppConfigApplied(client, "fictional-existing-thread", []);
     mocked.runtime = { config: { installationId, paths: installationPaths },
       handle: { roots: { userRoot, workspace, staging, artifacts: path.join(userRoot, "artifacts") } }, client };
     const request = { ...chatRequest(), options: { ...chatRequest().options, documentUploadIds: documents.map(({ document }) => document.uploadId) } };
@@ -390,13 +487,17 @@ describe("worker Codex turn", () => {
     } finally { await rm(userRoot, { recursive: true, force: true }); }
   });
 
-  it.each(["new", "existing"] as const)("attests quota profiles for a %s thread and downgrades the next turn without widening writes", async (kind) => {
+  it.each(["new", "existing", "host", "host-abort"] as const)("attests quota profiles for a %s thread and downgrades the next turn without widening writes", async (kind) => {
+    const isHost = kind.startsWith("host");
+    let controller = new AbortController();
     const workspace = await mkdtemp(path.join(tmpdir(), "aibrain-quota-tools-"));
     const roots = { workspace, staging: workspace, artifacts: path.join(workspace, "artifacts"),
       codexHome: path.join(workspace, "runtime/codex-home"), transportAudit: path.join(workspace, "audit/transport") };
     const policy = createQuotaToolPermissions({ ...roots, workspace: path.join(workspace, "projects", projectId) });
     const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
     const denials: unknown[] = [];
+    const violation = vi.fn();
+    const blocked: unknown[] = [];
     let handlers: {
       onNotification(value: unknown, event: unknown): Promise<void>;
       onServerRequest(value: unknown, event: unknown): Promise<unknown>;
@@ -414,9 +515,10 @@ describe("worker Codex turn", () => {
       async request(method: string, params: Record<string, unknown>, _purpose: string, _timeout: number,
         beforeResolve?: (value: never, event: never) => Promise<void>) {
         calls.push({ method, params });
+        if (method === "config/read") return { config: { mcp_servers: { private_mcp: {} } } };
         const result = method.startsWith("thread/") ? {
           thread: { id: "quota-thread", turns: [] }, cwd: policy.workspace,
-          activePermissionProfile: { id: policy.workspaceWriteId }, approvalPolicy: "never",
+          activePermissionProfile: { id: isHost ? policy.readOnlyId : policy.workspaceWriteId }, approvalPolicy: "never",
         } : { turn: { id: "quota-turn" } };
         await beforeResolve?.(result as never, envelope() as never);
         if (method === "turn/start") queueMicrotask(() => { void (async () => {
@@ -426,6 +528,15 @@ describe("worker Codex turn", () => {
               command: "read private runtime state", reason: "Inspect runtime files", permissions: { fileSystem: { read: ["/"], write: null } },
             } }, envelope()));
           }
+          if (kind === "host-abort") {
+            controller.abort(Error("HOST_EXECUTION_TIMEOUT"));
+            blocked.push(await handlers.onServerRequest({ id: "late-host-read", method: "item/tool/call", params: {
+              namespace: "officeexample_business", tool: "erp_read", arguments: {}, threadId: "quota-thread", turnId: "quota-turn", callId: "late-host-read",
+            } }, envelope()).catch(error => error));
+          }
+          if (kind === "host") blocked.push(await handlers.onServerRequest({ id: "blocked-host-write", method: "item/tool/call", params: {
+            namespace: "officeexample_business", tool: "attio_action", arguments: {}, threadId: "quota-thread", turnId: "quota-turn", callId: "blocked-host-write",
+          } }, envelope()));
           await handlers.onNotification({ method: "turn/completed", params: { threadId: "quota-thread",
             turn: { id: "quota-turn", status: "completed", items: [{ type: "agentMessage", id: "fixture-final", phase: "final_answer", text: "Fixture completed answer." }], error: null } } }, envelope());
         })(); });
@@ -435,6 +546,7 @@ describe("worker Codex turn", () => {
     mocked.runtime = { config: { installationId, paths: installationPaths,
       usageLimits: { weeklyTokens: 7_500_000, timeZone: "Europe/Madrid" } }, handle: { roots }, client };
     for (const [index, mode] of (["agent", "ask"] as const).entries()) {
+      controller = new AbortController();
       const localTurnId = index === 0 ? assistantMessageId : "00000000-0000-4000-8000-000000000042";
       const request = chatRequest();
       request.assistantMessageId = localTurnId;
@@ -442,19 +554,28 @@ describe("worker Codex turn", () => {
       await runWorkerCodexTurn(request, installationId, userId, index === 0 && kind === "new" ? null : "quota-thread", {
         tenantId: installationId, mode: "codex", codexBinary: "unused", codexHome: null,
         workspace, model: null, approvalPolicy: "on-request", sandbox: "workspace-write",
-      }, { ...permissions(), turnId: localTurnId }, {} as never, memoryDependencies(), [], new AbortController().signal, async () => {});
+      }, { ...permissions(), turnId: localTurnId }, {} as never, memoryDependencies(), [], controller.signal, async () => {},
+        undefined, "AiBrain", null, undefined, undefined, undefined, undefined, true, null, false,
+        isHost ? { businessReads: true, webSearch: false, onViolation: violation } : undefined);
     }
     const threads = calls.filter(({ method }) => method === "thread/start" || method === "thread/resume");
     expect(threads.map(({ method }) => method)).toEqual([kind === "new" ? "thread/start" : "thread/resume", "thread/resume"]);
-    expect(threads[0].params).toMatchObject({ permissions: policy.workspaceWriteId, approvalPolicy: "never", config: { web_search: "live" } });
-    expect(threads[1].params).toMatchObject({ permissions: policy.readOnlyId, approvalPolicy: "never", config: { web_search: "live" } });
+    expect(threads[0].params).toMatchObject({ permissions: isHost ? policy.readOnlyId : policy.workspaceWriteId, approvalPolicy: "never", config: { web_search: isHost ? "disabled" : "live" } });
+    expect(threads[1].params).toMatchObject({ permissions: policy.readOnlyId, approvalPolicy: "never", config: { web_search: isHost ? "disabled" : "live" } });
     for (const thread of threads) expect(thread.params).not.toHaveProperty("sandbox");
     const turns = calls.filter(({ method }) => method === "turn/start");
-    expect(turns.map(({ params }) => params.permissions)).toEqual([policy.workspaceWriteId, policy.readOnlyId]);
+    expect(turns.map(({ params }) => params.permissions)).toEqual([isHost ? policy.readOnlyId : policy.workspaceWriteId, policy.readOnlyId]);
     for (const { params } of turns) {
       expect(params).not.toHaveProperty("sandboxPolicy");
       expect(params.approvalPolicy).toBe("never");
       expect(params.runtimeWorkspaceRoots).toEqual([policy.workspace]);
+    }
+    if (isHost) {
+      for (const thread of threads) expect(thread.params.config).toMatchObject({ "features.shell_tool": false, "features.apps": false, "mcp_servers.private_mcp.enabled": false });
+      expect(violation).toHaveBeenCalledTimes(kind === "host-abort" ? 0 : 2);
+      expect(blocked).toEqual(kind === "host-abort"
+        ? [expect.objectContaining({ message: "HOST_EXECUTION_TIMEOUT" }), expect.objectContaining({ message: "HOST_EXECUTION_TIMEOUT" })]
+        : [expect.objectContaining({ success: false }), expect.objectContaining({ success: false })]);
     }
     expect(denials).toEqual([
       { decision: "decline" }, { decision: "decline" }, { permissions: {}, scope: "turn" },
@@ -584,6 +705,8 @@ describe("worker Codex turn", () => {
     mocked.maintenanceLease = null;
     mocked.maintenanceReleases = 0;
     mocked.cancelTurn = null;
+    mocked.pendingCancellation = false;
+    mocked.availableConnectors.mockReset().mockResolvedValue([]);
   });
 
   it.each(["terminal-snapshot", "empty-terminal", "lost-events", "still-running", "foreign-turn", "racing-terminal"])(
@@ -672,6 +795,94 @@ describe("worker Codex turn", () => {
     vi.unstubAllEnvs();
   });
 
+  it("makes verified connections available without mentions and refreshes app configuration after disconnect and reconnect", async () => {
+    const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-automatic-connectors-"));
+    const { mkdir, rm } = await import("node:fs/promises");
+    const workspace = path.join(userRoot, "workspace"), staging = path.join(userRoot, "staging");
+    await mkdir(workspace, { recursive: true });
+    await mkdir(path.join(staging, "threads"), { recursive: true });
+    const resources = [GMAIL_CATALOG_RESOURCE, OUTLOOK_CATALOG_RESOURCE, MAIL_CATALOG_RESOURCE, {
+      id: "qa-native-app", label: "QA Files", kind: "app" as const, credentialMode: "personal-oauth" as const,
+      managedBy: "company" as const, sharedResource: false, appId: "qa-files", connectorId: null, mcp: null,
+    }];
+    const available = resources.map<ResolvedConnectorMention>(resource => ({
+      resource,
+      mention: { id: resource.id, label: resource.label, kind: resource.kind as "app" | "connector", status: "connected", statusCode: null, canRead: true, requiresApprovalForWrites: false },
+    }));
+    mocked.availableConnectors.mockResolvedValue(available);
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    let handlers: { onNotification(value: unknown, envelope: unknown): Promise<void> };
+    let sequence = 0;
+    const envelope = () => ({ eventId: `automatic-connectors-${++sequence}`, sequence, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+    const completedTurns: Array<Record<string, unknown>> = [];
+    const client = {
+      canReuseLoadedThread: () => true,
+      router: { registerTurn: (_thread: string, _local: string, value: typeof handlers) => { handlers = value; return { bindRuntimeTurn() {}, dispose() {} }; } },
+      connectionSummary: async () => ({ connected: true }), resolvedSkills: async () => [],
+      async request(method: string, params: Record<string, unknown>, _purpose: string, _timeout: number, beforeResolve?: (value: never, event: never) => Promise<void>) {
+        calls.push({ method, params });
+        const turn = { id: `automatic-turn-${completedTurns.length + 1}`, status: "completed", error: null, items: [
+          { type: "userMessage", id: `automatic-input-${completedTurns.length + 1}`, clientId: params.clientUserMessageId, content: [] },
+          { type: "agentMessage", id: `automatic-answer-${completedTurns.length + 1}`, phase: "final_answer", text: "Verified connection inventory." },
+        ] };
+        const result = method === "thread/turns/list" ? { data: [...completedTurns].reverse(), nextCursor: null }
+          : method.startsWith("thread/") ? { thread: { id: "automatic-thread", turns: [...completedTurns] } }
+          : { turn: { id: turn.id } };
+        await beforeResolve?.(result as never, envelope() as never);
+        if (method === "turn/start") {
+          completedTurns.push(turn);
+          queueMicrotask(() => { void handlers.onNotification({ method: "turn/completed", params: {
+            threadId: "automatic-thread", turn,
+          } }, envelope()); });
+        }
+        return result;
+      },
+    };
+    mocked.runtime = { config: { installationId, paths: installationPaths, connectors: { mail: { enabled: true, provider: "nominalia" } } }, handle: { roots: { workspace, staging, artifacts: path.join(userRoot, "artifacts") } }, client };
+    const session = { provider: "local", tenant: { id: installationId }, user: { id: userId }, expiresAt: new Date(Date.now() + 3600000).toISOString() } as AuthSession;
+    const request = chatRequest();
+    request.message = "Find the project files and the latest message from the customer";
+    expect(request.options.connectorMentions).toBeUndefined();
+    const events: Array<Record<string, unknown>> = [];
+    const run = (value: ChatRequest, runtimeThreadId: string | null) => runWorkerCodexTurn(value, installationId, userId, runtimeThreadId, {
+      tenantId: installationId, mode: "codex", codexBinary: "unused", codexHome: null, workspace, model: null, approvalPolicy: "on-request", sandbox: "workspace-write",
+    }, { ...permissions(), turnId: value.assistantMessageId }, {} as never, memoryDependencies(), [], new AbortController().signal, async event => { events.push(event); }, undefined, "Assistant", null, undefined, undefined, undefined, session);
+    try {
+      await run(request, null);
+      expect(mocked.availableConnectors).toHaveBeenCalledExactlyOnceWith(installationId, userId, [], session);
+      expect(calls.map(({ method }) => method)).toEqual(["thread/start", "turn/start"]);
+      const params = calls[0].params;
+      expect(params.config).toMatchObject({ web_search: "live", apps: {
+        _default: { enabled: false, destructive_enabled: false, open_world_enabled: false },
+        "qa-files": { enabled: true, destructive_enabled: false, open_world_enabled: false, default_tools_approval_mode: "writes" },
+      } });
+      expect(Object.keys((params.config as { apps: object }).apps).sort()).toEqual(["_default", "qa-files"]);
+      expect(params.dynamicTools).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "aibrain_gmail" }), expect.objectContaining({ name: "aibrain_outlook" }), expect.objectContaining({ name: "aibrain_mail" }),
+      ]));
+      expect(params.developerInstructions).toContain("Conexiones disponibles automáticamente");
+      expect(params.developerInstructions).toContain("aunque el usuario no las mencione ni las seleccione");
+      expect(params.developerInstructions).toContain("No exijas @");
+      for (const resource of resources) expect(params.developerInstructions).toContain(`"id":"${resource.id}"`);
+      expect(events).toContainEqual({ type: "done" });
+
+      mocked.availableConnectors.mockResolvedValue([]);
+      await run({ ...request, userMessageId: "00000000-0000-4000-8000-000000000032", assistantMessageId: "00000000-0000-4000-8000-000000000042" }, "automatic-thread");
+      expect(calls[2]).toMatchObject({ method: "thread/resume", params: {
+        threadId: "automatic-thread", config: { apps: { _default: { enabled: false } } },
+      } });
+      expect(Object.keys((calls[2].params.config as { apps: object }).apps)).toEqual(["_default"]);
+
+      mocked.availableConnectors.mockResolvedValue(available);
+      await run({ ...request, userMessageId: "00000000-0000-4000-8000-000000000033", assistantMessageId: "00000000-0000-4000-8000-000000000043" }, "automatic-thread");
+      expect(calls[4]).toMatchObject({ method: "thread/resume", params: {
+        threadId: "automatic-thread", config: { apps: { _default: { enabled: false }, "qa-files": { enabled: true } } },
+      } });
+      expect(calls.map(({ method }) => method)).toEqual(["thread/start", "turn/start", "thread/resume", "turn/start", "thread/resume", "turn/start"]);
+      expect(mocked.availableConnectors).toHaveBeenCalledTimes(3);
+    } finally { await rm(userRoot, { recursive: true, force: true }); }
+  });
+
   it("recovers a late thread creation once and keeps subsequent turns' creation keys distinct", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "aibrain-thread-create-recovery-"));
     let handlers: { onNotification(value: unknown, event: unknown): Promise<void> };
@@ -724,6 +935,179 @@ describe("worker Codex turn", () => {
       `thread-start:${assistantMessageId}`, "thread-start:00000000-0000-4000-8000-000000000042",
     ]);
     expect(calls.filter(call => call.method === "turn/start")).toHaveLength(2);
+  });
+
+  it.each(["direct-invalid-request", "direct-invalid-params", "late", "recovered"])(
+    "closes a confirmed pre-creation rejection %s and never replays it on reconnect", async mode => {
+      const root = await mkdtemp(path.join(tmpdir(), "aibrain-thread-rejected-"));
+      const calls: string[] = [];
+      let recoveries = 0;
+      const purpose = `thread-start:${assistantMessageId}`;
+      const message = "Invalid request: unknown variant ``, expected user/auto_review/guardian_subagent\n\tin apps._default.approvals_reviewer";
+      const failure = () => new AppServerRpcResponseError("thread/start", purpose, { code: mode === "direct-invalid-params" ? -32602 : -32600, message });
+      const run = (recoveryOnly = false) => {
+        mocked.runtime = {
+          config: { installationId, paths: installationPaths },
+          handle: { roots: { userRoot: root, workspace: root, staging: root, artifacts: root } },
+          client: {
+            connectionSummary: async () => ({ connected: true }),
+            async request(method: string, _params: unknown, requestPurpose: string, timeout: number) {
+              calls.push(method);
+              expect(method).toBe("thread/start"); expect(requestPurpose).toBe(purpose);
+              if (mode === "late" || mode === "recovered") {
+                const lateError = mode === "late" ? failure() : new AppServerRequestTimeoutError("thread/start", purpose, timeout, new Promise(() => {}));
+                throw new AppServerRequestTimeoutError("thread/start", purpose, timeout, Promise.reject(lateError));
+              }
+              throw failure();
+            },
+            async recoverThreadStart(_params: unknown, requestPurpose: string) {
+              recoveries += 1; expect(requestPurpose).toBe(purpose); throw failure();
+            },
+          },
+        };
+        return runWorkerCodexTurn(chatRequest(), installationId, userId, null, {
+          tenantId: installationId, mode: "codex", codexBinary: "unused", codexHome: null,
+          workspace: root, model: null, approvalPolicy: "on-request", sandbox: "workspace-write",
+        }, permissions(), {} as never, memoryDependencies(), [], new AbortController().signal,
+        async () => {}, undefined, undefined, null, undefined, undefined, undefined, undefined, false, null, recoveryOnly);
+      };
+      try {
+        if (mode === "recovered") await expect(run()).rejects.toBeInstanceOf(WorkerTurnRecoveryPendingError);
+        await expect(run(mode === "recovered")).rejects.toBeInstanceOf(WorkerThreadStartRejectedError);
+        const file = path.join(root, "state", "turn-submissions", threadId, `${assistantMessageId}.json`);
+        const saved = JSON.parse(await readFile(file, "utf8"));
+        expect(saved).toMatchObject({ phase: "terminal", terminal: "failed", runtimeThreadId: null, runtimeTurnId: null, turnRequest: null });
+        expect(JSON.parse(saved.threadRequest).id).toBe(purpose);
+        const beforeReconnect = await readFile(file, "utf8");
+        await expect(run(true)).rejects.toMatchObject({ code: "THREAD_START_REJECTED" });
+        expect(await readFile(file, "utf8")).toBe(beforeReconnect);
+        expect(calls).toEqual(["thread/start"]);
+        expect(recoveries).toBe(mode === "recovered" ? 1 : 0);
+      } finally { await rm(root, { recursive: true, force: true }); }
+    },
+  );
+
+  it("settles the same stopped pre-creation admission from its COMPLETED rejection without replay or streaming", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "aibrain-stopped-rejection-"));
+    const usersRoot = path.join(root, "users");
+    const userRoot = path.join(usersRoot, userId);
+    const workspace = path.join(root, "workspace");
+    const projections = new FileTurnProjectionStore({ installationId, userId, usersRoot });
+    const initial = { id: assistantMessageId, role: "assistant" as const, content: "", createdAt: new Date().toISOString(),
+      status: "streaming" as const, activity: [], plan: [], approvals: [], diff: "", attachments: [], artifacts: [] };
+    const calls: string[] = [];
+    const purpose = `thread-start:${assistantMessageId}`;
+    const completed = { id: purpose, error: { code: -32600, message: "Invalid request\nin apps._default.approvals_reviewer" } };
+    const recoverThreadStart = vi.fn(async () => { throw new AppServerRpcResponseError("thread/start", completed.id, completed.error); });
+    const client = {
+      connectionSummary: async () => ({ connected: true }), recoverThreadStart,
+      async request(method: string) {
+        calls.push(method);
+        const late = Promise.reject(new AppServerRequestTimeoutError("thread/start", purpose, 120_000, new Promise(() => {})));
+        void late.catch(() => {});
+        throw new AppServerRequestTimeoutError("thread/start", purpose, 60_000, late);
+      },
+    };
+    const emit = async (event: WorkerCodexTurnEvent) => {
+      if (event.type === "runtimeThread" || event.type === "runtimeTurn" || event.type === "runtimeUsage") throw new Error("No remote identity exists.");
+      await projections.applyLocalEvent(threadId, assistantMessageId, event);
+    };
+    const run = (recover = false, queue = false) => {
+      mocked.runtime = { config: { installationId, paths: { ...installationPaths, ...(queue ? { dataRoot: root } : {}) } },
+        handle: { roots: { userRoot, workspace, staging: workspace, artifacts: workspace } }, client };
+      return runWorkerCodexTurn(chatRequest(), installationId, userId, null, {
+        tenantId: installationId, mode: "codex", codexBinary: "unused", codexHome: null,
+        workspace, model: null, approvalPolicy: "on-request", sandbox: "workspace-write",
+      }, permissions(), {} as never, memoryDependencies(), [], new AbortController().signal, emit,
+      undefined, undefined, null, undefined, undefined, undefined, undefined, false, null, recover);
+    };
+    try {
+      await mkdir(usersRoot, { recursive: true, mode: 0o700 });
+      await mkdir(userRoot, { mode: 0o700 });
+      await mkdir(workspace, { mode: 0o700 });
+      await projections.initialize(threadId, initial);
+      await expect(run()).rejects.toBeInstanceOf(WorkerTurnRecoveryPendingError);
+      await cancelPendingWorkerTurn({ installationId, userId, runtimeThreadId: null },
+        { action: "stop", threadId, assistantMessageId, clientRequestId: userMessageId }, emit);
+      const requested = await projections.read(threadId, assistantMessageId);
+      expect(requested).toMatchObject({ runtimeThreadToken: null, runtimeTurnId: null, message: { status: "streaming" } });
+      expect(requested?.message.activity).toContainEqual(expect.objectContaining({ id: `stop:${userMessageId}`, label: "Aturada sol·licitada" }));
+      const file = path.join(userRoot, "state", "turn-submissions", threadId, `${assistantMessageId}.json`);
+      const originalIntent = JSON.parse(await readFile(file, "utf8")).threadRequest;
+      // The API projects this terminal error through applyLocalEvent. The real
+      // worker, control, durable submission and projection store run here.
+      const failure = await run(true, true).then(() => null, error => error);
+      expect(failure).toBeInstanceOf(WorkerThreadStartRejectedError);
+      await projections.applyLocalEvent(threadId, assistantMessageId, { type: "error", message: failure.message });
+      const terminal = await projections.read(threadId, assistantMessageId);
+      expect(terminal).toMatchObject({ runtimeThreadToken: null, runtimeTurnId: null, message: { status: "error" } });
+      expect(terminal?.message.activity).toContainEqual(expect.objectContaining({ id: `stop:${userMessageId}` }));
+      const saved = JSON.parse(await readFile(file, "utf8"));
+      expect(saved).toMatchObject({ phase: "terminal", terminal: "failed", threadRequest: originalIntent,
+        runtimeThreadId: null, runtimeTurnId: null, turnRequest: null });
+      await expect(run(true, true)).rejects.toBeInstanceOf(WorkerThreadStartRejectedError);
+      expect(await projections.read(threadId, assistantMessageId)).toMatchObject({
+        threadId, assistantMessageId, runtimeThreadToken: null, runtimeTurnId: null, message: terminal!.message,
+      });
+      expect(JSON.parse(await readFile(file, "utf8"))).toEqual(saved);
+      expect(recoverThreadStart).toHaveBeenCalledOnce();
+      expect(calls).toEqual(["thread/start"]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it.each(["uncorrelated", "initialization", "generic-code", "server-error"])(
+    "keeps uncertain pre-creation %s failures recoverable without replay", async mode => {
+      const root = await mkdtemp(path.join(tmpdir(), "aibrain-thread-uncertain-"));
+      const purpose = `thread-start:${assistantMessageId}`;
+      const calls: string[] = [];
+      mocked.runtime = {
+        config: { installationId, paths: installationPaths },
+        handle: { roots: { userRoot: root, workspace: root, staging: root, artifacts: root } },
+        client: {
+          connectionSummary: async () => ({ connected: true }),
+          async request(method: string) {
+            calls.push(method);
+            if (mode === "generic-code") throw Object.assign(new Error("local failure"), { code: -32600 });
+            throw new AppServerRpcResponseError(mode === "initialization" ? "initialize" : "thread/start",
+              mode === "uncorrelated" ? "foreign-request" : purpose, { code: mode === "server-error" ? -32603 : -32600, message: "unconfirmed outcome" });
+          },
+        },
+      };
+      try {
+        await expect(runWorkerCodexTurn(chatRequest(), installationId, userId, null, {
+          tenantId: installationId, mode: "codex", codexBinary: "unused", codexHome: null,
+          workspace: root, model: null, approvalPolicy: "on-request", sandbox: "workspace-write",
+        }, permissions(), {} as never, memoryDependencies(), [], new AbortController().signal, async () => {}))
+          .rejects.toBeInstanceOf(WorkerTurnRecoveryPendingError);
+        const saved = JSON.parse(await readFile(path.join(root, "state", "turn-submissions", threadId, `${assistantMessageId}.json`), "utf8"));
+        expect(saved.terminal).toBeNull(); expect(saved.runtimeThreadId).toBeNull(); expect(saved.turnRequest).toBeNull();
+        expect(JSON.parse(saved.threadRequest).id).toBe(purpose); expect(calls).toEqual(["thread/start"]);
+      } finally { await rm(root, { recursive: true, force: true }); }
+    },
+  );
+
+  it("keeps an admitted thread-open timeout recoverable without submitting or duplicating a model turn", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "aibrain-thread-open-failed-"));
+    const calls: string[] = [];
+    mocked.runtime = {
+      config: { installationId, paths: installationPaths },
+      handle: { roots: { workspace: root, staging: root, artifacts: root } },
+      client: {
+        connectionSummary: async () => ({ connected: true }),
+        async request(method: string, _params: unknown, purpose: string, timeout: number) {
+          calls.push(method);
+          const lateError = new AppServerRequestTimeoutError("thread/start", purpose, timeout, new Promise(() => {}));
+          const lateResponse = Promise.reject(lateError);
+          throw new AppServerRequestTimeoutError("thread/start", purpose, timeout, lateResponse);
+        },
+      },
+    };
+    const failure = runWorkerCodexTurn(chatRequest(), installationId, userId, null, {
+      tenantId: installationId, mode: "codex", codexBinary: "unused", codexHome: null,
+      workspace: root, model: null, approvalPolicy: "on-request", sandbox: "workspace-write",
+    }, permissions(), {} as never, memoryDependencies(), [], new AbortController().signal, async () => {});
+    await expect(failure).rejects.toBeInstanceOf(WorkerTurnRecoveryPendingError);
+    expect(calls).toEqual(["thread/start"]);
   });
 
   it("recovers creation beyond both deadlines across reconnects and dispatches the admitted turn only once", async () => {
@@ -2251,6 +2635,7 @@ describe("worker Codex turn", () => {
         return result;
       },
     };
+    markConnectedAppConfigApplied(client, "runtime-thread-1", []);
     mocked.runtime = {
       config: { installationId, companySlug: "arnall", branding: { productName: "Arnall AI" }, paths: installationPaths },
       handle: { roots: { workspace, staging, artifacts: path.join(userRoot, "artifacts") } },
@@ -2363,6 +2748,7 @@ describe("worker Codex turn", () => {
         return result;
       },
     };
+    markConnectedAppConfigApplied(client, "runtime-thread-restart", []);
     mocked.runtime = {
       config: { installationId, paths: installationPaths },
       handle: { roots: { workspace, staging, artifacts: path.join(userRoot, "artifacts") } },
@@ -2554,6 +2940,60 @@ describe("worker Codex turn", () => {
         expect.objectContaining({ item: expect.objectContaining({ status: "declined" }) })));
   });
 
+  it.each(["allowed", "background", "ask", "missing-session"] as const)("uses chat authority for non-RETAILDEMO native actions without pending UI (%s)", async (scenario) => {
+    const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-chat-native-"));
+    const workspace = path.join(userRoot, "workspace"), staging = path.join(userRoot, "staging");
+    const { mkdir, rm } = await import("node:fs/promises");
+    await mkdir(workspace, { recursive: true }); await mkdir(path.join(staging, "threads"), { recursive: true });
+    const projectWorkspace = path.join(workspace, "projects", projectId);
+    let handlers: { onServerRequest(request: unknown, envelope: unknown): Promise<unknown>; onNotification(value: unknown): Promise<void> | void };
+    let sequence = 0;
+    const envelope = () => ({ eventId: `chat-native-${++sequence}`, sequence, occurredAt: new Date().toISOString(), message: { kind: "server-request", rpc: {} } });
+    const responses: unknown[] = [];
+    const requests = [
+      { method: "item/commandExecution/requestApproval", itemId: "command", command: "touch requested.txt", cwd: projectWorkspace },
+      { method: "item/commandExecution/requestApproval", itemId: "command", command: "touch requested.txt", cwd: projectWorkspace },
+      { method: "item/commandExecution/requestApproval", itemId: "command", command: "touch changed-binding.txt", cwd: projectWorkspace },
+      { method: "item/fileChange/requestApproval", itemId: "file" },
+      { method: "item/permissions/requestApproval", itemId: "permissions", permissions: { fileSystem: { write: ["/"] } } },
+      { method: "item/commandExecution/requestApproval", itemId: "outside", command: "touch outside", cwd: "/" },
+      { method: "item/commandExecution/requestApproval", itemId: "network", command: "curl external", cwd: projectWorkspace, networkApprovalContext: { host: "example.test" } },
+      { method: "item/commandExecution/requestApproval", itemId: "reason-only-escalation", command: "touch outside", cwd: projectWorkspace, reason: "Need to run outside the sandbox" },
+      { method: "item/fileChange/requestApproval", itemId: "grant-root", grantRoot: "/" },
+    ];
+    const client = {
+      router: { registerTurn: (_thread: string, _local: string, value: typeof handlers) => { handlers = value; return { bindRuntimeTurn() {}, dispose() {} }; } },
+      connectionSummary: async () => ({ connected: true }), resolvedSkills: async () => [],
+      async request(method: string, params: Record<string, unknown>, _purpose: string, _timeout: number, beforeResolve?: (value: never, event: never) => Promise<void>) {
+        const turn = { id: "native-turn", status: "completed", error: null, items: [
+          { type: "userMessage", id: "native-input", clientId: params.clientUserMessageId, content: [] },
+          { type: "agentMessage", id: "native-answer", phase: "final_answer", text: "Requested native actions were checked against chat authority." },
+        ] };
+        const result = method === "thread/turns/list" ? { data: [], nextCursor: null }
+          : method.startsWith("thread/") ? { thread: { id: "native-thread", turns: [] } } : { turn: { id: "native-turn" } };
+        await beforeResolve?.(result as never, envelope() as never);
+        if (method === "turn/start") queueMicrotask(() => { void (async () => {
+          for (const { method: requestMethod, ...params } of requests) responses.push(await handlers.onServerRequest({ id: `native-${sequence}`, method: requestMethod, params: { ...params, threadId: "native-thread", turnId: "native-turn" } }, envelope()));
+          await handlers.onNotification({ method: "turn/completed", params: { threadId: "native-thread", turn } });
+        })(); });
+        return result;
+      },
+    };
+    mocked.runtime = { config: { installationId, paths: installationPaths }, handle: { roots: { workspace, staging, artifacts: path.join(userRoot, "artifacts") } }, client };
+    await mkdir(path.join(userRoot, "users", userId), { recursive: true, mode: 0o700 });
+    const store = new FileApprovalStore({ installationId, userId, usersRoot: path.join(userRoot, "users") });
+    const events: Array<Record<string, unknown>> = [];
+    const request = chatRequest(); request.message = "Create requested.txt in this project"; if (scenario === "ask") request.options.mode = "ask";
+    const session = { provider: "local", tenant: { id: installationId, name: "QA" }, user: { id: userId, name: "Test", email: "test@example.test" }, expiresAt: new Date(Date.now() + 3600000).toISOString() } as AuthSession;
+    try {
+      await runWorkerCodexTurn(request, installationId, userId, null, { tenantId: installationId, mode: "codex", codexBinary: "unused", codexHome: null, workspace, model: null, approvalPolicy: "on-request", sandbox: "workspace-write" }, permissions([{ ruleId: "tools.execute", action: "execute", effect: "allow", instruction: "Execute requested project work", sourceScope: "installation", sourcePolicyVersion: 1, precedence: 0 }]), store, memoryDependencies(), [], new AbortController().signal, async event => { events.push(event); }, undefined, "Assistant", null, undefined, undefined, undefined, scenario === "missing-session" ? undefined : session, scenario === "background");
+      const accepted = scenario === "allowed";
+      expect(responses).toEqual([{ decision: accepted ? "accept" : "decline" }, { decision: accepted ? "accept" : "decline" }, { decision: "decline" }, { decision: accepted ? "accept" : "decline" }, { permissions: {}, scope: "turn" }, { decision: "decline" }, { decision: "decline" }, { decision: "decline" }, { decision: "decline" }]);
+      expect(events).not.toContainEqual(expect.objectContaining({ type: "approval", item: expect.objectContaining({ status: "pending" }) }));
+      if (accepted) expect(await store.read({ installationId, userId, threadId: "native-thread", turnId: "native-turn", itemId: "command", approvalId: `approval-${(await import("node:crypto")).createHash("sha256").update(JSON.stringify(["item/commandExecution/requestApproval", "native-thread", "native-turn", "command"])).digest("hex")}` })).toMatchObject({ status: "resolved", decision: "accept" });
+    } finally { await rm(userRoot, { recursive: true, force: true }); }
+  });
+
   it("fails closed before contacting a worker when the memory store is unavailable", async () => {
     let audited = false;
     await expect(runWorkerCodexTurn(
@@ -2584,5 +3024,86 @@ describe("worker Codex turn", () => {
     expect(audited).toBe(false);
     expect(mocked.runtime).toBeNull();
     expect(mocked.maintenanceReleases).toBe(1);
+  });
+
+  it("rejects a fictional Arnall schedule answer that did not attach the required template", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "aibrain-fictional-schedule-"));
+    let handlers: { onNotification(value: unknown, envelope: unknown): Promise<void> };
+    const events: Array<{ type: string; value?: string; message?: unknown }> = [];
+    let sequence = 0;
+    const envelope = () => ({ eventId: `fictional-${++sequence}`, sequence,
+      occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+    mocked.runtime = {
+      config: { installationId, companySlug: "arnall", branding: { productName: "Arnall AI" }, paths: installationPaths },
+      handle: { roots: { workspace: root, staging: root, artifacts: root } },
+      client: {
+        canReuseLoadedThread: () => false,
+        connectionSummary: async () => ({ connected: true }),
+        router: { registerTurn: (_thread: string, _local: string, value: typeof handlers) => {
+          handlers = value; return { bindRuntimeTurn() {}, dispose() {} };
+        } },
+        async request(method: string, _params: unknown, _purpose: string, _timeout: number,
+          beforeResolve?: (value: never, event: never) => Promise<void>) {
+          const result = method === "thread/start" ? { thread: { id: "fictional-thread" } } : { turn: { id: "fictional-turn" } };
+          await beforeResolve?.(result as never, envelope() as never);
+          if (method === "turn/start") queueMicrotask(() => { void (async () => {
+            await handlers.onNotification({ method: "item/started", params: { item: { id: "answer", type: "agentMessage", phase: "final_answer", text: "" } } }, envelope());
+            await handlers.onNotification({ method: "item/agentMessage/delta", params: { itemId: "answer", delta: "Aquí tens la taula sense Excel." } }, envelope());
+            await handlers.onNotification({ method: "item/completed", params: { item: { id: "answer", type: "agentMessage", phase: "final_answer", text: "Aquí tens la taula sense Excel." } } }, envelope());
+            await handlers.onNotification({ method: "turn/completed", params: { turn: { id: "fictional-turn", status: "completed", items: [], error: null } } }, envelope());
+          })(); });
+          return result;
+        },
+      },
+    };
+    const request = { ...chatRequest(), message: "Cas completament fictici. Genera un horari per a la Botiga Demo amb sis persones inventades." };
+    await runWorkerCodexTurn(request, installationId, userId, null, {
+      tenantId: installationId, mode: "codex", codexBinary: "unused", codexHome: null,
+      workspace: root, model: null, approvalPolicy: "on-request", sandbox: "workspace-write",
+    }, permissions(), {} as never, memoryDependencies(), [], new AbortController().signal,
+    async (event) => { events.push(event); });
+    expect(events.filter((event) => event.type === "content" || event.type === "delta")).toEqual([]);
+    expect(events.find((event) => event.type === "error")?.message).toContain("HORARI SAGARO");
+  });
+
+  it.each(["missing", "complete", "partial", "background"] as const)("preserves attachment coverage truth for a %s recovered review", async (mode) => {
+    const { mkdir, rm } = await import("node:fs/promises");
+    const root = await mkdtemp(path.join(tmpdir(), "aibrain-coverage-recovery-"));
+    const workspace = path.join(root, "workspace"), staging = path.join(root, "staging");
+    await mkdir(workspace, { mode: 0o700 }); await mkdir(staging, { mode: 0o700 });
+    const request = { ...chatRequest(), message: mode === "partial" || mode === "background" ? "Resume solo página 1." : "Revisa el documento.",
+      options: { ...chatRequest().options, documentUploadIds: [documentUploadId] } };
+    const document = { document: { kind: "pdf", fileName: "source.pdf", uploadId: documentUploadId, threadId, sha256: "a".repeat(64) },
+      absolutePath: path.join(staging, "source.pdf"), codexInputs: [{ type: "text", text: "Extracted source text.", text_elements: [] }] };
+    const receipt = (page: number) => ({ id: `inspection-${page}`, type: "dynamicToolCall", namespace: "aibrain_documents", tool: "inspect_attachment", status: "completed", success: true,
+      arguments: { fileName: "source.pdf", page }, contentItems: [{ type: "inputImage", imageUrl: `data:image/png;base64,${generatedPngFixture().toString("base64")}` },
+        { type: "inputText", text: JSON.stringify({ status: "attachment_review", fileName: "source.pdf", page, pages: 2, sourceSha256: "a".repeat(64) }) }] });
+    const claimedAnswer = "All original pages were visually reviewed.";
+    const usefulSummary = "Resumen de la página 1: conceptos y condiciones observados.";
+    mocked.runtime = { config: { installationId, paths: installationPaths },
+      handle: { roots: { workspace, staging, artifacts: path.join(root, "artifacts") } },
+      client: { canReuseLoadedThread: () => false, connectionSummary: async () => ({ connected: true }), resolvedSkills: async () => [],
+        router: { registerTurn() { throw new Error("Completed recovery must not submit or replay a turn."); } },
+        async request(_method: string, _params: unknown, purpose: string, _timeout: number, beforeResolve?: (value: never, event: never) => Promise<void>) {
+          const result = { thread: { id: "coverage-thread", turns: [{ id: "coverage-turn", status: "completed", error: null,
+            items: [{ type: "userMessage", id: "source-user", clientId: userMessageId, content: [] }, ...(mode === "background" ? [] : [receipt(1)]), ...(mode === "complete" ? [receipt(2)] : []),
+              { type: "agentMessage", id: "final", phase: "final_answer", text: `${usefulSummary}\n${claimedAnswer}` }] }] } };
+          await beforeResolve?.(result as never, { eventId: "coverage-recovery", sequence: 1, occurredAt: new Date().toISOString(), message: { kind: "rpc-response", rpc: { id: purpose, result } } } as never);
+          return result;
+        },
+      },
+    };
+    const events: Array<Record<string, unknown>> = [];
+    try {
+      await runWorkerCodexTurn(request, installationId, userId, "coverage-thread", { tenantId: installationId, mode: "codex", codexBinary: "unused", codexHome: null, workspace,
+        model: null, approvalPolicy: "on-request", sandbox: "workspace-write" }, permissions([{ ruleId: "documents.read", action: "consult", effect: "allow", instruction: "Fixture read", sourceScope: "installation", sourcePolicyVersion: 1, precedence: 100 }]),
+      {} as never, memoryDependencies(), [document] as never, new AbortController().signal, async event => { events.push(event); },
+      undefined, "Asistente", null, undefined, undefined, undefined, undefined, mode === "background");
+      const text = events.filter(event => event.type === "content").map(event => event.value).join("\n");
+      if (mode === "complete") expect(text).toContain(claimedAnswer);
+      else { expect(text).not.toContain(claimedAnswer); expect(text).toContain(mode === "partial" ? "Revisión parcial solicitada" : mode === "background" ? "número de páginas sin verificar" : "páginas pendientes 2"); }
+      if (mode === "partial") expect(text).toContain(usefulSummary);
+      expect(events).toContainEqual({ type: "done" });
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 });

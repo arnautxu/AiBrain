@@ -7,6 +7,7 @@ import { isCatalogCommand, isCatalogResource } from "@/catalog/contracts";
 import { allowsCatalogOperation } from "@/catalog/resolver";
 import { CatalogEnforcedTransport, CatalogRuntimeDeniedError, CatalogRuntimeEnforcer } from "@/catalog/runtime-enforcement";
 import { FileCatalogStore } from "@/catalog/store";
+import type { ListMcpServerStatusResponse } from "../../contracts/codex/0.162.1/types/v2/ListMcpServerStatusResponse";
 
 const USER_A = "00000000-0000-4000-8000-000000000001";
 const USER_B = "00000000-0000-4000-8000-000000000002";
@@ -115,5 +116,31 @@ describe("runtime catalog enforcement", () => {
     await expect(transport.request("plugin/install", {}, "install", 100)).rejects.toBeInstanceOf(CatalogRuntimeDeniedError);
     await expect(transport.request("mcpServer/tool/call", { server: "mail", tool: "erase" }, "tool", 100)).rejects.toMatchObject({ code: "CATALOG_MCP_DENIED" });
     expect(inner.request).toHaveBeenCalledTimes(3);
+  });
+
+  it("filters the pinned MCP inventory by name while preserving tool, connection and cursor metadata", () => {
+    const connected = {
+      name: "mail", runtimeStatus: "connected", pluginId: "mail-plugin", httpOrigin: "https://mail.example.test",
+      serverInfo: null, serverCapabilities: { tools: { listChanged: true } },
+      tools: { search: { name: "search", description: "Search connected mail", inputSchema: { type: "object" } } },
+      toolsError: null, resources: [], resourceTemplates: [], authStatus: "oAuth",
+    } satisfies ListMcpServerStatusResponse["data"][number];
+    const response = { data: [connected, { ...connected, name: "foreign-server" }], nextCursor: "next-page" } satisfies ListMcpServerStatusResponse;
+    const filtered = new CatalogRuntimeEnforcer(catalog, principal()).filterMcpStatus(response);
+    expect(filtered).toEqual({ ...response, data: [connected] });
+    expect((filtered as unknown as ListMcpServerStatusResponse).data[0]).toBe(connected);
+    expect(new CatalogRuntimeEnforcer(catalog, principal({ installationId: "foreign-company" })).filterMcpStatus(response))
+      .toEqual({ ...response, data: [] });
+    const denied = { ...catalog, rules: [...catalog.rules, rule("deny-mail", "user", USER_B, mcp.id, "deny", ["read"])] };
+    expect(new CatalogRuntimeEnforcer(denied, principal({ userId: USER_B })).filterMcpStatus(response))
+      .toEqual({ ...response, data: [] });
+  });
+
+  it("supports legacy MCP server names without allowing an alias to override the pinned name", () => {
+    const legacy = { server: "mail", tools: { search: { description: "Legacy tool metadata" } }, authStatus: "oAuth" };
+    const response = { servers: [legacy, { server: "foreign-server" },
+      { name: "foreign-server", server: "mail" }, { name: null, server: "mail" }], nextCursor: "legacy-next" };
+    expect(new CatalogRuntimeEnforcer(catalog, principal()).filterMcpStatus(response))
+      .toEqual({ ...response, servers: [legacy] });
   });
 });

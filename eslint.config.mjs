@@ -2,7 +2,9 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 
 export default defineConfig([
-  ...nextVitals,
+  ...nextVitals.map((config) => config.name === "next/typescript"
+    ? { ...config, files: [...config.files, "**/*.mts", "**/*.cts"] }
+    : config),
   globalIgnores([
     ".next/**",
     "dist/**",

@@ -13,7 +13,8 @@ for (const mobile of [false, true]) {
     const card = page.getByRole("button", { name: /Alex.*Abrir menú de cuenta/ });
     const avatar = card.locator('[aria-hidden="true"]');
     await expect(avatar).toBeVisible();
-    expect(await avatar.evaluate((element) => element.getBoundingClientRect().height)).toBe(36);
+    expect(await avatar.evaluate((element) => element.getBoundingClientRect().height)).toBe(32);
+    expect(await card.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
     expect(await card.evaluate((element) => getComputedStyle(element).backdropFilter)).toBe("none");
     for (const theme of ["light", "dark"]) {
       await page.evaluate((theme) => document.documentElement.setAttribute("data-theme", theme), theme);

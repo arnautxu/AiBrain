@@ -1,11 +1,11 @@
 import { beforeEach, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
-const mocks = vi.hoisted(() => ({ installation: vi.fn(), project: vi.fn(), permissions: vi.fn(), roots: vi.fn(), search: vi.fn(), navigation: vi.fn() }));
+const mocks = vi.hoisted(() => ({ installation: vi.fn(), project: vi.fn(), permissions: vi.fn(), roots: vi.fn(), search: vi.fn(), navigation: vi.fn(), read: vi.fn(), original: vi.fn() }));
 vi.mock("@/library/server-resource-access", () => ({ installationForLibraryResource: mocks.installation }));
 vi.mock("@/workbench/shared-access", () => ({ resolveProjectAccess: mocks.project }));
 vi.mock("@/runtime/permission-turn", () => ({ resolveServerTurnPermissions: mocks.permissions }));
 vi.mock("./enterprise-document-network", () => ({ EnterpriseDocumentNetwork: class { rootsForTurn = mocks.roots; } }));
-vi.mock("./server-files", () => ({ ServerDocumentFiles: class { search = mocks.search; navigation = mocks.navigation; } }));
+vi.mock("./server-files", () => ({ ServerDocumentFiles: class { search = mocks.search; navigation = mocks.navigation; read = mocks.read; readOriginal = mocks.original; } }));
 import { browseServerForSession } from "./server-browser-service";
 const session = { provider: "local" as const, user: { id: "user", email: "qa@example.test", name: "QA" }, tenant: { id: "arnall", name: "Arnall" }, expiresAt: "2099-01-01T00:00:00Z" };
 beforeEach(() => {
@@ -36,4 +36,33 @@ it("home checks membership and permissions but never starts a live source reques
   expect(mocks.permissions).toHaveBeenCalledOnce();
   expect(mocks.navigation).toHaveBeenCalledWith([]);
   expect(mocks.search).not.toHaveBeenCalled();
+});
+
+it("preview denies project access before reading and rechecks it after the source read", async () => {
+  const { previewServerForSession } = await import('./server-browser-service');
+  mocks.project.mockRejectedValueOnce(Error('denied'));
+  await expect(previewServerForSession(session,'project','server-worksitea/M/WORKSITEA/a.txt')).rejects.toThrow('denied');
+  expect(mocks.read).not.toHaveBeenCalled();
+  mocks.project.mockResolvedValueOnce({}).mockRejectedValueOnce(Error('revoked'));
+  mocks.read.mockResolvedValue({available:true,sourceChecked:true,content:'authorized before revocation'});
+  await expect(previewServerForSession(session,'project','server-worksitea/M/WORKSITEA/a.txt')).rejects.toThrow('revoked');
+});
+it("preview rejects stale evidence and never forwards an external continuation", async () => {
+  const { previewServerForSession } = await import('./server-browser-service');
+  mocks.read.mockResolvedValueOnce({available:true,sourceChecked:false,content:'stale'});
+  expect(await previewServerForSession(session,'project','server-worksitea/M/WORKSITEA/a.txt')).toEqual({available:false,error:'READ_UNAVAILABLE'});
+  mocks.read.mockResolvedValueOnce({available:true,sourceChecked:true,content:'<script>data</script>',nextPath:'https://foreign.test',preview:{kind:'html',html:'unsafe'}});
+  expect(await previewServerForSession(session,'project','server-worksitea/M/WORKSITEA/a.txt')).toMatchObject({content:'<script>data</script>',nextPath:null,preview:null});
+});
+
+it.each([
+  ['SERVER_FORMAT_NOT_READABLE', 'SERVER_FORMAT_NOT_READABLE'],
+  ['SERVER_REQUEST_DENIED', 'UNSUPPORTED_OR_DENIED'],
+  ['upstream failure at C:\\private\\document with secret', 'READ_UNAVAILABLE'],
+])("preview classifies %s without exposing upstream diagnostics", async (upstream, expected) => {
+  const { previewServerForSession } = await import('./server-browser-service');
+  mocks.read.mockResolvedValueOnce({ available: false, error: upstream });
+  expect(await previewServerForSession(session, 'project', 'server-worksitea/M/WORKSITEA/a.pptx'))
+    .toEqual({ available: false, error: expected });
+  expect(mocks.project).toHaveBeenCalledTimes(2);
 });

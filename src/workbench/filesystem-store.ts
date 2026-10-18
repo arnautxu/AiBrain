@@ -5,7 +5,7 @@ import type { InstallationConfig } from "@/config/installation-schema";
 import type { ChatMessage } from "@/lib/chat-contract";
 import { isActivityItem, isChatMessage } from "@/lib/chat-contract";
 import {
-  atomicWriteJson,
+  atomicWriteFileChunks,
   defineVersionedSchema,
   expectArray,
   expectInteger,
@@ -13,6 +13,7 @@ import {
   readValidatedJson,
   recoverAtomicJsonFile,
   ResourceLockManager,
+  StorageCorruptionError,
   type ValidationContext,
 } from "@/storage";
 import {
@@ -53,6 +54,8 @@ import {
   type WorkbenchThread,
   type WorkbenchThreadSummary,
 } from "@/workbench/types";
+import { FileApprovalStore } from "@/runtime/approval-store";
+import { AccessSnapshotCache, type AccessSnapshot } from "@/workbench/access-snapshot-cache";
 import { FileTurnProjectionStore } from "@/workbench/turn-projection-store";
 
 const WORKBENCH_SCHEMA_VERSION = 1 as const;
@@ -125,6 +128,7 @@ type CachedWorkbenchState = {
 
 const workbenchCacheGlobal = globalThis as typeof globalThis & {
   __aibrainWorkbenchStateCache?: Map<string, CachedWorkbenchState>;
+  __aibrainWorkbenchAccessCache?: AccessSnapshotCache;
 };
 
 function workbenchStateCache() {
@@ -230,7 +234,7 @@ function isStrictChatMessage(value: unknown): value is ChatMessage {
     hasExactKeys(
       item,
       ["id", "threadId", "turnId", "itemId", "kind", "title", "detail", "status"],
-      ["command", "cwd", "permissionFingerprint"],
+      ["command", "cwd", "permissionFingerprint", "fileReview", "connectorAuthorizationFingerprint", "authorizationFingerprint"],
     ))) return false;
   if (!value.attachments.every((item) =>
     hasExactKeys(item, ["id", "name", "mimeType", "size"]))) return false;
@@ -538,6 +542,26 @@ function snapshot(state: WorkbenchState): WorkbenchSnapshot {
   };
 }
 
+/** Serialize messages individually so unrelated histories are never copied into one giant string. */
+function* workbenchJsonChunks(state: WorkbenchState) {
+  const indent = (value: unknown, spaces: number) => JSON.stringify(value, null, 2).replace(/^/gm, " ".repeat(spaces));
+  const { projects, threads, ...header } = state;
+  yield `${JSON.stringify(header, null, 2).slice(0, -2)},\n  "projects": [`;
+  for (let index = 0; index < projects.length; index++) {
+    yield `${index ? "," : ""}\n${indent(projects[index], 4)}`;
+  }
+  yield `${projects.length ? "\n  " : ""}],\n  "threads": [`;
+  for (let index = 0; index < threads.length; index++) {
+    const { messages, ...metadata } = threads[index];
+    yield `${index ? "," : ""}\n${indent(metadata, 4).slice(0, -6)},\n      "messages": [`;
+    for (let messageIndex = 0; messageIndex < messages.length; messageIndex++) {
+      yield `${messageIndex ? "," : ""}\n${indent(messages[messageIndex], 8)}`;
+    }
+    yield `${messages.length ? "\n      " : ""}]\n    }`;
+  }
+  yield `${threads.length ? "\n  " : ""}]\n}\n`;
+}
+
 export type FileWorkbenchStoreOptions = {
   installationId: string;
   usersRoot: string;
@@ -686,27 +710,74 @@ export class FileWorkbenchStore {
         if (projection.updatedAt > target.thread.updatedAt) target.thread.updatedAt = projection.updatedAt;
       }
     }));
+    if (this.installationId === "retaildemo") {
+      const approvals = new FileApprovalStore({ installationId: this.installationId, userId, usersRoot: this.usersRoot });
+      for (const thread of state.threads) for (const message of thread.messages) for (const card of message.approvals) {
+        if (!card.id.startsWith("shopify-edit:") || !card.connectorAuthorizationFingerprint) continue;
+        const receipt = await approvals.readConnectorApproval({ installationId: this.installationId, userId, threadId: card.threadId, turnId: card.turnId, itemId: card.itemId, approvalId: card.id });
+        if (receipt?.authorizationFingerprint !== card.connectorAuthorizationFingerprint) continue;
+        if (receipt.status === "executed") {
+          card.status = "accepted";
+          card.title = card.title.startsWith("Restore") || card.title.includes("restored") ? "Shopify draft restored and verified" : "Shopify draft saved and verified";
+        } else if (["denied", "failed", "indeterminate"].includes(receipt.status)) {
+          card.status = "declined";
+          if (receipt.status !== "denied") card.title = "Shopify change could not be verified";
+        }
+      }
+    }
     return state;
   }
 
   private async writeUnlocked(statePath: string, state: WorkbenchState) {
     const validated = workbenchStateSchema.parse(state, statePath);
-    if (Buffer.byteLength(JSON.stringify(validated), "utf8") > MAX_STATE_BYTES) {
-      throw new WorkbenchPersistenceError("L’estat del workbench supera el límit operatiu segur.");
+    function* boundedChunks() {
+      let bytes = 0;
+      for (const chunk of workbenchJsonChunks(validated)) {
+        bytes += Buffer.byteLength(chunk, "utf8");
+        if (bytes > MAX_STATE_BYTES) throw new WorkbenchPersistenceError("L’estat del workbench supera el límit operatiu segur.");
+        yield chunk;
+      }
     }
-    await atomicWriteJson(statePath, validated, workbenchStateSchema);
+    await atomicWriteFileChunks(statePath, boundedChunks());
     const metadata = await this.assertStateFileSafe(statePath);
     if (metadata) cacheState(statePath, metadata, validated);
   }
 
   private async read(userId: string) {
     const paths = await this.prepare(userId);
-    // Keep projection I/O outside the per-user workbench lock. A contended
-    // active turn must not block unrelated reads or durable mutations.
-    const state = await this.lockManager(paths.lockRoot).withLock(
-      `workbench:${this.installationId}:${userId}`,
-      async () => structuredClone(await this.readCanonicalUnlocked(userId, paths.statePath)),
-    );
+    let state: WorkbenchState | null = null;
+    try {
+      const metadata = await this.assertStateFileSafe(paths.statePath);
+      if (metadata) {
+        state = cachedState(paths.statePath, metadata);
+        if (!state) {
+          // Writers commit with an atomic rename. A valid canonical file is
+          // a complete committed snapshot even while another writer holds
+          // the lock. Pure reads must not scan or recover its temporaries.
+          state = await readValidatedJson(paths.statePath, workbenchStateSchema);
+          const current = await this.assertStateFileSafe(paths.statePath);
+          // A replacement during the read is safe, but the bytes just read
+          // cannot be cached under the replacement's filesystem identity.
+          if (current && current.ino === metadata.ino &&
+              current.mtimeMs === metadata.mtimeMs && current.size === metadata.size) {
+            cacheState(paths.statePath, current, state);
+          }
+        }
+      }
+    } catch (error) {
+      if (!(error instanceof StorageCorruptionError) && !isNodeError(error, "ENOENT")) throw error;
+    }
+    if (!state) {
+      // Creation and recovery may promote/quarantine files. They retain the
+      // same exclusive writer lock, with a fresh canonical read inside it.
+      state = await this.lockManager(paths.lockRoot).withLock(
+        `workbench:${this.installationId}:${userId}`,
+        async () => structuredClone(await this.readCanonicalUnlocked(userId, paths.statePath)),
+      );
+    }
+    if (state.installationId !== this.installationId || state.userId !== userId) {
+      throw new WorkbenchPersistenceError("L’estat del workbench no pertany a aquesta instal·lació i usuari.");
+    }
     return this.overlayTurnProjections(userId, state);
   }
 
@@ -727,7 +798,7 @@ export class FileWorkbenchStore {
     );
   }
 
-  async load(userId: string): Promise<WorkbenchSnapshot> {
+  private async loadState(userId: string) {
     let state = await this.read(userId);
     if (!state.projects.some((project) => project.slug === STANDALONE_PROJECT_SLUG)) {
       await this.mutate(userId, (current) => {
@@ -736,7 +807,86 @@ export class FileWorkbenchStore {
       });
       state = await this.read(userId);
     }
-    return snapshot(state);
+    return state;
+  }
+
+  async load(userId: string): Promise<WorkbenchSnapshot> {
+    return snapshot(await this.loadState(userId));
+  }
+
+  private async accessFileIdentity(statePath: string) {
+    try {
+      const metadata = await lstat(statePath, { bigint: true });
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1n || metadata.size > BigInt(MAX_STATE_BYTES)) {
+        throw new WorkbenchPersistenceError("L’estat del workbench no és un fitxer regular segur dins del límit operatiu.");
+      }
+      return [metadata.dev, metadata.ino, metadata.size, metadata.mtimeNs, metadata.ctimeNs, metadata.mode].join(":");
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) return null;
+      throw error;
+    }
+  }
+
+  private async readAccessMetadata(userId: string): Promise<AccessSnapshot> {
+    const paths = await this.prepare(userId); // recheck canonical user roots even on hits
+    const key = JSON.stringify([this.installationId, userId, paths.statePath]);
+    const cache = workbenchCacheGlobal.__aibrainWorkbenchAccessCache ??= new AccessSnapshotCache();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const before = await this.accessFileIdentity(paths.statePath);
+      if (!before) {
+        cache.delete(key);
+        await this.loadState(userId); // preserve the existing locked creation/recovery path
+        continue;
+      }
+      const hit = cache.get(key, before);
+      if (hit) return hit;
+      let state: WorkbenchState;
+      try {
+        // Cold revisions still undergo the complete existing schema validator.
+        // Bypass the full-state cache: its inode/mtime/size identity is weaker
+        // than the ctime-aware identity required by access/revocation checks.
+        state = await readValidatedJson(paths.statePath, workbenchStateSchema);
+      } catch (error) {
+        if (!(error instanceof StorageCorruptionError) && !isNodeError(error, "ENOENT")) throw error;
+        await this.loadState(userId);
+        continue;
+      }
+      if (state.installationId !== this.installationId || state.userId !== userId) {
+        throw new WorkbenchPersistenceError("L’estat del workbench no pertany a aquesta instal·lació i usuari.");
+      }
+      if (!state.projects.some(project => project.slug === STANDALONE_PROJECT_SLUG)) {
+        await this.loadState(userId);
+        continue;
+      }
+      if (before !== await this.accessFileIdentity(paths.statePath)) continue;
+      const selected: AccessSnapshot = {
+        persistence: "filesystem", projects: state.projects.map(publicProject),
+        threads: state.threads.map(thread => ({ ...publicThread(thread), messages: [] })), turnContext: null,
+      };
+      cache.set(key, before, selected); // only small metadata is cloned/retained
+      return selected;
+    }
+    throw new WorkbenchPersistenceError("L’estat del workbench ha canviat durant la comprovació d’accés.");
+  }
+
+  /** Access indexing and pins need thread metadata, never unrelated histories. */
+  async loadAccessSnapshot(userId: string, threadId?: string, options: { includeTurnContext?: boolean } = {}) {
+    if (threadId === undefined && !options.includeTurnContext) return this.readAccessMetadata(userId);
+    if (threadId !== undefined) assertFilesystemWorkbenchId(threadId);
+    const state = await this.loadState(userId);
+    const target = state.threads.find(({ id }) => id === threadId);
+    const turnContext = options.includeTurnContext && target?.status === "active" && state.projects.some(({ id, status }) => id === target.projectId && status === "active")
+      ? this.threadTurnContext(state, target)
+      : null;
+    return {
+      persistence: "filesystem" as const,
+      projects: state.projects.map(publicProject),
+      threads: state.threads.map((thread) => ({
+        ...publicThread(thread),
+        messages: thread.id === threadId ? thread.messages : [],
+      })),
+      turnContext,
+    };
   }
 
   /**
@@ -923,10 +1073,14 @@ export class FileWorkbenchStore {
     projectId: string,
     title: string,
     requestedId?: string,
+    assistantGreeting?: string,
   ): Promise<WorkbenchThread> {
     assertFilesystemWorkbenchId(projectId);
     if (!isThreadTitle(title)) throw new WorkbenchPersistenceError("El títol del fil no és vàlid.");
     if (requestedId !== undefined) assertFilesystemWorkbenchId(requestedId);
+    if (assistantGreeting !== undefined && (!assistantGreeting.trim() || assistantGreeting.length > 16_000)) {
+      throw new WorkbenchValidationError("El missatge de benvinguda no és vàlid.");
+    }
     return this.mutate(userId, (state) => {
       const project = state.projects.find((candidate) => candidate.id === projectId);
       if (!project || project.status !== "active") {
@@ -951,7 +1105,10 @@ export class FileWorkbenchStore {
         pinned: false,
         createdAt: now,
         updatedAt: now,
-        messages: [],
+        messages: assistantGreeting === undefined ? [] : [{
+          id: randomUUID(), role: "assistant", content: assistantGreeting, createdAt: now,
+          status: "complete", activity: [], plan: [], approvals: [], diff: "", attachments: [], artifacts: [],
+        }],
         runtimeThreadToken: null,
       };
       state.threads.push(thread);
@@ -1033,6 +1190,17 @@ export class FileWorkbenchStore {
       throw new WorkbenchNotFoundError("Fil actiu no trobat.");
     }
     return conversationHistory(thread);
+  }
+
+  private threadTurnContext(state: WorkbenchState, thread: StoredThread) {
+    return {
+      context: {
+        ...this.runtimeContext(state, thread.projectId),
+        runtimeThreadToken: thread.runtimeThreadToken,
+        branchHistory: branchHistory(thread),
+      },
+      rebootstrapHistory: conversationHistory(thread),
+    };
   }
 
   async branchThread(

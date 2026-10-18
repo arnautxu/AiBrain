@@ -202,6 +202,17 @@ describe("chat workspace simplificado", () => {
     expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue("Keep this draft");
   });
 
+  it("offers original voice-note controls directly on a saved user attachment", () => {
+    const onRequestPublication = vi.fn();
+    const attachment = { id: "00000000-0000-4000-8000-000000000019", name: "voice.ogg", mimeType: "audio/ogg", size: 125139 };
+    renderWorkspace({ id: "00000000-0000-4000-8000-000000000020", projectId: project.id, title: "Voice notes", status: "active", pinned: false,
+      createdAt: project.createdAt, updatedAt: project.updatedAt,
+      messages: [{ ...assistantMessage(), id: "user-1", role: "user", content: "Read this", attachments: [attachment], approvals: [] }, assistantMessage()],
+    }, project, { onRequestPublication });
+    expect(screen.getByRole("button", { name: "Ver audio voice.ogg" })).toBeInTheDocument();
+    expect(onRequestPublication).not.toHaveBeenCalled();
+  });
+
   it("offers publication only after a deliberate action on a sent attachment", () => {
     const onRequestPublication = vi.fn();
     const attachment = { id: "00000000-0000-4000-8000-000000000019", name: "notes.pdf", mimeType: "application/pdf", size: 128 };
@@ -260,7 +271,7 @@ describe("chat workspace simplificado", () => {
     expect(screen.getAllByRole("heading", { name: "Informe final" })).toHaveLength(1);
     expect(screen.getByText("Evidencia verificada").closest("li")).toBeInTheDocument();
     expect(screen.getByText("He comprobado la fuente autorizada.")).not.toBeVisible();
-    expect(screen.getByRole("heading", { name: "Informe final" }).closest(".markdown-body")?.parentElement).toHaveClass("text-[length:calc(var(--font-reading)-1px)]", "leading-[23px]");
+    expect(screen.getByRole("heading", { name: "Informe final" }).closest(".markdown-body")?.parentElement).toHaveClass("text-[length:var(--font-reading)]", "leading-[1.75]");
     expect(screen.getByTestId("composer")).toHaveAttribute("data-layout", "conversation");
     expect(screen.getByTestId("composer")).toHaveClass("composer-compact");
     expect(screen.getByTestId("composer")).toHaveAttribute("data-focused", "false");
@@ -415,11 +426,14 @@ describe("chat workspace simplificado", () => {
     expect(screen.getByTestId("composer")).not.toHaveClass("composer-compact");
     expect(screen.getByTestId("composer-controls")).toContainElement(screen.getByRole("button", { name: "Añadir al mensaje" }));
     expect(screen.getAllByText("Operaciones Arnall").length).toBeGreaterThan(0);
-    expect(screen.getByRole("heading", { name: "¿Cómo puedo ayudarte en Operaciones Arnall?" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "¿En qué te puedo ayudar, Ada?" })).toBeInTheDocument();
     expect(screen.getByLabelText("Destino de la conversación")).toHaveTextContent("Operaciones Arnall");
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveFocus());
     expect(screen.queryByText("Trabajar")).not.toBeInTheDocument();
-    expect(screen.getByText("Prepárame una presentación")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resumir documentos" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Comparar opciones" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Organizar los próximos pasos" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Trabajemos en los horarios/ })).not.toBeInTheDocument();
     expect(screen.getByTestId("project-breadcrumb")).toHaveTextContent("Operaciones Arnall");
     expect(screen.queryByRole("button", { name: /Abrir contexto/ })).not.toBeInTheDocument();
     for (const removed of ["Analizar información", "Crear un documento", "Resumir contenido", "Comprueba los datos importantes antes de usarlos.", "Planificar", "Preguntar", "↵ enviar"]) {
@@ -433,6 +447,13 @@ describe("chat workspace simplificado", () => {
 
     expect(screen.getByRole("heading", { name: "¿En qué te puedo ayudar, David?" })).toBeInTheDocument();
     expect(screen.queryByText("David Liria", { exact: true })).not.toBeInTheDocument();
+  });
+
+  it("greets the authenticated employee while keeping a shared project's owner in its context", () => {
+    renderWorkspace(null, { ...project, name: "Qualitat · Example User" }, { userName: "Example User", installationId: "worksitea-production" });
+    expect(screen.getByRole("heading", { name: "¿En qué te puedo ayudar, Jordi?" })).toBeInTheDocument();
+    expect(screen.getByTestId("project-breadcrumb")).toHaveTextContent("Qualitat · Example User");
+    expect(screen.getByLabelText("Destino de la conversación")).toHaveTextContent("Qualitat · Example User");
   });
 
   it("keeps the add menu limited to files and authorized connectors", async () => {
@@ -561,16 +582,37 @@ describe("chat workspace simplificado", () => {
   it("fills a normal suggestion for review rather than submitting it", () => {
     const onSend = vi.fn();
     renderWorkspace(null, project, { onSend });
-    fireEvent.click(screen.getByRole("button", { name: /^Prepárame una presentación/ }));
-    expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue("Prepárame una presentación sobre…");
+    fireEvent.click(screen.getByRole("button", { name: "Resumir documentos" }));
+    expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue("Ayúdame a resumir estos documentos para Arnall: … Usa solo el material aportado o autorizado, cita las fuentes y destaca decisiones, dudas y datos que faltan.");
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["¿Qué campañas tenemos en marcha?", "¿Qué campañas tenemos en marcha?"],
+    ["Preparar más leads cualificados", "Prepara 1000 leads cualificados más con la distribución de ICP acordada."],
+    ["¿Qué necesita mi atención?", "¿Qué necesita mi atención en outreach hoy?"],
+  ])("fills the Transportexample suggestion %s as an editable draft without submitting", (label, expectedContent) => {
+    const onSend = vi.fn();
+    const onAttachmentsChange = vi.fn();
+    const onDestinationChange = vi.fn();
+    renderWorkspace(null, project, { installationId: "transportexample-demo", companyName: "Transportexample", prompt: "Mi borrador anterior", onSend, onAttachmentsChange, onDestinationChange });
+    expect(screen.queryByRole("button", { name: /Trabajemos en los horarios/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    const composer = screen.getByRole("textbox", { name: "Mensaje" });
+    expect((composer as HTMLTextAreaElement).value).toContain(expectedContent);
+    expect(composer).not.toHaveValue("Mi borrador anterior");
+    fireEvent.change(composer, { target: { value: "Mi solicitud revisada para Transportexample" } });
+    expect(composer).toHaveValue("Mi solicitud revisada para Transportexample");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onAttachmentsChange).not.toHaveBeenCalled();
+    expect(onDestinationChange).not.toHaveBeenCalled();
   });
 
   it("replaces drafts with schedule templates without sending or changing attachments and destination", () => {
     const onSend = vi.fn();
     const onAttachmentsChange = vi.fn();
     const onDestinationChange = vi.fn();
-    renderWorkspace(null, project, { prompt: "Mi borrador.  ", onSend, onAttachmentsChange, onDestinationChange });
+    renderWorkspace(null, project, { installationId: "arnall", prompt: "Mi borrador.  ", onSend, onAttachmentsChange, onDestinationChange });
     fireEvent.click(screen.getByRole("button", { name: /Trabajemos en los horarios/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Dame los horarios preparados" }));
     expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue("Dame los horarios preparados del equipo de Arnall para…");
@@ -617,6 +659,17 @@ describe("chat workspace simplificado", () => {
     expect(screen.getByText("Resultado parcial")).toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
     expect(thread.messages).toEqual([request, failure]);
+  });
+
+  it.each(["error", "stopped"] as const)("keeps the saved process accessible after %s with activity preference off", (status) => {
+    const failure: ChatMessage = { ...assistantMessage(), status, approvals: [], content: "Resultado parcial", activity: [{ id: "read", kind: "tool", label: "Lectura del documento", status: "complete" }, { id: "host-analysis-outcome", kind: "system", label: "Se ha agotado el tiempo de análisis. El resultado parcial no se ha aceptado.", status: "failed" }] };
+    const thread: WorkbenchThread = { id: "failed-process", projectId: project.id, title: "Revisar", status: "active", pinned: false, createdAt: failure.createdAt, updatedAt: failure.createdAt, messages: [failure] };
+    renderWorkspace(thread, project, { preferences: { ...preferences, showActivityPanel: false } });
+    if (status === "error") expect(screen.getByRole("alert")).toHaveTextContent("Se ha agotado el tiempo de análisis");
+    const disclosure = screen.getByRole("button", { name: "Mostrar el proceso de trabajo" });
+    fireEvent.click(disclosure);
+    expect(screen.getByText("Lectura del documento")).toBeInTheDocument();
+    expect(screen.getByText("Resultado parcial")).toBeInTheDocument();
   });
 
   it("does not discard the current draft when recovering a failed request", async () => {
@@ -694,10 +747,11 @@ describe("chat workspace simplificado", () => {
     expect(onCancelQueuedMessage).toHaveBeenCalledWith("queued-1");
   });
 
-  it("offers only the three named work experiences with complete menu navigation", async () => {
+  it("offers only the two named work experiences with complete menu navigation", async () => {
     renderWorkspace();
     fireEvent.click(screen.getByRole("button", { name: "Experiencia" }));
-    expect(screen.getByRole("menuitemradio", { name: /Rápido/ })).toBeInTheDocument();
+    expect(screen.getAllByRole("menuitemradio")).toHaveLength(2);
+    expect(screen.queryByRole("menuitemradio", { name: /Rápido/ })).not.toBeInTheDocument();
     expect(screen.getByRole("menuitemradio", { name: /Inteligente/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitemradio", { name: /Experto/ })).toBeInTheDocument();
     const menu = screen.getByRole("menu", { name: "Experiencia" });
@@ -706,7 +760,7 @@ describe("chat workspace simplificado", () => {
     fireEvent.keyDown(menu, { key: "ArrowDown" });
     expect(screen.getByRole("menuitemradio", { name: /Experto/ })).toHaveFocus();
     fireEvent.keyDown(menu, { key: "Home" });
-    expect(screen.getByRole("menuitemradio", { name: /Rápido/ })).toHaveFocus();
+    expect(screen.getByRole("menuitemradio", { name: /Inteligente/ })).toHaveFocus();
     expect(screen.queryByRole("button", { name: "Aprobar permisos automáticamente" })).not.toBeInTheDocument();
   });
 
@@ -846,10 +900,41 @@ describe("chat workspace simplificado", () => {
 
     expect(screen.getByRole("button", { name: "Copiar" })).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Aprobación: Confirmar cambio sensible" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Permitir" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Permitir" })).not.toBeInTheDocument();
     for (const removed of ["Aprobar resultado", "Descargar resultado", "Leer en voz alta", "Regenerar respuesta", "Crear rama desde aquí", "Revisar resultados"]) {
       expect(screen.queryByLabelText(removed)).not.toBeInTheDocument();
     }
     expect(screen.queryByLabelText("Acciones de conversación")).not.toBeInTheDocument();
   });
+});
+
+it("removes server controls for Officeexample and Transportexample while preserving other installations", () => {
+  for (const installationId of ["officeexample-production", "transportexample-demo"]) {
+    renderWorkspace(null, project, { installationId, onServerReferencesChange: vi.fn() });
+    expect(screen.queryByRole("button", { name: "Archivos del servidor" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Añadir al mensaje" }));
+    expect(screen.queryByRole("menuitem", { name: "Archivos del servidor" })).not.toBeInTheDocument();
+    cleanup();
+  }
+  renderWorkspace(null, project, { installationId: "arnall", onServerReferencesChange: vi.fn() });
+  expect(screen.getByRole("button", { name: "Archivos del servidor" })).toBeInTheDocument();
+});
+
+it("keeps internal WORKSITEA apps out of Tools while preserving the production connector", () => {
+  renderWorkspace(null, null, { installationId: "worksitea-production", connectorCatalogStatus: "ready", connectorMentions: [
+    { id: "worksitea-production", label: "Full de producció", kind: "connector", status: "connected", statusCode: null, canRead: true, requiresApprovalForWrites: false },
+    { id: "worksitea-app-test", label: "Equips i calibracions", kind: "connector", status: "connected", statusCode: null, canRead: true, requiresApprovalForWrites: false },
+  ] });
+  fireEvent.click(screen.getByRole("button", { name: "Conexiones" }));
+  expect(screen.getByRole("option", { name: /Full de producció/ })).toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: /Equips i calibracions/ })).not.toBeInTheDocument();
+});
+it("offers neutral tasks without implying department access to a WORKSITEA employee", () => {
+  const send = vi.fn();
+  renderWorkspace(null, null, { installationId: "worksitea-production", userName: "Example User", onSend: send });
+  expect(screen.getByRole("heading", { name: "¿En qué te puedo ayudar, Example User?" })).toBeInTheDocument();
+  for (const department of ["Producció", "Qualitat", "Administració"]) expect(screen.queryByRole("button", { name: department })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Resumir documentos" }));
+  expect((screen.getByRole("textbox", { name: "Mensaje" }) as HTMLTextAreaElement).value).toContain("documentos");
+  expect(send).not.toHaveBeenCalled();
 });

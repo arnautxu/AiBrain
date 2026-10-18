@@ -13,6 +13,11 @@ export type QuotaToolPermissions = {
 
 const attestedThreads = new WeakMap<object, Map<string, string>>();
 
+/** Credential privacy is mandatory for owner-auth installations, even without a quota. */
+export function privateCodexToolPermissionsRequired(config: { installationId?: unknown; usageLimits?: unknown }) {
+  return ["retaildemo", "officeexample-production"].includes(String(config.installationId)) || Boolean(config.usageLimits);
+}
+
 /** The model's subprocess policy; App Server itself retains its private state. */
 export function createQuotaToolPermissions(roots: {
   workspace: string;
@@ -56,7 +61,7 @@ export function createQuotaToolPermissions(roots: {
         },
         [workspaceWriteId]: {
           extends: readOnlyId,
-          // Quota-enabled turns supply only the exact legacy writable root
+          // Privacy-protected turns supply only the exact legacy writable root
           // as runtimeWorkspaceRoots, never artifact/user metadata roots.
           filesystem: { ":workspace_roots": "write", ":tmpdir": "write", ":slash_tmp": "write" },
         },

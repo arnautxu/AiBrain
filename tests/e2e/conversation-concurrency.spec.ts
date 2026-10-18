@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+const primaryProject = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Operacions" : "Espacio principal";
 const demoUserId = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "operations-user" : "example-user";
 
 async function login(page: Page) {
@@ -47,6 +48,11 @@ test("conversations run independently, cancel independently and notify on backgr
   });
 
   await login(page);
+  // Home intentionally starts in personal conversations. Project activity is
+  // exercised only after the employee explicitly chooses that project.
+  await expect(page.getByLabel("Destino de la conversación")).toHaveText("Proyecto");
+  await page.getByRole("button", { name: primaryProject, exact: true }).click();
+  await expect(page.getByLabel("Destino de la conversación")).toContainText(primaryProject);
   await page.getByRole("textbox", { name: "Mensaje" }).fill("Primera tarea en segundo plano");
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
   await expect.poll(() => chatRequests).toBe(1);
@@ -69,7 +75,7 @@ test("conversations run independently, cancel independently and notify on backgr
   second.release();
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0);
 
-  const runningProject = page.getByRole("button", { name: /Espacio principal.*1 conversación trabajando/ });
+  const runningProject = page.getByRole("button", { name: new RegExp(`${primaryProject}.*1 conversación trabajando`) });
   await expect(runningProject).toBeVisible();
   await runningProject.click();
 
@@ -78,10 +84,10 @@ test("conversations run independently, cancel independently and notify on backgr
   await page.getByRole("button", { name: /^Segunda tarea cancelable(?: Hoy)?$/ }).click();
 
   first.release();
-  const completedProject = page.getByRole("button", { name: /Espacio principal.*1 actualización sin leer/ });
+  const completedProject = page.getByRole("button", { name: new RegExp(`${primaryProject}.*1 actualización sin leer`) });
   await expect(completedProject).toBeVisible();
 
   await completedProject.click();
   await expect(page.getByText("Primera tarea completada.")).toBeVisible();
-  await expect(page.getByRole("button", { name: /Espacio principal.*actualización sin leer/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: new RegExp(`${primaryProject}.*actualización sin leer`) })).toHaveCount(0);
 });

@@ -1,13 +1,13 @@
 """Pinned, text-only Codex configuration shared by the adapter and offline probe.
 
-Verified against openai/codex rust-v0.153.4 config_toml.rs, ModelInfo and
-core/src/tools/spec_plan.rs. A catalog is explicit: fallback metadata is refused.
+Runtime pinned to Codex 0.162.1; compatibility is checked by the offline probe.
+A catalog is explicit: fallback metadata is refused.
 """
 import json
 
-VERSION = 'codex-cli 0.153.4'
+VERSION = 'codex-cli 0.162.1'
 MODEL = 'gpt-5.6-luna'
-MODEL_KEY = 'codex-0.153.4:gpt-5.6-luna:knowledge-v1'
+MODEL_KEY = 'codex-0.162.1:gpt-5.6-luna:knowledge-v1'
 
 
 def catalog(model=MODEL):
@@ -44,7 +44,7 @@ def config(catalog_path):
     for feature in ('shell_tool', 'unified_exec', 'view_image', 'multi_agent', 'apps',
                     'plugins', 'memories', 'hooks', 'image_generation', 'tool_suggest',
                     'request_permissions_tool', 'token_budget', 'current_time_reminder',
-                    'sleep_tool', 'deferred_executor'):
+                    'sleep_tool', 'deferred_executor', 'goals'):
         values['features.' + feature] = False
     return values
 

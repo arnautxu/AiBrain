@@ -141,7 +141,7 @@ describe("DocumentPreviewPanel", () => {
     expect(screen.getByRole("dialog")).toHaveClass("xl:fixed");
     expect(screen.getByRole("link", { name: "Descargar informe-precios.pdf" })).toHaveAttribute("href", expect.stringContaining("/api/threads/"));
   });
-  it.each(["pdf", "pptx"] as const)("renders historic %s deliveries without stored page counts", async (kind) => {
+  it.each(["pdf", "docx", "pptx", "xlsx"] as const)("renders historic %s deliveries without stored page counts", async (kind) => {
     const fetchMock = vi.fn().mockImplementation(async () => new Response(new Uint8Array([137, 80, 78, 71]), {
       headers: { "Content-Type": "image/png", "X-Document-Page-Count": "3" },
     }));
@@ -154,10 +154,39 @@ describe("DocumentPreviewPanel", () => {
     fireEvent.load(first);
     expect(screen.queryByRole("status")).toBeNull();
     expect(document.querySelector("iframe")).toBeNull();
-    expect(screen.getAllByText("1 / 3")).toHaveLength(2);
+    expect(screen.getAllByText("1 / 3")).toHaveLength(1);
+    expect(screen.getByRole("navigation", { name: "Navegación del documento" }).closest("header")).toBeNull();
     fireEvent.click(screen.getAllByRole("button", { name: "Página siguiente" })[0]!);
     expect(await screen.findByRole("img", { name: "Documento informe-precios.pdf, página 2" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenLastCalledWith(expect.stringContaining("page=2"), expect.anything());
+  });
+
+  it("switches a generated workbook between rendered pages and data without a native PDF plugin", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => url.includes("grid=1")
+      ? new Response(JSON.stringify({ schemaVersion: 1, kind: "spreadsheet", truncated: false,
+        sheets: [{ name: "Inventario", hidden: false, cells: [{ address: "A1", value: "Producto de prueba" }] }],
+      }), { headers: { "Content-Type": "application/json" } })
+      : new Response(new Uint8Array([137, 80, 78, 71]), {
+        headers: { "Content-Type": "image/png", "X-Document-Page-Count": "2" },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("URL", { createObjectURL: () => "blob:workbook-page", revokeObjectURL: vi.fn() });
+    render(<DocumentPreviewPanel artifact={{ ...artifact, kind: "xlsx", name: "Inventario.xlsx", pages: null,
+      previewUrl: "/api/threads/thread/artifacts/inventory?preview=1",
+    }} onClose={vi.fn()} />);
+    fireEvent.load(await screen.findByRole("img", { name: "Documento Inventario.xlsx, página 1" }));
+    expect(screen.queryByRole("status")).toBeNull();
+    fireEvent.click(screen.getAllByRole("button", { name: "Página siguiente" })[0]!);
+    fireEvent.load(await screen.findByRole("img", { name: "Documento Inventario.xlsx, página 2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Datos" }));
+    expect(await screen.findByRole("cell", { name: "Producto de prueba" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Página siguiente" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Formato" }));
+    fireEvent.load(await screen.findByRole("img", { name: "Documento Inventario.xlsx, página 2" }));
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(document.querySelector("iframe")).toBeNull();
+    expect(fetchMock).toHaveBeenLastCalledWith(expect.stringContaining("preview=1&page=2"),
+      expect.objectContaining({ credentials: "same-origin", headers: { Accept: "image/png" } }));
   });
 
   it("keeps document shortcuts local to the preview, leaving composer editing alone", async () => {
@@ -173,14 +202,14 @@ describe("DocumentPreviewPanel", () => {
     composer.focus();
     fireEvent.keyDown(composer, { key: "-" });
     fireEvent.keyDown(composer, { key: "ArrowRight" });
-    expect(screen.getAllByText("100%")).toHaveLength(2);
-    expect(screen.getAllByText("1 / 3")).toHaveLength(2);
+    expect(screen.getAllByText("100%")).toHaveLength(1);
+    expect(screen.getAllByText("1 / 3")).toHaveLength(1);
     const page = screen.getByLabelText("Documento informe-precios.pdf, página 1", { selector: "div" });
     page.focus();
     fireEvent.keyDown(page, { key: "-", ctrlKey: true });
-    expect(screen.getAllByText("100%")).toHaveLength(2);
+    expect(screen.getAllByText("100%")).toHaveLength(1);
     fireEvent.keyDown(page, { key: "-" });
-    expect(screen.getAllByText("75%")).toHaveLength(2);
+    expect(screen.getAllByText("75%")).toHaveLength(1);
     fireEvent.keyDown(page, { key: "ArrowRight" });
     expect(await screen.findByRole("img", { name: "Documento informe-precios.pdf, página 2" })).toBeInTheDocument();
   });

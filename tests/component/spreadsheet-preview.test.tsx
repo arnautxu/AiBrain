@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from "../render-spanish";
 import { afterEach, expect, it, vi } from "vitest";
 import { DocumentPreviewPanel } from "@/components/document-preview-panel";
 import { AuthenticatedSpreadsheetPreview, SpreadsheetTable } from "@/components/authenticated-spreadsheet-preview";
-import type { SpreadsheetPreview } from "@/documents/spreadsheet-preview";
+import { isSpreadsheetPreview, type SpreadsheetPreview } from "@/documents/spreadsheet-preview";
 
 const preview: SpreadsheetPreview = { schemaVersion: 1, kind: "spreadsheet", truncated: false, sheets: [
   { name: "S’Agaró", hidden: false, cells: [{ address: "A1", value: "<script>unsafe()</script>" }, { address: "C3", value: "09:00" }] },
@@ -50,17 +50,23 @@ it("opens a generated XLSX in the private grid and keeps its original download",
   expect(screen.getByRole("link", { name: "Descargar Resultat.xlsx" })).toHaveAttribute("href", "/api/threads/test/artifacts/file?download=1");
 });
 
-it("starts a generated XLSX in the formatted PDF view", async () => {
-  const fetch = vi.fn().mockResolvedValue(new Response("%PDF-1.7\n%%EOF", { headers: { "Content-Type": "application/pdf" } }));
+it("starts a generated XLSX in the formatted page view", async () => {
+  const fetch = vi.fn().mockImplementation(async () => new Response(new Uint8Array([137, 80, 78, 71]), {
+    headers: { "Content-Type": "image/png", "X-Document-Page-Count": "2" },
+  }));
   vi.stubGlobal("fetch", fetch);
   vi.stubGlobal("URL", { createObjectURL: () => "blob:formatted-workbook", revokeObjectURL: vi.fn() });
   render(<DocumentPreviewPanel artifact={{ id: "00000000-0000-4000-8000-000000000098", type: "document", name: "Informe.xlsx",
     kind: "xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", size: 500, status: "ready", pages: null,
     url: "/api/threads/test/artifacts/file?download=1", previewUrl: "/api/threads/test/artifacts/file?preview=1",
     publicationStatus: null, publicationError: null, targetLabel: null, error: null }} onClose={vi.fn()} />);
-  expect(await screen.findByTitle("Documento Informe.xlsx")).toHaveAttribute("src", "blob:formatted-workbook");
+  const first = await screen.findByRole("img", { name: "Documento Informe.xlsx, página 1" });
+  expect(first).toHaveAttribute("src", "blob:formatted-workbook");
+  fireEvent.load(first);
+  expect(screen.queryByRole("status")).toBeNull();
+  expect(document.querySelector("iframe")).toBeNull();
   expect(screen.getByText("Excel · vista con formato")).toBeInTheDocument();
-  expect(fetch).toHaveBeenCalledWith("/api/threads/test/artifacts/file?preview=1", expect.objectContaining({ credentials: "same-origin" }));
+  expect(fetch).toHaveBeenCalledWith("/api/threads/test/artifacts/file?preview=1&page=1", expect.objectContaining({ credentials: "same-origin", headers: { Accept: "image/png" } }));
 });
 
 it("recovers from an unavailable route", async () => {
@@ -99,5 +105,29 @@ it("bounds the DOM and exposes partial and empty states", () => {
   fireEvent.click(screen.getByRole("button", { name: "Más filas" }));
   expect(screen.getByRole("cell", { name: "Value 51" })).toBeInTheDocument();
   fireEvent.change(screen.getByRole("combobox"), { target: { value: "1" } });
-  expect(screen.getByText(/No hay celdas/)).toBeInTheDocument();
+  expect(screen.getByText(/No se han incluido valores/)).toBeInTheDocument();
+});
+
+it("reports incompleteness for the selected sheet rather than other sheets", () => {
+  render(<SpreadsheetTable preview={{ ...preview, truncated: true, sheets: [
+    { name: "Partial", hidden: false, truncated: true, cells: [{ address: "A1", value: "Partial value" }] },
+    { name: "Summary", hidden: false, truncated: false, cells: [{ address: "A1", value: "Complete summary" }] },
+    { name: "Empty", hidden: false, truncated: false, cells: [] },
+    { name: "Omitted", hidden: false, truncated: true, cells: [] },
+  ] }} />);
+  expect(screen.getByRole("status")).toHaveTextContent("Vista parcial");
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "1" } });
+  expect(screen.getByRole("cell", { name: "Complete summary" })).toBeInTheDocument();
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "2" } });
+  expect(screen.getByText("No hay celdas con valores en esta hoja.")).toBeInTheDocument();
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "3" } });
+  expect(screen.getByText(/No se han incluido valores/)).toBeInTheDocument();
+  expect(screen.queryByText(/No hay celdas/)).not.toBeInTheDocument();
+});
+
+it("validates per-sheet completeness metadata while accepting legacy previews", () => {
+  expect(isSpreadsheetPreview(preview)).toBe(true);
+  expect(isSpreadsheetPreview({ ...preview, sheets: [{ ...preview.sheets[0], truncated: false }] })).toBe(true);
+  expect(isSpreadsheetPreview({ ...preview, sheets: [{ ...preview.sheets[0], truncated: "false" }] })).toBe(false);
 });

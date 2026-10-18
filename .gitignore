@@ -18,3 +18,8 @@ supabase/.temp/
 coverage/
 playwright-report/
 test-results/
+
+.local-qa/
+deployments/**/runtime.env
+deployments/**/egress.env
+deployments/**/users.json

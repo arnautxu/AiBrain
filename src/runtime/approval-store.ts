@@ -1,3 +1,5 @@
+import { assertInteractiveChatAuthorization, type InteractiveChatAuthorization } from "./interactive-chat-authorization";
+import { readRegularFileWithin } from "@/security/safe-file";
 import { createHash } from "node:crypto";
 import { lstat, mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
@@ -6,6 +8,7 @@ import {
   FileJournal,
   ResourceLockManager,
   ValidationContext,
+  atomicWriteFile,
   atomicWriteJson,
   defineVersionedSchema,
   expectIsoDate,
@@ -660,6 +663,44 @@ export class FileApprovalStore {
     });
   }
 
+  /** Resolve the exact native request using the authenticated direct chat,
+   * without exposing a pending card or broad session grant. A separate immutable
+   * hash binds the legacy native receipt to request/message/policy content. */
+  async resolveChatApproval(input: { authorization: InteractiveChatAuthorization; locator: ApprovalLocator; requestType: "command" | "file"; requestFingerprint: string }): Promise<"accept" | "decline" | "cancel"> {
+    const locator = this.assertLocator(input.locator);
+    const assertCurrent = () => assertInteractiveChatAuthorization(input.authorization, locator);
+    assertCurrent();
+    const requestFingerprint = expectAuthorizationFingerprint(input.requestFingerprint, new ValidationContext("ChatApproval", "requestFingerprint"));
+    const binding = createHash("sha256").update(JSON.stringify([locator, input.requestType, requestFingerprint,
+      input.authorization.userMessageId, input.authorization.requestHash, input.authorization.permissionFingerprint])).digest("hex");
+    await this.prepare();
+    return this.locks.withLock(this.lockKey(locator), async () => {
+      assertCurrent();
+      const bindingFile = this.recordPath(locator).replace(/\.json$/, ".chat");
+      let previous: string | null = null;
+      try { previous = (await readRegularFileWithin(this.approvalsRoot, path.relative(this.approvalsRoot, bindingFile), 128)).toString("utf8"); }
+      catch (error) { if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) throw error; }
+      let record = await this.readUnlocked(locator);
+      if (previous && previous !== binding || !previous && record) throw new ApprovalStoreError("APPROVAL_RECORD_MISMATCH", "The native request binding changed.");
+      if (!previous) await atomicWriteFile(bindingFile, binding, { mode: 0o600 });
+      if (!record) {
+        const now = this.now();
+        record = approvalRecordSchema.parse({ schemaVersion: 1, ...locator, requestType: input.requestType,
+          status: "pending", decision: null, requestedAt: new Date(now).toISOString(),
+          expiresAt: new Date(now + this.defaultTtlMs).toISOString(), resolvedAt: null });
+        await this.writeUnlocked(record); await this.appendEvent(record, "requested");
+      }
+      record = await this.expireUnlocked(record);
+      if (record.status === "resolved") return record.decision === "accept" ? "accept" : "decline";
+      if (record.status !== "pending") return "cancel";
+      assertCurrent();
+      const resolved = approvalRecordSchema.parse({ ...record, status: "resolved", decision: "accept", resolvedAt: new Date(this.now()).toISOString() });
+      await this.writeUnlocked(resolved); await this.appendEvent(resolved, "resolved");
+      assertCurrent();
+      return "accept";
+    });
+  }
+
   async read(locatorInput: ApprovalLocator) {
     const locator = this.assertLocator(locatorInput);
     await this.prepare();
@@ -1155,4 +1196,17 @@ export async function waitForApproval(
     await abortableDelay(pollIntervalMs, signal);
     record = await store.read(locator) ?? record;
   }
+}
+
+/** Wait on the same fingerprint-bound record resolved by the authenticated connector route. */
+export async function waitForConnectorApproval(store: FileApprovalStore, locator: ApprovalLocator, fingerprint: string, signal: AbortSignal): Promise<ApprovalDecision | "cancel"> {
+  while (!signal.aborted) {
+    const record = await store.readConnectorApproval(locator);
+    if (!record || record.authorizationFingerprint !== fingerprint) return "cancel";
+    if (["approved", "executed"].includes(record.status)) return "accept";
+    if (record.status !== "approval_requested") return "decline";
+    await abortableDelay(DEFAULT_POLL_INTERVAL_MS, signal);
+  }
+  await store.denyConnectorApprovalByLocator(locator, fingerprint);
+  return "cancel";
 }

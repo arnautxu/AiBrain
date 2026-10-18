@@ -128,10 +128,13 @@ const LIFECYCLE_ACTIVITY_IDS = new Set([
   "client-request-status",
 ]);
 
-function translatedRuntimeLabel(label: string) {
-  return label
-    .replace(/^Utilitzant /u, "Usando ")
-    .replace(/ completat$/u, " completado");
+function translatedRuntimeLabel(label: string, t: UiText) {
+  const safe = label.replace(/el asistente/gu, t("El asistente").toLocaleLowerCase());
+  const running = safe.match(/^(?:Utilitzant|Usando) (.+)$/u);
+  if (running) return t("Usando {herramienta}", { herramienta: t(running[1]) });
+  const completed = safe.match(/^(.+) (?:completat|completado)$/u);
+  if (completed) return t("{herramienta} completado", { herramienta: t(completed[1]) });
+  return t(safe);
 }
 
 function ActivityIcon({ item, recoveryPaused = false }: { item: ActivityItem; recoveryPaused?: boolean }) {
@@ -157,7 +160,7 @@ function activityPresentation(item: ActivityItem, t: UiText = spanishUiText) {
   const active = item.status === "running" || item.status === "waiting";
   const safeLabel = publicActivityText(item.label, 240) ?? t("Actividad completada");
   const customLabel = safeLabel && !GENERIC_RUNTIME_LABELS.has(item.label)
-    ? (SYSTEM_ACTIVITY_LABELS[item.label] ? t(SYSTEM_ACTIVITY_LABELS[item.label]) : translatedRuntimeLabel(safeLabel))
+    ? (SYSTEM_ACTIVITY_LABELS[item.label] ? t(SYSTEM_ACTIVITY_LABELS[item.label]) : translatedRuntimeLabel(safeLabel, t))
     : null;
   let title = customLabel;
   let secondaryDetail: string | undefined = detail;
@@ -359,7 +362,7 @@ export function TurnActivity({
       ) : null}
 
       {message.approvals.map((approval) => (
-        <PermissionGrant key={approval.id} approval={approval} readOnly={readOnly} connectorApproval={managedAppApprovalKeys.includes(managedAppActionKey({ ...approval, approvalId: approval.id }))} onResolve={(decision) => onResolveApproval(approval, decision)} />
+        <PermissionGrant key={approval.id} approval={approval} readOnly={readOnly} connectorApproval={Boolean(approval.connectorAuthorizationFingerprint) || managedAppApprovalKeys.includes(managedAppActionKey({ ...approval, approvalId: approval.id }))} onResolve={(decision) => onResolveApproval(approval, decision)} />
       ))}
 
       {managedAppAction ? <ManagedAppActionControl

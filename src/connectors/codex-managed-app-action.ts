@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { connectorFingerprint } from "@/connectors/canonical";
 import { assertAuthorizationFresh, prepareConnectorAuthorization } from "@/connectors/authorization";
 import { FileConnectorBindingStore } from "@/connectors/binding-store";
@@ -12,11 +13,20 @@ import {
 import { ConnectorError, type ConnectorAuthorizationSnapshot, type ConnectorPrincipal } from "@/connectors/contracts";
 import type { CodexManagedAppActionConfig } from "@/config/installation-schema";
 import type { ApprovalItem } from "@/lib/chat-contract";
-import type { JsonValue } from "../../contracts/codex/0.153.4/types/serde_json/JsonValue";
+import type { JsonValue } from "../../contracts/codex/0.162.1/types/serde_json/JsonValue";
 import {
   FileApprovalStore,
   type ApprovalLocator,
 } from "@/runtime/approval-store";
+import { assertInteractiveChatAuthorization, type InteractiveChatAuthorization } from "@/runtime/interactive-chat-authorization";
+
+export type ConnectedActionChatContext = {
+  authorization: InteractiveChatAuthorization | undefined;
+  threadId: string;
+  turnId: string;
+  userMessageId: string;
+  message: string;
+};
 
 const OPERATION = "execute-allowlisted-action";
 
@@ -146,22 +156,86 @@ export class CodexManagedAppAction {
     if (!visible || visible.status !== "resolved" || visible.decision !== "accept") {
       throw new ConnectorError("CODEX_APP_ACTION_APPROVAL_PENDING", "Connector action requires one explicit approved pending item.");
     }
-    const approved = await this.approvals.approveConnectorApprovalByLocator(locator, input.authorizationFingerprint);
+    return this.executeAuthorized(locator, authorization);
+  }
+
+  /** The authenticated runner supplies this context. No HTTP/body approval flag
+   * can create this process-local authority. Repeated tool calls in the same
+   * user message share one durable operation, including across recovery. */
+  async executeFromChat(input: ConnectedActionChatContext) {
+    const authority = assertInteractiveChatAuthorization(input.authorization, {
+      installationId: this.principal.installationId, userId: this.principal.userId,
+      threadId: input.threadId, turnId: input.turnId,
+    });
+    if (authority.userMessageId !== input.userMessageId ||
+        authority.requestHash !== createHash("sha256").update(input.message).digest("hex") ||
+        authority.permissionFingerprint !== this.permissionFingerprint) {
+      throw new ConnectorError("CODEX_APP_CHAT_AUTHORITY_MISMATCH", "Chat authorization does not match the current message and permission policy.");
+    }
+    const operationId = connectorFingerprint({
+      installationId: this.principal.installationId, userId: this.principal.userId,
+      threadId: input.threadId, turnId: input.turnId, userMessageId: input.userMessageId,
+      requestHash: authority.requestHash,
+    });
+    const locator: ApprovalLocator = { installationId: this.principal.installationId, userId: this.principal.userId,
+      threadId: input.threadId, turnId: input.turnId,
+      itemId: `chat-action:${operationId}`, approvalId: `chat-action:${operationId}` };
+    const existing = await this.approvals.readConnectorApproval(locator);
+    let authorization: ConnectorAuthorizationSnapshot;
+    if (existing) {
+      authorization = await this.authorizations.read(locator, existing.authorizationFingerprint);
+    } else {
+      const binding = await this.binding();
+      const inspected = await this.provider.inspect({ principal: this.principal, binding });
+      if (inspected.health.status !== "connected") {
+        throw new ConnectorError("CODEX_APP_ACTION_HEALTH_UNAVAILABLE", "Codex App is not connected for the configured action.");
+      }
+      authorization = prepareConnectorAuthorization({
+        principal: this.principal, definition: codexManagedAppDefinition, binding, operation: OPERATION,
+        resourceId: actionFingerprint(this.config),
+        args: { config: this.config, userMessageId: authority.userMessageId, requestHash: authority.requestHash },
+        permissionFingerprint: this.permissionFingerprint, workspacePolicyFingerprint: this.workspacePolicyFingerprint,
+        allowSharedCredential: false,
+      });
+      await this.authorizations.put(locator, authorization);
+      await this.approvals.prepareConnectorApproval({ locator, authorizationFingerprint: authorization.authorizationFingerprint });
+    }
+    if (authorization.argsHash !== connectorFingerprint({ config: this.config,
+      userMessageId: authority.userMessageId, requestHash: authority.requestHash }) ||
+        authorization.permissionFingerprint !== authority.permissionFingerprint ||
+        authorization.workspacePolicyFingerprint !== this.workspacePolicyFingerprint) {
+      throw new ConnectorError("CODEX_APP_CHAT_AUTHORITY_MISMATCH", "Stored action does not match this chat authorization.");
+    }
+    return this.executeAuthorized(locator, authorization, () => {
+      assertInteractiveChatAuthorization(input.authorization, {
+        installationId: this.principal.installationId, userId: this.principal.userId,
+        threadId: input.threadId, turnId: input.turnId,
+      });
+    });
+  }
+
+  private async executeAuthorized(locator: ApprovalLocator, authorization: ConnectorAuthorizationSnapshot, assertChat?: () => void) {
+    assertChat?.();
+    const approved = await this.approvals.approveConnectorApprovalByLocator(locator, authorization.authorizationFingerprint);
     if (approved.outcome !== "approved" && approved.outcome !== "already-approved" &&
         approved.record?.status !== "executed" && approved.record?.status !== "indeterminate") {
       throw new ConnectorError("CODEX_APP_ACTION_APPROVAL_UNAVAILABLE", "Connector approval is not available for execution.");
     }
-    return this.approvals.executeConnectorApprovalByLocator(locator, input.authorizationFingerprint, {
+    return this.approvals.executeConnectorApprovalByLocator(locator, authorization.authorizationFingerprint, {
       revalidate: async () => {
         try {
+          assertChat?.();
           await this.revalidate(authorization);
+          assertChat?.();
           return true;
         } catch {
           return false;
         }
       },
       execute: async () => {
+        assertChat?.();
         const transport = await this.transportForUser(this.principal.userId);
+        assertChat?.();
         const actionResponse = await transport.request("mcpServer/tool/call", {
           threadId: locator.threadId,
           server: this.config.server,

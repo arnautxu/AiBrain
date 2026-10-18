@@ -1,3 +1,4 @@
+import { loginDemoEmployee } from "../helpers/demo-login";
 import { expect, test, type Page } from "@playwright/test";
 
 const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Taylor" : "Alex";
@@ -14,9 +15,7 @@ const viewports = [
 ];
 
 async function login(page: Page) {
-  await page.goto("/login");
-  await page.getByRole("button", { name: new RegExp(accountName) }).click();
-  await expect(page.getByTestId("composer")).toBeVisible();
+  await loginDemoEmployee(page, accountName);
 }
 
 for (const viewport of viewports) {
@@ -55,6 +54,8 @@ for (const viewport of viewports) {
     const addMenuBox = await addMenu.boundingBox();
     expect(addMenuBox).not.toBeNull();
     expect(addMenuBox!.x).toBeGreaterThanOrEqual(0);
+    expect(addMenuBox!.y).toBeGreaterThanOrEqual(0);
+    expect(addMenuBox!.y + addMenuBox!.height).toBeLessThanOrEqual(viewport.height + 1);
     expect(addMenuBox!.x + addMenuBox!.width).toBeLessThanOrEqual(viewport.width + 1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
     await page.keyboard.press("Escape");
@@ -63,6 +64,8 @@ for (const viewport of viewports) {
     const experienceMenu = await page.getByRole("menu", { name: "Experiencia" }).boundingBox();
     expect(experienceMenu).not.toBeNull();
     expect(experienceMenu!.x).toBeGreaterThanOrEqual(0);
+    expect(experienceMenu!.y).toBeGreaterThanOrEqual(0);
+    expect(experienceMenu!.y + experienceMenu!.height).toBeLessThanOrEqual(viewport.height + 1);
     expect(experienceMenu!.x + experienceMenu!.width).toBeLessThanOrEqual(viewport.width + 1);
     await page.keyboard.press("Escape");
 
@@ -155,23 +158,27 @@ test("a pinned chat persists once across mobile and desktop sidebars", async ({ 
   const threadAction = projectThread.locator("xpath=..").getByRole("button", { name: /^Acciones de / });
   const actionLabel = await threadAction.getAttribute("aria-label");
   expect(actionLabel).toMatch(/^Acciones de .+/);
-  const title = actionLabel!.slice("Acciones de ".length);
+  const threadId = await projectThread.getAttribute("data-thread-id");
+  expect(threadId).toMatch(/^[a-f0-9-]{36}$/);
+  // Activity status contributes to the accessible name while the turn runs.
+  // Identity remains stable across pinning, completion, reload and viewport changes.
+  const byIdentity = `[data-thread-id="${threadId}"]`;
 
   await threadAction.click();
   await page.getByRole("menuitem", { name: "Fijar" }).click();
   const pinned = page.getByRole("region", { name: "Anclados" });
   await expect(pinned).toBeVisible();
-  await expect(page.getByRole("button", { name: title!, exact: true })).toHaveCount(1);
-  await expect(pinned.getByRole("button", { name: title!, exact: true })).toBeVisible();
+  await expect(page.getByTestId("workbench-sidebar").locator(byIdentity)).toHaveCount(1);
+  await expect(pinned.locator(byIdentity)).toBeVisible();
 
   await page.reload();
   await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
-  await expect(page.getByRole("region", { name: "Anclados" }).getByRole("button", { name: title!, exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: title!, exact: true })).toHaveCount(1);
+  await expect(page.getByRole("region", { name: "Anclados" }).locator(byIdentity)).toBeVisible();
+  await expect(page.getByTestId("workbench-sidebar").locator(byIdentity)).toHaveCount(1);
 
   await page.setViewportSize({ width: 1280, height: 800 });
   await expect(page.getByTestId("workbench-sidebar")).toHaveAttribute("data-desktop-state", "expanded");
-  await expect(page.getByRole("region", { name: "Anclados" }).getByRole("button", { name: title!, exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Anclados" }).locator(byIdentity)).toBeVisible();
 });
 
 test("settings can recover after its initial request fails", async ({ page }) => {

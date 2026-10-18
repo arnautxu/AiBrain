@@ -37,6 +37,16 @@ describe("InstallationConfig", () => {
     expect(() => parseInstallationConfig({ ...fixture, connectors: { companyMail: { ...companyMail, password: "never-here" } } })).toThrow();
   });
 
+  it("pins native Instantly to an exact workspace and rejects credential configuration", async () => {
+    const fixture = await readFixture();
+    const instantly = { enabled: true, workspaceId: "11111111-1111-4111-8111-111111111111" };
+    const parsed = parseInstallationConfig({ ...fixture, connectors: { instantly } });
+    expect(parsed.connectors?.instantly).toEqual(instantly);
+    expect(Object.isFrozen(parsed.connectors?.instantly)).toBe(true);
+    for (const invalid of [null, {}, { ...instantly, workspaceId: "all" }, { ...instantly, apiKey: "secret" }, { ...instantly, enabled: "yes" }]) {
+      expect(() => parseInstallationConfig({ ...fixture, connectors: { instantly: invalid } })).toThrow(InstallationConfigValidationError);
+    }
+  });
   it("accepts an immutable installation-wide token budget and rejects ambiguous policies", async () => {
     const fixture = await readFixture();
     expect(parseInstallationConfig(fixture).usageLimits).toBeUndefined();

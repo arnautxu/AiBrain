@@ -1,4 +1,5 @@
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -180,6 +181,28 @@ describe("LocalFileMemoryService", () => {
     expect(snapshotA.text).not.toContain("Source-backed procedure");
     await expect(service.readKnowledge(contextA, "../PROFILE.md"))
       .rejects.toMatchObject({ code: "MEMORY_KNOWLEDGE_PATH_INVALID" });
+  });
+
+  it("shares snapshot truncation across long documents instead of erasing one workflow", async () => {
+    const { config, service, contextA } = await fixture();
+    await chmod(path.join(config.paths.companyContextRoot, "40_WORKFLOWS.md"), 0o600);
+    await chmod(path.join(config.paths.companyContextRoot, "20_COMPANY.md"), 0o600);
+    await writeFile(path.join(config.paths.companyContextRoot, "40_WORKFLOWS.md"),
+      "Use the verified order summary.\n" + "W".repeat(4_500));
+    await writeFile(path.join(config.paths.companyContextRoot, "20_COMPANY.md"),
+      "Company background.\n" + "C".repeat(4_000));
+    const snapshot = await service.buildPromptSnapshot(contextA, { maxCharacters: 4_096 });
+    const payload = JSON.parse(snapshot.text);
+    const workflow = payload.companyContext.find((entry: { fileName: string }) => entry.fileName === "40_WORKFLOWS.md");
+    const company = payload.companyContext.find((entry: { fileName: string }) => entry.fileName === "20_COMPANY.md");
+    expect(snapshot.text.length).toBeLessThanOrEqual(4_096);
+    expect(snapshot.truncated).toBe(true);
+    expect(workflow.content).toContain("Use the verified order summary.");
+    expect(workflow.content.length).toBeGreaterThan(500);
+    expect(company.content.length).toBeGreaterThan(500);
+    expect(workflow.contentTruncated).toBe(true);
+    expect(company.contentTruncated).toBe(true);
+    expect(snapshot.text).not.toContain("Employee B");
   });
 
   it("requires explicit writes, preserves provenance and is idempotent across restart", async () => {

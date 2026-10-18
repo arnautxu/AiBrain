@@ -2,18 +2,19 @@ import { spanishUiText, type UiText } from "@/i18n/messages";
 import { type WorkbenchProject } from "@/workbench/types";
 
 export type LandingSuggestion = {
-  id: "presentation" | "spreadsheets" | "schedule" | "presentation-image" | "illustration" | "diagram";
+  id: "presentation" | "spreadsheets" | "schedule" | "presentation-image" | "illustration" | "diagram" | "store-performance" | "meta-review" | "shopify-review" | "officeexample-crm" | "officeexample-erp" | "officeexample-documents" | "outreach-campaigns" | "outreach-leads" | "outreach-attention" | "document-summary" | "compare-options" | "next-steps" | "automation" | "production" | "quality" | "administration";
   label: string;
   prompt: string;
   iconPath?: string;
-  children?: { id: string; label: string; prompt: string }[];
+  action?: "create-automation";
+  children?: { id: string; label: string; prompt: string; disabledReason?: string }[];
 };
 
-/** Uses only the selected project and installation name, never inferred email data. */
+/** Installation identity selects business templates; display names never select another client’s tasks. */
 export function landingSuggestions(
   _project: WorkbenchProject | null,
   companyName: string,
-  capabilities: { gmailAuthorized?: boolean; imageGeneration?: boolean } = {},
+  capabilities: { gmailAuthorized?: boolean; imageGeneration?: boolean; installationId?: string } = {},
   t: UiText = spanishUiText,
 ): LandingSuggestion[] {
   if (capabilities.imageGeneration) return [
@@ -21,7 +22,15 @@ export function landingSuggestions(
     { id: "illustration", label: t("Ilustrar una idea"), prompt: t("Crea una ilustración que represente…") },
     { id: "diagram", label: t("Explicar un proceso"), prompt: t("Crea un diagrama visual que explique estos pasos: …") },
   ];
-  return scheduledPromptTemplates(companyName, t);
+  // Department labels are not an actor permission matrix. WORKSITEA uses the neutral
+  // prompts below; its authorized apps remain available through normal navigation.
+
+  if (capabilities.installationId === "arnall" || capabilities.installationId === "company-qa") return scheduledPromptTemplates(companyName, t);
+  return [
+    { id: "document-summary", label: t("Resumir documentos"), prompt: t("Ayúdame a resumir estos documentos para {company}: … Usa solo el material aportado o autorizado, cita las fuentes y destaca decisiones, dudas y datos que faltan.", { company: companyName }) },
+    { id: "compare-options", label: t("Comparar opciones"), prompt: t("Comparemos estas opciones para {company}: … Organiza criterios, ventajas, costes conocidos y dudas con los datos disponibles. Indica qué falta para decidir sin inventar cifras ni compromisos.", { company: companyName }) },
+    { id: "next-steps", label: t("Organizar los próximos pasos"), prompt: t("Ayúdame a organizar los próximos pasos de este trabajo de {company}: … A partir de la información aportada, resume pendientes, dependencias y preguntas. Propón responsables y fechas para revisar, sin crear tareas programadas ni enviar mensajes.", { company: companyName }) },
+  ];
 }
 
 /** Fixed editable prompts, never scheduled jobs or automatic actions. */

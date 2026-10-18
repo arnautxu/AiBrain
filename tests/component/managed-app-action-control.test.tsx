@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "../render-spanish";
+import { cleanup, render, screen } from "../render-spanish";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ManagedAppActionControl } from "@/components/managed-app-action-control";
 import type { ChatMessage } from "@/lib/chat-contract";
@@ -35,19 +35,19 @@ describe("ManagedAppActionControl", () => {
     expect(screen.queryByRole("button", { name: "Solicitar aprobación" })).not.toBeInTheDocument();
 
     rerender(<ManagedAppActionControl enabled threadId="thread-current" message={message} onPrepared={() => undefined} />);
-    expect(screen.getByRole("button", { name: "Solicitar aprobación" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Solicitar aprobación" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Acción conectada" })).toBeVisible();
   });
 
-  it("prepares only the active thread/turn descriptor and exposes its pending approval", async () => {
+  it("directs the employee to chat without creating a button approval or sending a mutation", async () => {
     const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ schemaVersion: 1, descriptor })));
     vi.stubGlobal("fetch", fetcher);
     const onPrepared = vi.fn();
     render(<ManagedAppActionControl enabled threadId="thread-current" message={message} onPrepared={onPrepared} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Solicitar aprobación" }));
-    await waitFor(() => expect(onPrepared).toHaveBeenCalledWith(descriptor));
-    expect(fetcher).toHaveBeenCalledWith("/api/connectors/codex-managed-app/action", expect.objectContaining({ method: "POST" }));
-    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({ operation: "prepare", ...descriptor.locator });
+    expect(screen.getByText(/Pide al asistente en el chat/)).toBeVisible();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(onPrepared).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });

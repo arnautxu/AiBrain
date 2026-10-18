@@ -1,5 +1,5 @@
 "use client";
-import { useUiText } from "@/i18n/provider";
+import { useUiLocale, useUiText } from "@/i18n/provider";
 
 import Image from "next/image";
 import type { ButtonHTMLAttributes, HTMLAttributes, InputHTMLAttributes } from "react";
@@ -22,9 +22,11 @@ export function BrandMark({
   className?: string;
 }) {
   const imagePath = compact ? branding.faviconPath : branding.logoPath;
+  const officialWORKSITEA = imagePath.startsWith("/branding/worksitea/");
   const officialArnall = imagePath === "/branding/arnall/logo.jpg";
   return (
     <span
+      data-brand={officialWORKSITEA ? "worksitea" : undefined}
       role="img"
       aria-label={compact ? branding.productName : `${branding.productName}, ${branding.companyName}`}
       className={classes("ui-brand", compact && "ui-brand-compact", className)}
@@ -34,8 +36,8 @@ export function BrandMark({
         src={officialArnall ? `${imagePath}?v=d09bb6bb7e8a` : imagePath}
         unoptimized={officialArnall}
         alt=""
-        width={compact ? 40 : 194}
-        height={compact ? 40 : 194}
+        width={officialWORKSITEA ? 549 : compact ? 40 : 194}
+        height={officialWORKSITEA ? 342 : compact ? 40 : 194}
         className="ui-brand-image"
       />
     </span>
@@ -81,6 +83,7 @@ export function TextField({ className, ...props }: InputHTMLAttributes<HTMLInput
 
 export function ThemeToggle({ className }: { className?: string }) {
   const t = useUiText();
+  const locale = useUiLocale();
   const { preference, setPreference } = useTheme();
   const options: Array<{ value: ThemePreference; label: string; icon: React.ReactNode }> = [
     { value: "system", label: t("Tema del sistema"), icon: <Desktop size={14} /> },
@@ -93,7 +96,7 @@ export function ThemeToggle({ className }: { className?: string }) {
   return (
     <IconButton
       className={className}
-      label={`${active.label}. Cambiar a ${next.label.toLocaleLowerCase("es")}`}
+      label={t("{p0}. Cambiar a {p1}", { p0: active.label, p1: next.label.toLocaleLowerCase(locale) })}
       onClick={() => setPreference(next.value)}
     >
       {active.icon}

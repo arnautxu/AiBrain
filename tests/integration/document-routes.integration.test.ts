@@ -1,4 +1,5 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { oggOpusFixture } from "../helpers/ogg-opus-fixture";
 import { generatedPngFixture } from "../helpers/png-fixture";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -179,6 +180,62 @@ describe("authenticated document routes", () => {
 
     auth.session = session(USER_B);
     expect((await previewRoute.GET(new Request("http://localhost/preview"), previewContext)).status).toBe(404);
+  });
+
+  it("transcribes an original audio through the same owner/tenant ACL and private routes", async () => {
+    const { SystemDocumentToolRunner } = await import("@/documents/preview-service");
+    const { loadInstallationConfig } = await import("@/config/installation");
+    const { documentServicesForUser } = await import("@/documents/server-service");
+    const { parseDocumentUploadResponse } = await import("@/ui/document-ui-adapter");
+    const uploadRoute = await import("@/app/api/threads/[threadId]/documents/route");
+    const previewRoute = await import("@/app/api/threads/[threadId]/documents/[uploadId]/preview/[fileName]/route");
+    const downloadRoute = await import("@/app/api/threads/[threadId]/documents/[uploadId]/versions/[versionId]/route");
+    const historyRoute = await import("@/app/api/threads/[threadId]/documents/[uploadId]/route");
+    const { isSameOriginMutation } = await import("@/auth/request-security");
+    const uploadId = "0198b9f0-6631-7000-8000-000000000529";
+    const ogg = oggOpusFixture();
+    const send = () => uploadRoute.POST(uploadRequest(uploadId, new File([new Uint8Array(ogg)], "voice.ogg", { type: "audio/ogg" })), { params: Promise.resolve({ threadId }) });
+    const previous = [process.env.AIBRAIN_FFPROBE_BIN, process.env.AIBRAIN_AUDIO_TRANSCRIBER_BIN];
+    const runner = vi.spyOn(SystemDocumentToolRunner.prototype, "run").mockImplementation(async (command) => ({
+      stdout: command === "/tools/ffprobe" ? JSON.stringify({ streams: [{ codec_type: "audio", codec_name: "opus", channels: 1, sample_rate: "48000" }], format: { format_name: "ogg", duration: "1.0" } }) : "Synthetic HTTP fixture transcript", stderr: "",
+    }));
+    try {
+      process.env.AIBRAIN_FFPROBE_BIN = "/tools/ffprobe";
+      process.env.AIBRAIN_AUDIO_TRANSCRIBER_BIN = "/tools/transcribe";
+      auth.session = session(USER_A);
+      vi.mocked(isSameOriginMutation).mockResolvedValueOnce(false);
+      expect((await send()).status).toBe(403);
+      auth.session = null; expect((await send()).status).toBe(401);
+      auth.session = session(USER_B); expect((await send()).status).toBe(404);
+      auth.session = { ...session(USER_A), tenant: { id: "other-installation", name: "Other" } }; expect((await send()).status).toBe(403);
+      expect(runner).not.toHaveBeenCalled();
+      auth.session = session(USER_A);
+      const response = await send(); expect(response.status).toBe(201);
+      const result = await response.json();
+      expect(result.document.kind).toBe("audio"); expect(parseDocumentUploadResponse(result)).not.toBeNull();
+      expect(() => assertUiContract("DocumentUploadResponse", result)).not.toThrow();
+      const config = await loadInstallationConfig(); const services = await documentServicesForUser(config, USER_A);
+      const staged = await services.staging.readById(threadId, uploadId);
+      expect(await readFile(path.join(services.manifest.roots.staging, staged.relativePath))).toEqual(ogg);
+      const previewContext = { params: Promise.resolve({ threadId, uploadId, fileName: "preview.txt" }) };
+      const preview = await previewRoute.GET(new Request("http://localhost/preview"), previewContext);
+      expect(preview.status).toBe(200); expect(await preview.text()).toBe("Synthetic HTTP fixture transcript");
+      expect(preview.headers.get("Cache-Control")).toBe("private, no-store");
+      const history = await historyRoute.GET(new Request("http://localhost/history"), { params: Promise.resolve({ threadId, uploadId }) });
+      const versionId = (await history.json()).document.originalVersionId;
+      const downloadContext = { params: Promise.resolve({ threadId, uploadId, versionId }) };
+      const download = await downloadRoute.GET(new Request("http://localhost/download"), downloadContext);
+      expect(download.status).toBe(200); expect(Buffer.from(await download.arrayBuffer())).toEqual(ogg);
+      auth.session = session(USER_B);
+      expect((await previewRoute.GET(new Request("http://localhost/preview"), previewContext)).status).toBe(404);
+      expect((await downloadRoute.GET(new Request("http://localhost/download"), downloadContext)).status).toBe(404);
+      expect(runner).toHaveBeenCalledTimes(2);
+    } finally {
+      runner.mockRestore();
+      for (const [index, key] of ["AIBRAIN_FFPROBE_BIN", "AIBRAIN_AUDIO_TRANSCRIBER_BIN"].entries()) {
+        if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index];
+      }
+    }
   });
 
   it("stages a PNG privately and supplies image bytes to the model without publication", async () => {
@@ -599,5 +656,29 @@ describe("authenticated document routes", () => {
       if (previousRetry === undefined) delete process.env.AIBRAIN_DOCUMENT_STORAGE_RETRY_AFTER_MS;
       else process.env.AIBRAIN_DOCUMENT_STORAGE_RETRY_AFTER_MS = previousRetry;
     }
+  });
+
+
+
+  it("rejects a second malformed legacy workbook before staging it", async () => {
+    const uploadRoute = await import("@/app/api/threads/[threadId]/documents/route");
+    const data = await readFile(path.resolve("tests/infra/fixtures/knowledge-legacy.xls"));
+    const bof = data.indexOf(Buffer.from("0908100000060500", "hex"));
+    expect(bof).toBeGreaterThan(0);
+    data.writeUInt16LE(0x01b8, bof + 20); // Synthetic HLINK; never a customer file.
+    auth.session = session(USER_A);
+    const response = await uploadRoute.POST(
+      uploadRequest("0198b9f0-6631-7000-8000-000000000956", new File([new Uint8Array(data)], "unsafe.xls", { type: "application/octet-stream" })),
+      { params: Promise.resolve({ threadId }) },
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "El document no supera la validació de seguretat.",
+    });
+    const [{ loadInstallationConfig }, { documentServicesForUser }] = await Promise.all([
+      import("@/config/installation"), import("@/documents/server-service"),
+    ]);
+    const services = await documentServicesForUser(await loadInstallationConfig(), USER_A);
+    await expect(services.staging.readById(threadId, "0198b9f0-6631-7000-8000-000000000956")).rejects.toThrow();
   });
 });

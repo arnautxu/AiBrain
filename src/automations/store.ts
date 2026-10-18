@@ -3,6 +3,7 @@ import { lstat, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   AutomationRun,
+  AutomationRunHistory,
   AutomationSnapshot,
   AutomationTask,
   AutomationTaskInput,
@@ -64,6 +65,7 @@ function parseTask(value: unknown): AutomationTask {
     !UUID_PATTERN.test(String(value.projectId)) || typeof value.projectName !== "string" ||
     !isValidTimeZone(value.timeZone) || !isAutomationSchedule(value.schedule) ||
     !(value.executionContext === undefined || isAutomationExecutionContext(value.executionContext)) ||
+    !(value.preparationBlock === undefined || value.preparationBlock === null || (typeof value.preparationBlock === "string" && value.preparationBlock.length > 0 && value.preparationBlock.length <= 500)) ||
     !["active", "paused", "completed"].includes(String(value.state)) ||
     !(value.nextRunAt === null || isIsoDate(value.nextRunAt)) ||
     !(value.lastRunAt === null || isIsoDate(value.lastRunAt)) ||
@@ -243,7 +245,7 @@ export class FileAutomationStore {
   async create(input: AutomationTaskInput, options: { id?: string } = {}) {
     const now = new Date(this.now());
     const nextRunAt = nextScheduledInstant(input.schedule, input.timeZone, new Date(now.getTime() - 1));
-    if (!nextRunAt) throw new AutomationStoreError("AUTOMATION_DATE_PAST", "La fecha de ejecución ya ha pasado.");
+    if (!nextRunAt && input.schedule.kind !== "external") throw new AutomationStoreError("AUTOMATION_DATE_PAST", "La fecha de ejecución ya ha pasado.");
     const task: AutomationTask = {
       schemaVersion: 1,
       id: options.id ?? randomUUID(),
@@ -295,6 +297,7 @@ export class FileAutomationStore {
       this.assertOwnership(current);
       if (current.deletedAt !== null) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", "Automatización no encontrada.");
       const state = patch.state ?? current.state;
+      if (current.preparationBlock && state === "active") throw new AutomationStoreError("AUTOMATION_DEPENDENCY_PENDING", current.preparationBlock);
       // A claim is a snapshot of these runtime inputs. Keep its lease while
       // cancelling it so the owning worker can record the terminal history,
       // but fence it before it can produce a turn for obsolete instructions.
@@ -317,10 +320,28 @@ export class FileAutomationStore {
       };
       if (state === "active" && (patch.schedule || patch.timeZone || current.state !== "active")) {
         next.nextRunAt = nextScheduledInstant(next.schedule, next.timeZone, new Date(this.now() - 1));
-        if (!next.nextRunAt) throw new AutomationStoreError("AUTOMATION_DATE_PAST", "La fecha de ejecución ya ha pasado.");
+        if (!next.nextRunAt && next.schedule.kind !== "external") throw new AutomationStoreError("AUTOMATION_DATE_PAST", "La fecha de ejecución ya ha pasado.");
       }
       snapshot.tasks[index] = next;
       return next;
+    });
+  }
+
+  /** Operator only: unblock after validating the connection; leaves the task paused. */
+  async setPreparationBlock(taskId: string, reason: string | null) {
+    if (reason !== null && (!reason.trim() || reason.length > 500)) throw new Error("Invalid preparation reason");
+    return this.mutate((snapshot) => {
+      const task = snapshot.tasks.find((item) => item.id === taskId && item.deletedAt === null);
+      if (!task) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", "Automatización no encontrada.");
+      this.assertOwnership(task);
+      task.preparationBlock = reason;
+      task.state = "paused";
+      task.manualRun = null;
+      task.retryAt = null;
+      task.nextRunAt = null;
+      task.updatedAt = new Date(this.now()).toISOString();
+      task.cancellationRequestedAt = task.lease ? task.updatedAt : null;
+      return { ...task };
     });
   }
 
@@ -356,6 +377,7 @@ export class FileAutomationStore {
       const task = snapshot.tasks.find((candidate) => candidate.id === taskId);
       if (!task || task.deletedAt !== null) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", "Automatización no encontrada.");
       this.assertOwnership(task);
+      if (task.preparationBlock) throw new AutomationStoreError("AUTOMATION_DEPENDENCY_PENDING", task.preparationBlock);
       if (task.manualRun?.requestId === requestId) return { ...task };
       if (task.manualRun || task.lease) {
         throw new AutomationStoreError("AUTOMATION_RUN_PENDING", "Ya hay una ejecución pendiente o en curso.");
@@ -377,7 +399,7 @@ export class FileAutomationStore {
           b.retryAt ?? b.manualRun?.scheduledFor ?? b.nextRunAt ?? ""))) {
         const scheduledFor = task.manualRun?.scheduledFor ?? task.nextRunAt;
         const dueAt = task.retryAt ?? scheduledFor;
-        if (claims.length >= limit || task.deletedAt !== null || (!task.manualRun && task.state !== "active") || !scheduledFor || !dueAt ||
+        if (task.preparationBlock || claims.length >= limit || task.deletedAt !== null || (!task.manualRun && task.state !== "active") || !scheduledFor || !dueAt ||
           new Date(dueAt).getTime() > now ||
           (task.lease && new Date(task.lease.expiresAt).getTime() > now)) continue;
         const runKey = task.manualRun
@@ -483,7 +505,7 @@ export class FileAutomationStore {
     }
   }
 
-  async listRuns(taskId?: string) {
+  private async latestAttempts(taskId?: string) {
     await this.prepare();
     const entries = await this.runs.read();
     const latestByAttempt = new Map<string, AutomationRun>();
@@ -500,7 +522,22 @@ export class FileAutomationStore {
     return [...latestByAttempt.values()];
   }
 
+  async listRuns(taskId?: string): Promise<AutomationRunHistory[]> {
+    const attempts = await this.latestAttempts(taskId);
+    const byRun = Map.groupBy(attempts, (run) => run.runKey);
+    return attempts.map((run) => {
+      if (run.status !== "running") return run;
+      const successor = byRun.get(run.runKey)?.filter((candidate) => candidate.attempt > run.attempt)
+        .toSorted((left, right) => left.attempt - right.attempt)[0];
+      if (!successor) return run;
+      // The successor proves this attempt lost ownership, not when it stopped
+      // or whether its model turn completed. Keep those facts unknown and keep
+      // the original append-only records intact, including legacy recoveries.
+      return { ...run, status: "interrupted", recoveredByAttempt: successor.attempt, recoveredAt: successor.startedAt };
+    });
+  }
+
   async latestRun(runKey: string) {
-    return (await this.listRuns()).filter((run) => run.runKey === runKey).at(-1) ?? null;
+    return (await this.latestAttempts()).filter((run) => run.runKey === runKey).at(-1) ?? null;
   }
 }

@@ -49,10 +49,10 @@ function oauthConfiguration(config: Readonly<InstallationConfig>) {
   return { tenantId: outlook.tenantId, clientId, clientSecret, encryptionKey, redirectUri: `${config.publicUrl}/api/connectors/outlook/oauth/callback` };
 }
 
-async function context(session: AuthSession) {
+async function context(session: AuthSession, requireEnabled = true) {
   const config = await loadInstallationConfig();
   if (session.provider !== "local" || session.tenant.id !== config.installationId) throw new OutlookConnectorError("OUTLOOK_TENANT_MISMATCH", "Authenticated session does not belong to this installation.", 403);
-  if (!config.connectors?.outlook?.enabled) throw new OutlookConnectorError("OUTLOOK_NOT_ENABLED", "Outlook is not enabled for this installation.", 404);
+  if (requireEnabled && !config.connectors?.outlook?.enabled) throw new OutlookConnectorError("OUTLOOK_NOT_ENABLED", "Outlook is not enabled for this installation.", 404);
   const workspace = await workspacePolicyForIdentity(config.installationId, session.user.id, config);
   const principal: ConnectorPrincipal = { installationId: config.installationId, userId: session.user.id, roleId: workspace.roleId };
   const catalog = await catalogRuntimeEnforcer(config.installationId, session.user.id);
@@ -108,7 +108,9 @@ async function connectedReadback(config: Readonly<InstallationConfig>, principal
 }
 
 export async function outlookCapabilityForSession(session: AuthSession, fetcher: Fetcher = fetch): Promise<OutlookConnectionSnapshot> {
-  const { config, principal } = await context(session);
+  // A catalog tile can be provisioned before administrative OAuth setup.
+  // Keep authorization mandatory, but report missing setup without enabling it.
+  const { config, principal } = await context(session, false);
   const base = { connectorId: OUTLOOK_CONNECTOR_ID, label: "Microsoft 365", effectiveOperations: [], approvalRequiredOperations: [], connectUrl: "/api/connectors/outlook/oauth/start", disconnectUrl: null, accountEmail: null, connectionVersion: null };
   try { oauthConfiguration(config); }
   catch (error) { return { ...base, status: "not_configured", statusCode: code(error), checkedAt: null, connectUrl: null }; }

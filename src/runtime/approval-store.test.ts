@@ -1,7 +1,10 @@
+import { createInteractiveChatAuthorization } from "@/runtime/interactive-chat-authorization";
+import type { AuthSession } from "@/auth/types";
+vi.mock("server-only", () => ({}));
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { isApprovalItem, isApprovalResolutionRequest, type ApprovalItem } from "@/lib/chat-contract";
 import {
   FileApprovalStore,
@@ -74,6 +77,43 @@ describe("FileApprovalStore", () => {
     if (!result.receipt) throw new Error("Expected connector approval receipt.");
     return result.receipt;
   }
+
+  it("resolves real native receipts from exact chat authority and preserves immutable binding across store restart", async () => {
+    const { usersRoot } = await fixture();
+    const item = approval("chat-native", "chat-thread", "chat-turn", "chat-command");
+    const itemLocator = locator(item);
+    const currentFileStore = store(usersRoot);
+    const createAuthority = (overrides: { userId?: string; threadId?: string; turnId?: string; message?: string; userMessageId?: string } = {}) => {
+      const actor = overrides.userId ?? USER_A;
+      return createInteractiveChatAuthorization({ installationId: INSTALLATION_ID, userId: actor,
+        threadId: overrides.threadId ?? item.threadId, turnId: overrides.turnId ?? item.turnId,
+        userMessageId: overrides.userMessageId ?? "direct-message", message: overrides.message ?? "Create the requested project file",
+        signal: new AbortController().signal, backgroundExecution: false, mode: "agent", localTurnId: "local-turn",
+        session: { provider: "local", tenant: { id: INSTALLATION_ID, name: "QA" }, user: { id: actor, name: "Test", email: "qa@example.test" }, expiresAt: new Date(Date.now() + 3600000).toISOString() } as AuthSession,
+        permissions: { installationId: INSTALLATION_ID, userId: actor, turnId: "local-turn", fingerprint: fingerprint(), rules: [{ ruleId: "tools.execute", action: "execute", effect: "allow", instruction: "Execute authorized project work", sourceScope: "installation", sourcePolicyVersion: 1, precedence: 0 }] },
+      })!;
+    };
+    const authorization = createAuthority();
+    const request = { locator: itemLocator, requestType: "command" as const, requestFingerprint: fingerprint("b"), authorization };
+    const legacyPending = vi.spyOn(currentFileStore, "createPending");
+    // The real locator has itemId/approvalId beyond the four authority fields.
+    // This caught the structural-extra-property authorization regression.
+    await expect(currentFileStore.resolveChatApproval(request)).resolves.toBe("accept");
+    expect(legacyPending).not.toHaveBeenCalled();
+    expect(await currentFileStore.read(itemLocator)).toMatchObject({ status: "resolved", decision: "accept" });
+    await expect(currentFileStore.resolveChatApproval(request)).resolves.toBe("accept");
+    const restartedFileStore = store(usersRoot);
+    await expect(restartedFileStore.resolveChatApproval({ ...request, authorization: createAuthority() })).resolves.toBe("accept");
+    expect((await restartedFileStore.readEvents()).map(event => event.payload.eventType)).toEqual(["requested", "resolved"]);
+    await expect(restartedFileStore.resolveChatApproval({ ...request, requestFingerprint: fingerprint("c") })).rejects.toMatchObject({ code: "APPROVAL_RECORD_MISMATCH" });
+    for (const patch of [{ message: "A different action" }, { userMessageId: "another-direct-message" }])
+      await expect(restartedFileStore.resolveChatApproval({ ...request, authorization: createAuthority(patch) })).rejects.toMatchObject({ code: "APPROVAL_RECORD_MISMATCH" });
+    for (const patch of [{ userId: USER_B }, { threadId: "foreign-thread" }, { turnId: "foreign-turn" }])
+      await expect(restartedFileStore.resolveChatApproval({ ...request, authorization: createAuthority(patch) })).rejects.toThrow("INTERACTIVE_CHAT_REQUIRED");
+    await expect(restartedFileStore.resolveChatApproval({ ...request, authorization: { ...authorization } })).rejects.toThrow("INTERACTIVE_CHAT_REQUIRED");
+    expect(await restartedFileStore.read(itemLocator)).toMatchObject({ status: "resolved", decision: "accept" });
+    expect((await restartedFileStore.readEvents()).map(event => event.payload.eventType)).toEqual(["requested", "resolved"]);
+  });
 
   it("persists a decision across independent store instances and restart replay", async () => {
     const { usersRoot } = await fixture();

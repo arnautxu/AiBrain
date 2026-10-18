@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { ClientRequest } from "../../contracts/codex/0.153.4/types/ClientRequest";
+import type { ClientRequest } from "../../contracts/codex/0.162.1/types/ClientRequest";
 import type { InstallationConfig } from "@/config/installation-schema";
 import { FileLocalUserStore } from "@/auth/local-user-store";
 import { loadInstallationConfig } from "@/config/installation";
@@ -17,14 +17,16 @@ import {
   type CodexConnection,
   type ResolvedSkill,
 } from "@/runtime/codex-app-server";
-import { AppServerRpcRouter } from "@/runtime/transport/app-server-rpc-router";
+import { AppServerRpcRouter, AppServerRpcResponseError } from "@/runtime/transport/app-server-rpc-router";
 import { validateAppServerRequest } from "@/runtime/transport/wire-protocol";
 import type { AppServerEvent, JsonValue } from "@/runtime/transport";
 import { LocalGatewayWorkerRuntimeFactory, workerEgressEnvironment } from "@/runtime/workers/local-gateway-runtime";
 import { sharedAuthProvider } from "@/runtime/workers/shared-auth-broker";
+import { privateCodexToolPermissionsRequired } from "@/runtime/quota-tool-permissions";
 import { WorkerRuntimeRegistry } from "@/runtime/workers/registry";
 import type { WorkerRuntimeHandle } from "@/runtime/workers/types";
 import { operationalLogger } from "@/operations/server-logger";
+import { installationOwnerAuthSocket, readInstallationOwnerAccess } from "@/runtime/installation-owner-auth";
 import { createWeeklyTokenBudgetRuntime, type WeeklyTokenBudgetRuntime } from "@/usage/weekly-token-budget-runtime";
 
 const CATALOG_FRESH_TTL_MS = 5 * 60_000;
@@ -144,6 +146,14 @@ export class WorkerAppServerClient {
     if (initializedHere) {
       await this.router.notify({ method: "initialized" }, `initialized:${randomUUID()}`);
     }
+    if (installationOwnerAuthSocket(this.handle.installationId)) {
+      // External access tokens stay in App Server memory. Refresh tokens remain
+      // only in the host's canonical managed account, never employee homes.
+      const access = await readInstallationOwnerAccess(this.handle.installationId);
+      await this.router.request(randomRequest("account/login/start", {
+        type: "chatgptAuthTokens", ...access,
+      }, "owner-access-login"), 10_000);
+    }
     // Readiness must not proactively rotate credentials. Codex owns normal
     // refresh during authenticated work; forcing it here can invalidate a
     // still-usable shared-QA session when its refresh token was already rotated.
@@ -206,7 +216,7 @@ export class WorkerAppServerClient {
     const response = await this.handle.transport.recoverResponse?.(request);
     if (!response) return null;
     if (response.id !== purpose) throw new Error("Recovered thread creation identity changed.");
-    if ("error" in response) throw Object.assign(new Error(response.error.message), { code: response.error.code });
+    if ("error" in response) throw new AppServerRpcResponseError("thread/start", response.id, response.error);
     return response.result;
   }
 
@@ -416,7 +426,7 @@ async function serviceState(): Promise<RuntimeServiceState> {
       registry: new WorkerRuntimeRegistry({
         config,
         factory: new LocalGatewayWorkerRuntimeFactory({
-          quotaToolPrivacy: Boolean(config.usageLimits),
+          quotaToolPrivacy: privateCodexToolPermissionsRequired(config),
           sharedAuth: sharedAuthProvider(config, process.env.AIBRAIN_CODEX_AUTH_SCOPE === "shared-qa" ? workerEgressEnvironment() : {}),
         }),
         maintenance,

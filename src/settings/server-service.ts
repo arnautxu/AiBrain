@@ -1,3 +1,4 @@
+import { instantlyCapabilityForSession } from "@/connectors/instantly-service";
 import { composioCapabilitiesForSession } from "@/connectors/composio-service";
 import "server-only";
 
@@ -27,6 +28,7 @@ import { companyMailCapabilityForSession } from "@/connectors/company-mail-serve
 import { COMPANY_MAIL_CONNECTOR_ID, COMPANY_MAIL_SCOPES } from "@/connectors/company-mail-contracts";
 import { GMAIL_CONNECTOR_ID, GMAIL_MINIMUM_SCOPES } from "@/connectors/gmail-contracts";
 import { outlookCapabilityForSession } from "@/connectors/outlook-server-service";
+import { mailCapabilityForSession } from "@/connectors/mail-server-service";
 import { OUTLOOK_API_SCOPES, OUTLOOK_CONNECTOR_ID } from "@/connectors/outlook-contracts";
 import { catalogRuntimeEnforcer } from "@/catalog/access-service";
 import { projectPersonalConnectorSettings, type PersonalConnectorSettings } from "@/settings/connector-settings";
@@ -300,15 +302,35 @@ export async function settingsSnapshot(session: AuthSession): Promise<SettingsSn
   const mailAuthorized = catalog.allowsConnector(COMPANY_MAIL_CONNECTOR_ID);
   const gmailAuthorized = catalog.allowsConnector(GMAIL_CONNECTOR_ID);
   const outlookAuthorized = catalog.allowsConnector(OUTLOOK_CONNECTOR_ID);
-  const [userSettings, permissions, apps, gmail, outlook, companyMail] = await Promise.all([
+  const [userSettings, permissions, apps, gmail, outlook, companyMail, mail] = await Promise.all([
     store.readUser(session.user.id),
     permissionsForSession(session),
     appCatalogue(session, isAdmin),
     gmailAuthorized ? gmailCapabilityForSession(session).catch(() => null) : Promise.resolve(null),
     outlookAuthorized ? outlookCapabilityForSession(session).catch(() => null) : Promise.resolve(null),
     mailAuthorized ? companyMailCapabilityForSession(session).catch(() => null) : Promise.resolve(null),
+    mailCapabilityForSession(session),
   ]);
   const connectors: PersonalConnectorSettings[] = [];
+  if (mail) {
+    connectors.push({
+      ...projectPersonalConnectorSettings(mail, ["mail.read", "mail.draft", "mail.send", "mail.organize"], {
+        connected: "Tu buzón está conectado. Puedes usarlo directamente en el chat.",
+        requiresLogin: "Conecta tu buzón con la contraseña de tu correo.",
+        adminSetupRequired: "La conexión de correo todavía no está preparada.",
+        unavailable: "No se ha podido comprobar el buzón. Puedes volver a conectarlo.",
+      }),
+      connectionMethod: "password",
+    });
+  }
+  if (catalog.allowsConnector("instantly") && installation.connectors?.instantly?.enabled) {
+    connectors.push(projectPersonalConnectorSettings(await instantlyCapabilityForSession(installation, session), ["instantly:read"], {
+      connected: "Workspace de empresa verificado por ID. Solo lectura; las respuestas comerciales son borradores para revisión.",
+      requiresLogin: "El administrador debe reconectar la credencial del workspace.",
+      adminSetupRequired: "El administrador debe configurar la conexión de Instantly.",
+      unavailable: "No se puede verificar el workspace de Instantly ahora mismo.",
+    }));
+  }
   if (mailAuthorized) connectors.push(projectPersonalConnectorSettings(companyMail ?? {
     connectorId: COMPANY_MAIL_CONNECTOR_ID, label: "Correo de empresa", status: "degraded", statusCode: "MAIL_CAPABILITY_CHECK_FAILED", checkedAt: null,
     effectiveOperations: [], approvalRequiredOperations: [], connectUrl: null, disconnectUrl: null, accountEmail: null, connectionVersion: null,

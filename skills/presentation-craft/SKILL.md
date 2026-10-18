@@ -15,7 +15,7 @@ Apply silently. Use the user's request, source files and authorized brand refere
 4. Create a private storyboard under .aibrain-drafts/: for each slide record its purpose, title, evidence, visual form and main emphasis. Give the deck a coherent rhythm. Choose each composition for its content, not a repeated heading/chart/card skeleton. A corporate report still needs art direction, readable typography and carefully designed charts; it need not become a decorative marketing deck.
 5. Lock supplied facts, currencies, units, dates, qualifiers and citations. Compute derived values once and reuse them. Simulated data is allowed only when the user requests or authorizes it and must be clearly identified. Never invent causal explanations for a graph.
 
-## Author with the actual Arnall tools
+## Author with the installation's available tools
 
 Read /usr/local/share/aibrain/presentations.md for the supported PptxGenJS authoring and private render/deliver tools. It is the implementation adapter for this workflow. Do not call desktop-only Artifact Tool APIs, a template picker, a finalizer, Google Slides or shell converters that this runtime does not expose. Missing capabilities are limitations, never permission to bypass the runtime.
 

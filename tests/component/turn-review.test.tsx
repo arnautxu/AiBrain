@@ -158,8 +158,8 @@ describe("turn activity and Review", () => {
     expect(screen.getByText("Comprobación sintética terminada")).toBeInTheDocument();
     expect(screen.getByText("Cambios preparados")).toBeInTheDocument();
     const approval = screen.getByRole("group", { name: "Aprobación: Ejecutar comprobación" });
-    fireEvent.click(within(approval).getByRole("button", { name: "Permitir" }));
-    expect(onResolve).toHaveBeenCalledWith(message.approvals[0], "accept");
+    expect(within(approval).queryByRole("button", { name: "Permitir" })).not.toBeInTheDocument();
+    expect(onResolve).not.toHaveBeenCalled();
   });
 
   it("keeps activity and Review inspectable in read-only mode without approval mutations", () => {

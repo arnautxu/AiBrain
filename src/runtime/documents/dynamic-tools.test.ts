@@ -10,11 +10,15 @@ import type { ResolvedPermissions } from "@/permissions";
 import { persistGeneratedImageArtifact } from "@/runtime/generated-image-artifacts";
 import {
   AIBRAIN_DOCUMENT_TOOL_NAMESPACE,
+  DOCUMENT_DYNAMIC_TOOLS,
   handleLocalDocumentDynamicToolCall,
   type LocalDocumentDynamicToolContext,
 } from "@/runtime/documents/dynamic-tools";
 import { generatedPngFixture } from "../../../tests/helpers/png-fixture";
 import template from "./templates/arnall-schedule.json";
+import { createAttachmentReviewer } from "./attachment-review";
+import type { ResolvedTurnDocument } from "@/documents/turn-attachments";
+import type { DocumentPreview } from "@/documents/preview-service";
 
 vi.mock("server-only", () => ({}));
 
@@ -27,6 +31,85 @@ const MESSAGE_ID = "30000000-0000-4000-8000-000000000001";
 const PREVIOUS_MESSAGE_ID = "30000000-0000-4000-8000-000000000003";
 const OTHER_THREAD_ID = "30000000-0000-4000-8000-000000000004";
 const roots: string[] = [];
+
+describe("read-only original attachment inspection", () => {
+  it("blocks report creation without effects until every original page has been supplied, then allows the same call", async () => {
+    const c = await context(USER_A);
+    const inspectAttachment = createAttachmentReviewer({
+      documents: [{ document: { kind: "pdf", fileName: "source.pdf", threadId: "source-thread", uploadId: "source-upload", sha256: "a".repeat(64) }, codexInputs: [] } as unknown as ResolvedTurnDocument],
+      previews: { read: async () => ({ sourceSha256: "a".repeat(64), files: ["document.pdf"], pages: 3 } as DocumentPreview), renderPage: async () => generatedPngFixture() },
+    });
+    const ctx = { ...c, inspectAttachment,
+      assertAttachmentReviewComplete: () => inspectAttachment.assertComplete(),
+      permissions: { ...c.permissions, rules: [...c.permissions.rules, { ...c.permissions.rules[0]!, ruleId: "documents.read", action: "consult" as const }] },
+    };
+    const inspect = (page: number) => ({ ...request(`page-${page}`, "pdf"), tool: "inspect_attachment", arguments: { fileName: "source.pdf", page } });
+    expect((await handleLocalDocumentDynamicToolCall(inspect(1), ctx)).response.success).toBe(true);
+    const blocked = await handleLocalDocumentDynamicToolCall(request("review-report", "pdf"), ctx);
+    expect(blocked.response.success).toBe(false);
+    expect(blocked.artifacts).toEqual([]);
+    expect(JSON.parse((blocked.response.contentItems[0] as { text: string }).text)).toMatchObject({ code: "ATTACHMENT_REVIEW_INCOMPLETE", coverage: { complete: false } });
+    expect(await readdir(c.receiptRoot)).toEqual([]);
+    for (const page of [2, 3]) expect((await handleLocalDocumentDynamicToolCall(inspect(page), ctx)).response.success).toBe(true);
+    const completed = await handleLocalDocumentDynamicToolCall(request("review-report", "pdf"), ctx);
+    expect(completed.response.success).toBe(true);
+    expect(completed.artifacts).toHaveLength(1);
+  });
+  it("guards batch and delivery before publishing, but permits an explicitly partial report with coverage", async () => {
+    const c = await context(USER_A);
+    const make = (partial = false) => createAttachmentReviewer({ partial,
+      documents: [{ document: { kind: "pdf", fileName: "source.pdf", threadId: "source-thread", uploadId: "source-upload", sha256: "a".repeat(64) }, codexInputs: [] } as unknown as ResolvedTurnDocument],
+      previews: { read: async () => ({ sourceSha256: "a".repeat(64), files: ["document.pdf"], pages: 2 } as DocumentPreview), renderPage: async () => generatedPngFixture() },
+    });
+    const review = make(); await review("source.pdf", 1);
+    const ctx = { ...c, assertAttachmentReviewComplete: () => review.assertComplete() };
+    const batch = await handleLocalDocumentDynamicToolCall(batchRequest(), ctx);
+    expect(batch.response.success).toBe(false); expect(batch.artifacts).toEqual([]);
+    expect(await readdir(c.receiptRoot)).toEqual([]);
+    const generated = await generateLocalDocument({ format: "pdf", title: "Partial source review", content: "Observed page only." });
+    await mkdir(path.join(c.projectWorkspace, "documents"));
+    await writeFile(path.join(c.projectWorkspace, "documents/authored.pdf"), generated.data);
+    const delivery = await handleLocalDocumentDynamicToolCall({ ...request("deliver-review", "pdf"), tool: "deliver", arguments: { relativePath: "documents/authored.pdf" } }, ctx);
+    expect(delivery.response.success).toBe(false); expect(delivery.artifacts).toEqual([]);
+    const partial = make(true); await partial("source.pdf", 1);
+    const result = await handleLocalDocumentDynamicToolCall(request("partial-review", "pdf"), { ...c,
+      assertAttachmentReviewComplete: () => partial.assertComplete(), attachmentReviewCoverage: () => partial.coverage(), attachmentReviewNotice: () => partial.finalText(""),
+    });
+    expect(result.response.success).toBe(true);
+    expect(JSON.parse((result.response.contentItems[0] as { text: string }).text)).toMatchObject({ attachmentReview: { scope: "partial", complete: false, documents: [{ suppliedPages: [1], pendingPages: [2] }] } });
+    expect(partial.coverage()).toMatchObject({ scope: "partial", complete: false });
+    const bytes = await readFile(path.join(c.projectWorkspace, "documents/resultado.pdf"));
+    expect((await PDFDocument.load(bytes)).getPageCount()).toBeGreaterThan(0);
+    expect(partial.finalText("Reviewed all original pages.")).toContain("Revisión parcial solicitada");
+    const repeated = await handleLocalDocumentDynamicToolCall(request("partial-review", "pdf"), { ...c,
+      assertAttachmentReviewComplete: () => partial.assertComplete(), attachmentReviewCoverage: () => partial.coverage(), attachmentReviewNotice: () => partial.finalText(""),
+    });
+    expect(repeated.response.success).toBe(true);
+    expect(repeated.artifacts[0].id).toBe(result.artifacts[0].id);
+  });
+
+  const inspection = () => ({ ...request("inspect-original", "pdf"), tool:"inspect_attachment", arguments:{fileName:"original.pdf",page:5} });
+  it("allows authorized attachment consultation without granting document creation or commands", async () => {
+    const c=await context(USER_A);
+    const inspectAttachment=vi.fn().mockResolvedValue({png:generatedPngFixture(),fileName:"original.pdf",page:5,pages:5,sourceSha256:"a".repeat(64)});
+    const readOnly={...c,inspectAttachment,permissions:{...c.permissions,rules:[...permissions(USER_A,"deny").rules,{...c.permissions.rules[0]!,ruleId:"documents.read",action:"consult" as const,effect:"allow" as const}]}};
+    const result=await handleLocalDocumentDynamicToolCall(inspection(),readOnly);
+    expect(result.response.success).toBe(true);expect(result.artifacts).toEqual([]);
+    expect(inspectAttachment).toHaveBeenCalledWith("original.pdf",5);
+    expect(result.response.contentItems.some(i=>i.type==="inputImage")).toBe(true);
+    expect((await handleLocalDocumentDynamicToolCall(request("no-create","pdf"),readOnly)).response.success).toBe(false);
+  });
+  it("rejects explicit read denial, extra identity fields and foreign turn ownership before inspection", async () => {
+    const c=await context(USER_A);const inspectAttachment=vi.fn();
+    const rule={...c.permissions.rules[0]!,ruleId:"documents.read",action:"consult" as const,effect:"allow" as const};
+    const permitted={...c,inspectAttachment,permissions:{...c.permissions,rules:[rule]}};
+    const denied={...permitted,permissions:{...c.permissions,rules:[rule,{...rule,effect:"deny" as const}]}};
+    expect((await handleLocalDocumentDynamicToolCall(inspection(),denied)).response.success).toBe(false);
+    expect((await handleLocalDocumentDynamicToolCall({...inspection(),arguments:{...inspection().arguments,threadId:OTHER_THREAD_ID}},permitted)).response.success).toBe(false);
+    expect((await handleLocalDocumentDynamicToolCall({...inspection(),threadId:"foreign-runtime"},permitted)).response.success).toBe(false);
+    expect(inspectAttachment).not.toHaveBeenCalled();
+  });
+});
 
 afterEach(async () => {
   vi.unstubAllGlobals();
@@ -135,6 +218,18 @@ function batchRequest(callId = "hello-world-batch") {
 }
 
 describe("local document dynamic tool", () => {
+  it("declares unique document functions and keeps the richer schedule contract", () => {
+    for (const namespace of DOCUMENT_DYNAMIC_TOOLS) {
+      if (namespace.type !== "namespace") throw Error("document namespace missing");
+      expect(new Set(namespace.tools.map(tool => tool.name)).size).toBe(namespace.tools.length);
+      const schedule = namespace.tools.filter(tool => tool.name === "create_arnall_schedule");
+      expect(schedule).toHaveLength(1);
+      expect(schedule[0].inputSchema).toMatchObject({ properties: { people: { items: { properties: {
+        maxWeeklyHours: { type: "number", minimum: 0, maximum: 40 },
+      } } } } });
+    }
+  });
+
   it("attaches a fictional Arnall schedule in the original template without business records", async () => {
     const base = await context(USER_A);
     const ctx = { ...base, installation: { ...base.installation, companySlug: "arnall" } };
@@ -166,6 +261,18 @@ describe("local document dynamic tool", () => {
     } }, ctx);
     expect(wrongHours.response.success).toBe(false);
     expect(wrongHours.artifacts).toHaveLength(0);
+    const reducedWeek = await handleLocalDocumentDynamicToolCall({ ...params, callId: "fictional-reduced-week", arguments: {
+      ...params.arguments, fileName: "horari-reduced.xlsx",
+      people: [{ ...params.arguments.people[0], maxWeeklyHours: 16 }],
+    } }, ctx);
+    expect(reducedWeek.response.success).toBe(false);
+    expect(reducedWeek.artifacts).toHaveLength(0);
+    const validReducedWeek = await handleLocalDocumentDynamicToolCall({ ...params, callId: "fictional-valid-reduced-week", arguments: {
+      ...params.arguments, fileName: "horari-reduced.xlsx",
+      people: [{ ...params.arguments.people[0], maxWeeklyHours: 20 }],
+    } }, ctx);
+    expect(validReducedWeek.response.success).toBe(true);
+    expect(validReducedWeek.artifacts).toHaveLength(1);
     const zip = await JSZip.loadAsync(await readFile(path.join(ctx.projectWorkspace, "documents/horari-demo.xlsx")));
     const sheet = await zip.file("xl/worksheets/sheet1.xml")!.async("text");
     expect(sheet).toContain("Botiga Demo");

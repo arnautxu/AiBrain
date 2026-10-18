@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { ClientNotification } from "../../../contracts/codex/0.153.4/types/ClientNotification";
-import type { ClientRequest } from "../../../contracts/codex/0.153.4/types/ClientRequest";
-import type { ServerNotification } from "../../../contracts/codex/0.153.4/types/ServerNotification";
-import type { ServerRequest } from "../../../contracts/codex/0.153.4/types/ServerRequest";
+import type { ClientNotification } from "../../../contracts/codex/0.162.1/types/ClientNotification";
+import type { ClientRequest } from "../../../contracts/codex/0.162.1/types/ClientRequest";
+import type { ServerNotification } from "../../../contracts/codex/0.162.1/types/ServerNotification";
+import type { ServerRequest } from "../../../contracts/codex/0.162.1/types/ServerRequest";
 import type {
   AppServerEvent,
   AppServerTransport,
@@ -62,6 +62,22 @@ export class AppServerRequestTimeoutError extends Error {
   }
 }
 
+/** A correlated remote response, distinct from transport/initialization failures. */
+export class AppServerRpcResponseError extends Error {
+  readonly code: number;
+  readonly data?: JsonValue;
+  constructor(
+    readonly method: ClientRequest["method"],
+    readonly requestId: string | number,
+    error: JsonRpcFailure["error"],
+  ) {
+    super(error.message);
+    this.name = "AppServerRpcResponseError";
+    this.code = error.code;
+    if (error.data !== undefined) this.data = error.data;
+  }
+}
+
 export type AppServerTurnHandlers = {
   onNotification(notification: ServerNotification, event: AppServerEvent): void | Promise<void>;
   onServerRequest(request: ServerRequest, event: AppServerEvent): JsonValue | Promise<JsonValue>;
@@ -117,13 +133,6 @@ function serverResponseClientRequestId(event: AppServerEvent, request: ServerReq
     ? createHash("sha256").update(JSON.stringify([scope.threadId, scope.turnId])).digest("hex")
     : "unscoped";
   return `server-response:${event.eventId}:${scopeDigest}`;
-}
-
-function responseError(response: JsonRpcFailure) {
-  const error = new Error(response.error.message) as Error & { code?: number; data?: JsonValue };
-  error.code = response.error.code;
-  if (response.error.data !== undefined) error.data = response.error.data;
-  return error;
 }
 
 /**
@@ -487,7 +496,7 @@ export class AppServerRpcRouter {
         this.timedOut.delete(response.id);
       }
       if ("error" in response) {
-        const error = responseError(response);
+        const error = new AppServerRpcResponseError(request.method, response.id, response.error);
         if (pending) {
           clearTimeout(pending.timeout);
           this.pending.delete(response.id);

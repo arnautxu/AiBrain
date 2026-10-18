@@ -127,6 +127,7 @@ export function isSettingsSnapshot(value: unknown): value is SettingsSnapshot {
       typeof item.label === "string" && typeof item.effectiveEnabled === "boolean") &&
     value.connectors.every((item) => isRecord(item) && typeof item.id === "string" && typeof item.label === "string" &&
       ["connected", "requires_login", "admin_setup_required", "unavailable"].includes(String(item.status)) &&
+      (item.connectionMethod === undefined || item.connectionMethod === "password") &&
       (item.connectUrl === null || typeof item.connectUrl === "string") && (item.disconnectUrl === null || typeof item.disconnectUrl === "string")) &&
     value.memory.enabled === true && value.memory.confirmationRequired === false && value.memory.provenanceVisible === true &&
     value.memory.employeeRuntimeIsolated === true && value.memory.sharedComputerHistory === false && Array.isArray(value.memory.scopes) &&

@@ -45,7 +45,7 @@ require_secret AIBRAIN_MAINTENANCE_SECRET
 require_value NEXT_PUBLIC_SUPABASE_URL
 require_value NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 require_value AIBRAIN_CHROME_EXPECTED_VERSION
-[ "${AIBRAIN_CODEX_EXPECTED_VERSION:-}" = 0.153.4 ] || fail "AIBRAIN_CODEX_EXPECTED_VERSION must be the contract-pinned version 0.153.4"
+[ "${AIBRAIN_CODEX_EXPECTED_VERSION:-}" = 0.162.1 ] || fail "AIBRAIN_CODEX_EXPECTED_VERSION must be the contract-pinned version 0.162.1"
 
 node -e '
   const value = process.env.NEXT_PUBLIC_SUPABASE_URL;

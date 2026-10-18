@@ -148,7 +148,7 @@ export function WorkspaceFilePreview({ projectId, file }: { projectId: string; f
                 {preview.content !== null ? (
                   <button type="button" className="touch-target flex min-h-7 items-center gap-1.5 rounded-md px-2 font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => void copyContent()}>{copied ? <Check size={12} /> : <Copy size={12} />}{copied ? t("Copiado") : t("Copiar")}</button>
                 ) : null}
-                <a href={preview.downloadUrl} download={preview.name} className="touch-target grid size-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" aria-label={`Descargar ${preview.name}`} title={t("Descargar original para abrir o editar en escritorio")}><DownloadSimple size={13} /></a>
+                <a href={preview.downloadUrl} download={preview.name} className="touch-target grid size-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" aria-label={t("Descargar {nombre}", { nombre: preview.name })} title={t("Descargar original para abrir o editar en escritorio")}><DownloadSimple size={13} /></a>
                 <button type="button" className="touch-target grid size-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" aria-label={t("Actualizar la vista previa de {p0}", { p0: file.path })} onClick={() => void loadPreview()}><ArrowClockwise size={13} /></button>
               </header>
               {preview.kind === "text" && preview.content !== null ? (

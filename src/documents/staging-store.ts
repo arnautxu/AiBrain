@@ -53,7 +53,7 @@ const baseStagedDocumentSchema = defineVersionedSchema<Omit<StagedDocument, "leg
         maxLength: 500,
         pattern: /^threads\/[0-9a-f-]+\/uploads\/[0-9a-f-]+\/[^/\\]+$/i,
       }),
-      kind: expectOneOf(record.kind, ["docx", "xlsx", "xls", "pptx", "pdf", "text", "image"] as const, context.at("kind")),
+      kind: expectOneOf(record.kind, ["docx", "xlsx", "xls", "pptx", "pdf", "text", "image", "audio"] as const, context.at("kind")),
       mediaType: expectString(record.mediaType, context.at("mediaType"), { minLength: 1, maxLength: 180 }),
       size: expectInteger(record.size, context.at("size"), { minimum: 1, maximum: 50 * 1024 * 1024 }),
       sha256: expectString(record.sha256, context.at("sha256"), { pattern: SHA256 }),

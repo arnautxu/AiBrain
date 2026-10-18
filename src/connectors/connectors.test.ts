@@ -2,6 +2,9 @@ import { mkdtemp, mkdir, readFile, rm, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+vi.mock("server-only", () => ({}));
+import type { AuthSession } from "@/auth/types";
+import { createInteractiveChatAuthorization } from "@/runtime/interactive-chat-authorization";
 import {
   ConnectorError,
   ConnectorRegistry,
@@ -415,8 +418,108 @@ describe("Codex managed App action", () => {
       itemId: "item-connector-action",
       approvalId: "approval-connector-action",
     };
-    return { action, approvals, authorizations, locator, request, dataRoot };
+    return { action, approvals, authorizations, locator, request, dataRoot, bindings: store };
   }
+
+  function chatContext() {
+    const identity = { installationId: INSTALLATION_ID, userId: USER_ONE,
+      threadId: "chat-thread", turnId: "chat-turn" };
+    const userMessageId = "chat-message", message = "Run the configured export sync";
+    const controller = new AbortController();
+    const authorization = createInteractiveChatAuthorization({ ...identity, userMessageId, message,
+      session: { tenant: { id: INSTALLATION_ID }, user: { id: USER_ONE },
+        expiresAt: new Date(Date.now() + 3600000).toISOString() } as AuthSession,
+      signal: controller.signal, backgroundExecution: false, mode: "agent", localTurnId: "local-turn",
+      permissions: { installationId: INSTALLATION_ID, userId: USER_ONE, turnId: "local-turn", fingerprint: SHA_A,
+        rules: [{ ruleId: "tools.execute", action: "execute", effect: "allow", instruction: "Execute requested tools",
+          sourceScope: "installation", sourcePolicyVersion: 1, precedence: 0 }] },
+    })!;
+    return { authorization, threadId: identity.threadId, turnId: identity.turnId, userMessageId, message, controller };
+  }
+
+  it("executes the authenticated chat request once without a visible approval item and replays its durable result", async () => {
+    const { action, approvals, request } = await actionFixture();
+    const context = chatContext();
+    const result = await action.executeFromChat(context);
+    expect(result).toMatchObject({ outcome: "executed", value: { correlation: "execution-1" } });
+    expect(await approvals.read(result.record!)).toBeNull();
+    expect(await approvals.readEvents()).toHaveLength(0);
+    await expect(action.executeFromChat(context)).resolves.toMatchObject({ outcome: "replayed" });
+    expect(request).toHaveBeenCalledTimes(4);
+  });
+
+  it("rejects copied authority, changed actor/turn/message/policy and cancellation before provider access", async () => {
+    const { action, request } = await actionFixture();
+    const context = chatContext();
+    for (const patch of [{ authorization: undefined }, { authorization: { ...context.authorization } },
+      { threadId: "foreign" }, { turnId: "foreign" }, { userMessageId: "foreign" }, { message: "Different action" }]) {
+      await expect(action.executeFromChat({ ...context, ...patch })).rejects.toThrow();
+    }
+    context.controller.abort();
+    await expect(action.executeFromChat(context)).rejects.toThrow("INTERACTIVE_CHAT_REQUIRED");
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("refuses changed allowlist and policy when recovering the same chat action", async () => {
+    const f = await actionFixture();
+    const context = chatContext();
+    await f.action.executeFromChat(context);
+    for (const [actionConfig, policy] of [[{ ...config, arguments: { mode: "changed" } }, SHA_A], [config, SHA_B]] as const) {
+      const changed = new CodexManagedAppAction(f.bindings, f.authorizations, f.approvals, principal(), actionConfig,
+        async () => ({ request: f.request } as never), policy, SHA_B);
+      await expect(changed.executeFromChat(context)).rejects.toMatchObject({ code: "CODEX_APP_CHAT_AUTHORITY_MISMATCH" });
+    }
+    expect(f.request).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not dispatch a chat action with missing scopes or another user's binding", async () => {
+    for (const binding of [{ userId: USER_TWO }, { scopes: [CODEX_MANAGED_APP_READ_SCOPE] }]) {
+      const f = await actionFixture({ binding });
+      await expect(f.action.executeFromChat(chatContext())).rejects.toThrow();
+      expect(f.request.mock.calls.some(([, params]) => (params as { tool?: string }).tool)).toBe(false);
+    }
+  });
+
+  it("preserves indeterminate chat readback durably without repeating the side effect", async () => {
+    const f = await actionFixture({ responses: [
+      { apps: [{ id: "app-arnall-files", enabled: true, callable: true }] },
+      { apps: [{ id: "app-arnall-files", enabled: true, callable: true }] },
+      { structuredContent: { executionId: "chat-execution" } },
+      { structuredContent: { executionId: "different-execution" } },
+    ] });
+    const context = chatContext();
+    await expect(f.action.executeFromChat(context)).resolves.toMatchObject({ outcome: "indeterminate" });
+    await expect(f.action.executeFromChat(context)).resolves.toMatchObject({ outcome: "indeterminate" });
+    expect(f.request).toHaveBeenCalledTimes(4);
+  });
+
+  it("rechecks cancellation after acquiring the dispatch transport", async () => {
+    const f = await actionFixture();
+    const context = chatContext();
+    let transportAcquisitions = 0;
+    const action = new CodexManagedAppAction(f.bindings, f.authorizations, f.approvals, principal(), config,
+      async () => {
+        if (++transportAcquisitions === 3) context.controller.abort();
+        return { request: f.request } as never;
+      }, SHA_A, SHA_B);
+    await expect(action.executeFromChat(context)).resolves.toMatchObject({ outcome: "indeterminate" });
+    expect(f.request).toHaveBeenCalledTimes(2);
+    expect(f.request.mock.calls.some(([, params]) => (params as { tool?: string }).tool)).toBe(false);
+  });
+
+  it("dispatches at most once when duplicate chat tools race", async () => {
+    const f = await actionFixture({ responses: [
+      { apps: [{ id: "app-arnall-files", enabled: true, callable: true }] },
+      { apps: [{ id: "app-arnall-files", enabled: true, callable: true }] },
+      { apps: [{ id: "app-arnall-files", enabled: true, callable: true }] },
+      { structuredContent: { executionId: "raced" } },
+      { structuredContent: { executionId: "raced" } },
+    ] });
+    const context = chatContext();
+    const results = await Promise.allSettled([f.action.executeFromChat(context), f.action.executeFromChat(context)]);
+    expect(results.some(result => result.status === "fulfilled" && result.value.outcome === "executed")).toBe(true);
+    expect(f.request.mock.calls.filter(([, params]) => (params as { tool?: string }).tool === "sync-confirmed-export")).toHaveLength(1);
+  });
 
   it("runs the approved fixed action once and returns its durable readback without replaying the side effect", async () => {
     const { action, approvals, locator, request } = await actionFixture();

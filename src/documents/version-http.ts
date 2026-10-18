@@ -3,7 +3,7 @@ import type { StoredDocumentVersion, VersionedDocument } from "@/documents/versi
 import { quotedDocumentEtag } from "@/documents/version-store";
 
 export function versionPreviewFile(version: StoredDocumentVersion) {
-  if (version.kind === "text") return "preview.txt";
+  if (version.kind === "text" || version.kind === "audio") return "preview.txt";
   if (version.kind === "image") return `preview${path.extname(version.fileName).toLowerCase()}`;
   return "document.pdf";
 }

@@ -60,8 +60,9 @@ export async function codexManagedAppCapabilities(
   return registry.capabilities(principal, { allowSharedCredentials: false });
 }
 
-/** Server-only construction point consumed by the action API and future Auth receipt handoff. */
-export async function codexManagedAppActionForSession(session: AuthSession) {
+/** Server-only construction for legacy HTTP receipts and authenticated chat.
+ * The chat runner passes its current immutable permission fingerprint. */
+export async function codexManagedAppActionForSession(session: AuthSession, turn?: { permissionFingerprint: string }) {
   const { installation, workspacePolicy, principal } = await connectorContext(session);
   const config = installation.connectors?.codexManagedAppAction;
   if (!config) {
@@ -72,6 +73,9 @@ export async function codexManagedAppActionForSession(session: AuthSession) {
   }
   if (!(await catalogRuntimeEnforcer(installation.installationId, session.user.id)).allowsConnector(CODEX_MANAGED_APP_CONNECTOR_ID)) {
     throw new ConnectorError("CODEX_APP_ACTION_CATALOG_DENIED", "This connector is not assigned to the authenticated user.");
+  }
+  if (turn && !/^[a-f0-9]{64}$/.test(turn.permissionFingerprint)) {
+    throw new ConnectorError("CODEX_APP_ACTION_PERMISSION_DENIED", "Turn permission fingerprint is invalid.");
   }
   const transportForUser = async (userId: string) => catalogTransportForUser(installation.installationId, userId);
   return new CodexManagedAppAction(
@@ -85,7 +89,7 @@ export async function codexManagedAppActionForSession(session: AuthSession) {
     principal,
     config,
     transportForUser,
-    connectorFingerprint({ roleId: workspacePolicy.roleId, execute: workspacePolicy.policy.capabilities.execute }),
+    turn?.permissionFingerprint ?? connectorFingerprint({ roleId: workspacePolicy.roleId, execute: workspacePolicy.policy.capabilities.execute }),
     connectorFingerprint(workspacePolicy.policy),
   );
 }

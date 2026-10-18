@@ -7,7 +7,7 @@ import type { InstallationConfig } from "@/config/installation-schema";
 import { ResourceLockManager } from "@/storage";
 import { buildWorkerLaunchContext, deriveWorkerRoots } from "./provisioner";
 import { stopOwnedWorkerProcess } from "./owned-process";
-import type { ChatgptAuthTokensRefreshResponse } from "../../../contracts/codex/0.153.4/types/v2/ChatgptAuthTokensRefreshResponse";
+import type { ChatgptAuthTokensRefreshResponse } from "../../../contracts/codex/0.162.1/types/v2/ChatgptAuthTokensRefreshResponse";
 
 export type SharedAuthTokens = ChatgptAuthTokensRefreshResponse;
 export type SharedAuthProvider = (previousAccountId?: string | null, rejectedAccessToken?: string) => Promise<SharedAuthTokens>;

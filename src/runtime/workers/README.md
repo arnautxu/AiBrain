@@ -16,6 +16,18 @@ and refuses a runtime or transport object ever returned for another start.
 Durable roots survive a Node restart; the injected factory is responsible for
 reattaching or starting the pinned Codex App Server and browser services.
 
+Before reusing a cached handle, the registry checks its controller generation.
+A confirmed `failed` or `stopped` controller is retired and replaced for that
+employee only, after both process and transport cleanup succeed. Concurrent
+requests join the same recovery; explicit stop, close and maintenance fencing
+prevent a replacement from starting. Transient transport reconnects, nonterminal
+degradation and unavailable health checks never justify replacing an active
+generation. Cleanup failure retains ownership until explicit cleanup succeeds.
+Recovery reuses the employee's durable roots and journals; it does not replay
+accepted RPCs or approve a pending connector effect. Local regression includes
+a killed child process with another employee still active. Publication,
+installation rollout and authenticated live acceptance are separate gates.
+
 Security boundaries:
 
 - User IDs are canonical lowercase UUIDs; worker-owned relative paths reject

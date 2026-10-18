@@ -1,7 +1,9 @@
 "use client";
+
 import { useUiText } from "@/i18n/provider";
 import { CompanyMailConnectionForm } from "@/components/company-mail-connection-form";
 import { ConnectorLogo } from "@/components/connector-logo";
+import { MailConnectionCard } from "@/components/mail-connection-card";
 import { connectorPresentation } from "@/connectors/presentation";
 
 import { Archive, Bell, Brain, PaintBrush, Plugs, X } from "@phosphor-icons/react";
@@ -40,7 +42,13 @@ function Toggle({ label, checked, disabled = false, onChange }: { label: string;
 export function CustomizationPanel({ productName, open, initialTab = "appearance", projects = [], threads = [], archiveBusy = false, onRestoreProject, onRestoreThread, onSettingsSnapshot, activeProjectId = null, returnFocusRef, onClose }: Props) {
   const t = useUiText();
   const panelRef = useModalFocus(open, onClose, undefined, returnFocusRef);
-  const [tab, setTab] = useState<Tab>(initialTab);
+  const [navigation, setNavigation] = useState({ open, initialTab, tab: initialTab });
+  // A deep link can arrive after hydration; apply each new opening without resetting tab clicks.
+  if (navigation.open !== open || navigation.initialTab !== initialTab) {
+    setNavigation({ open, initialTab, tab: open ? initialTab : navigation.tab });
+  }
+  const tab = navigation.tab;
+  const setTab = (next: Tab) => setNavigation(current => ({ ...current, tab: next }));
   const [settings, setSettings] = useState<SettingsSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
@@ -90,9 +98,9 @@ export function CustomizationPanel({ productName, open, initialTab = "appearance
       {(surfaceMotion) => <>
         <button className="absolute inset-0" aria-label={t("Cerrar configuración")} onClick={onClose} />
         <motion.section {...surfaceMotion} ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("Configuración de {p0}", { p0: productName })} className="workspace-panel relative flex h-full w-full max-w-[840px] flex-col overflow-hidden border border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-lg)] md:h-[min(680px,calc(100dvh-3rem))] md:rounded-[22px]">
-          <header className="workspace-panel-header flex shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5"><div><h2 className="workspace-panel-title">{t("Configuración")}</h2><p className="workspace-panel-subtitle mt-0.5 hidden sm:block">{t("Tu apariencia, avisos y elementos archivados.")}</p></div><button type="button" aria-label={t("Cerrar")} className="grid size-10 place-items-center rounded-full text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={onClose}><X size={17} /></button></header>
+          <header className="workspace-panel-header flex shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5"><div><h2 className="workspace-panel-title">{t("Configuración")}</h2><p className="workspace-panel-subtitle mt-0.5 hidden sm:block">{t("Tu apariencia, conexiones, avisos y elementos archivados.")}</p></div><button type="button" aria-label={t("Cerrar")} className="grid size-10 place-items-center rounded-full text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={onClose}><X size={17} /></button></header>
           <div className="flex min-h-0 flex-1 flex-col md:flex-row"><nav aria-label={t("Secciones de configuración")} className="flex shrink-0 gap-1 overflow-x-auto border-b border-[var(--border-subtle)] p-2 md:w-52 md:flex-col md:border-b-0 md:border-r md:p-3">{tabs.map((item) => <button key={item.id} type="button" aria-current={tab === item.id ? "page" : undefined} className={`flex min-h-10 shrink-0 items-center gap-2.5 rounded-[12px] px-3 text-left text-[12px] font-medium ${tab === item.id ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"}`} onClick={() => setTab(item.id)}>{item.icon}{item.label}</button>)}</nav>
-            <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8">{error ? <div className="mb-5 flex items-center justify-between gap-3 rounded-[12px] border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2 text-[11px] text-[var(--danger)]"><p role="alert">{t(error)}</p>{!settings ? <button type="button" className="shrink-0 rounded-lg border border-current px-3 py-2 font-semibold hover:bg-[var(--surface-hover)]" onClick={retryLoad}>{t("Reintentar")}</button> : null}</div> : null}{loading && !settings ? <p className="text-[12px] text-[var(--text-subtle)]">{t("Cargando configuración…")}</p> : null}{tab === "appearance" ? <Appearance /> : null}{tab === "connectors" ? <Connectors settings={settings} onChanged={retryLoad} /> : null}{tab === "memory" ? <MemorySettings productName={productName} settings={settings} projectId={activeProjectId} /> : null}{tab === "notifications" ? <Notifications settings={settings} busy={savingKey === "notifications"} onSave={save} /> : null}{tab === "archived" ? <Archived projects={projects} threads={threads} busy={archiveBusy} onRestoreProject={onRestoreProject} onRestoreThread={onRestoreThread} /> : null}</div>
+            <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8">{error ? <div className="mb-5 flex items-center justify-between gap-3 rounded-[12px] border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2 text-[11px] text-[var(--danger)]"><p role="alert">{t(error)}</p>{!settings ? <button type="button" className="shrink-0 rounded-lg border border-current px-3 py-2 font-semibold hover:bg-[var(--surface-hover)]" onClick={retryLoad}>{t("Reintentar")}</button> : null}</div> : null}{loading && !settings ? <p className="text-[12px] text-[var(--text-subtle)]">{t("Cargando configuración…")}</p> : null}{tab === "appearance" ? <Appearance /> : null}{tab === "connectors" ? <Connectors projectId={activeProjectId} settings={settings} onChanged={retryLoad} /> : null}{tab === "memory" ? <MemorySettings productName={productName} settings={settings} projectId={activeProjectId} /> : null}{tab === "notifications" ? <Notifications settings={settings} busy={savingKey === "notifications"} onSave={save} /> : null}{tab === "archived" ? <Archived projects={projects} threads={threads} busy={archiveBusy} onRestoreProject={onRestoreProject} onRestoreThread={onRestoreThread} /> : null}</div>
           </div>
         </motion.section>
       </>}
@@ -106,10 +114,10 @@ const subscribeConnectorCallback = () => () => undefined;
 function requestedMailConnection() { return new URLSearchParams(window.location.search).get("connect") === "company-mail"; }
 function connectorCallbackStatus() {
   const params = new URLSearchParams(window.location.search);
-  if (params.get("connection") === "failed" || [params.get("gmail"), params.get("outlook")].some(status => status === "failed" || status === "denied")) return "failed";
-  return params.get("connection") === "verified" ? "returned" : "none";
+  if (params.get("connection") === "failed" || [params.get("gmail"), params.get("outlook"), params.get("shopify"), params.get("shopify_themes")].some(status => status === "failed" || status === "denied")) return "failed";
+  return params.get("connection") === "verified" || [params.get("shopify"), params.get("shopify_themes")].includes("connected") ? "returned" : "none";
 }
-function Connectors({ settings, onChanged }: { settings: SettingsSnapshot | null; onChanged: () => void }) {
+function Connectors({ settings, projectId, onChanged }: { settings: SettingsSnapshot | null; projectId: string | null; onChanged: () => void }) {
   const t = useUiText();
   const requestedMail = useSyncExternalStore(subscribeConnectorCallback, requestedMailConnection, () => false);
   const [mailFormOpen, setMailFormOpen] = useState<boolean | null>(null);
@@ -117,27 +125,29 @@ function Connectors({ settings, onChanged }: { settings: SettingsSnapshot | null
   const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null);
   const disconnect = async (url: string) => { setBusy(true); setError(null); try { const response = await fetch(url, { method: "POST" }); const body: unknown = await response.json().catch(() => null); if (!response.ok) throw new Error(body && typeof body === "object" && "error" in body && typeof body.error === "string" ? body.error : t("No se ha podido desconectar.")); if (body && typeof body === "object" && "providerRevoked" in body && body.providerRevoked === false) setError(t("Acceso local desconectado. La revocación en el proveedor sigue pendiente; reintenta Desconectar.")); onChanged(); } catch (cause) { setError(cause instanceof Error ? cause.message : t("No se ha podido desconectar.")); } finally { setBusy(false); } };
   const [query, setQuery] = useState("");
-  const matches = settings?.connectors.filter(c => `${c.label} ${connectorPresentation(c.id).description}`.toLocaleLowerCase("es").includes(query.toLocaleLowerCase("es"))) ?? [];
+  const matches = settings?.connectors.filter(c => `${c.label} ${t(connectorPresentation(c.id).description)}`.toLocaleLowerCase("es").includes(query.toLocaleLowerCase("es"))) ?? [];
   const connected = matches.filter(c => c.status === "connected");
   const available = matches.filter(c => c.status !== "connected");
-  const row = (connector: NonNullable<SettingsSnapshot>["connectors"][number]) => <article key={connector.id} className="flex min-h-20 items-center gap-3 border-b border-[var(--border-subtle)] px-3 py-3 last:border-0">
+  const row = (connector: NonNullable<SettingsSnapshot>["connectors"][number]) => connector.connectionMethod === "password"
+    ? <MailConnectionCard key={connector.id} connector={connector} accountEmail={settings!.account.email} onChanged={onChanged} />
+    : <article key={connector.id} className="flex min-h-20 items-center gap-3 border-b border-[var(--border-subtle)] px-3 py-3 last:border-0">
     <ConnectorLogo id={connector.id} size={28} />
-    <div className="min-w-0 flex-1"><p className="text-[13px] font-medium">{connector.label}</p><p className="mt-1 text-[11px] leading-4 text-[var(--text-subtle)]">{connectorPresentation(connector.id).description}</p>{connector.status === "admin_setup_required" ? <p className="mt-1 text-[11px] text-[var(--text-subtle)]">{connector.statusDetail}</p> : null}{connector.accountEmail ? <p className="mt-1 truncate text-[11px] text-[var(--text-subtle)]">{connector.accountEmail}</p> : null}</div>
+    <div className="min-w-0 flex-1"><p className="text-[13px] font-medium">{connector.label}</p><p className="mt-1 text-[11px] leading-4 text-[var(--text-subtle)]">{t(connectorPresentation(connector.id).description)}</p>{connector.status !== "connected" && connector.statusDetail ? <p className="mt-1 text-[11px] text-[var(--text-subtle)]">{t(connector.statusDetail)}</p> : null}{connector.accountEmail ? <p className="mt-1 truncate text-[11px] text-[var(--text-subtle)]">{connector.accountEmail}</p> : null}</div>
     <div className="flex shrink-0 flex-col items-end gap-2">
-      {connector.status === "connected" ? <span className="text-[11px] font-medium text-[var(--positive)]">{t("Conectado")}</span> : connector.connectUrl ? connector.id === "company-mail" ? <button type="button" onClick={() => setMailFormOpen(true)} aria-label={`Conectar ${connector.label}`} className="rounded-full bg-[var(--brain-accent)] px-4 py-2 text-[11px] font-semibold text-[var(--brain-contrast)]">{t("Conectar")}</button> : <a aria-label={`Conectar ${connector.label}`} href={connector.connectUrl} className="rounded-full bg-[var(--brain-accent)] px-4 py-2 text-[11px] font-semibold text-[var(--brain-contrast)]">{t("Conectar")}</a> : <span className="text-[11px] text-[var(--text-subtle)]">{connector.status === "admin_setup_required" ? t("Falta configuración") : t("No disponible")}</span>}
-      {connector.disconnectUrl ? <button type="button" disabled={busy} aria-label={`Desconectar ${connector.label}`} onClick={() => void disconnect(connector.disconnectUrl!)} className="text-[10px] text-[var(--text-subtle)] underline underline-offset-2 disabled:opacity-50">{t("Desconectar")}</button> : null}
-      {connector.status === "connected" && connector.connectUrl ? connector.id === "company-mail" ? <button type="button" onClick={() => setMailFormOpen(true)} aria-label={`Reconectar ${connector.label}`} className="text-[10px] text-[var(--text-subtle)]">{t("Reconectar")}</button> : <a href={connector.connectUrl} aria-label={`Reconectar ${connector.label}`} className="text-[10px] text-[var(--text-subtle)]">{t("Reconectar")}</a> : null}
+      {connector.status === "connected" ? <span className="text-[11px] font-medium text-[var(--positive)]">{t("Conectado")}</span> : connector.connectUrl ? connector.id === "company-mail" ? <button type="button" onClick={() => setMailFormOpen(true)} aria-label={t("Conectar {p0}", { p0: connector.label })} className="rounded-full bg-[var(--brain-accent)] px-4 py-2 text-[11px] font-semibold text-[var(--brain-contrast)]">{t("Conectar")}</button> : <a aria-label={t("Conectar {p0}", { p0: connector.label })} href={connector.connectUrl} className="rounded-full bg-[var(--brain-accent)] px-4 py-2 text-[11px] font-semibold text-[var(--brain-contrast)]">{t("Conectar")}</a> : <span className="text-[11px] text-[var(--text-subtle)]">{connector.status === "admin_setup_required" ? t("Falta configuración") : t("No disponible")}</span>}
+      {connector.disconnectUrl ? <button type="button" disabled={busy} aria-label={t("Desconectar {p0}", { p0: connector.label })} onClick={() => void disconnect(connector.disconnectUrl!)} className="text-[10px] text-[var(--text-subtle)] underline underline-offset-2 disabled:opacity-50">{t("Desconectar")}</button> : null}
+      {connector.status === "connected" && connector.connectUrl ? connector.id === "company-mail" ? <button type="button" onClick={() => setMailFormOpen(true)} aria-label={t("Reconectar {p0}", { p0: connector.label })} className="text-[10px] text-[var(--text-subtle)]">{t("Reconectar")}</button> : <a href={connector.connectUrl} aria-label={t("Reconectar {p0}", { p0: connector.label })} className="text-[10px] text-[var(--text-subtle)]">{t("Reconectar")}</a> : null}
     </div>
   </article>;
   return <section><SectionTitle>{t("Conectores personales")}</SectionTitle>
     {callbackStatus === "failed" ? <p role="alert" className="mb-3 text-xs text-[var(--danger)]">{t("No se completó la conexión. Vuelve a intentarlo.")}</p> : callbackStatus === "returned" ? <p role="status" className="mb-3 text-xs text-[var(--text-subtle)]">{t("Consulta abajo el estado verificado de tus conexiones.")}</p> : null}
-    <p className="mb-4 text-[12px] leading-5 text-[var(--text-muted)]">{t("Conecta tus apps para usarlas con @ en tus conversaciones. Cada cuenta pertenece solo a tu usuario.")}</p>
+    <p className="mb-4 text-[12px] leading-5 text-[var(--text-muted)]">{t("Conecta tus apps y úsalas directamente en el chat. El asistente elige la conexión adecuada sin que tengas que seleccionarla. Las cuentas personales son privadas.")}</p>
     <input type="search" aria-label={t("Buscar apps")} placeholder={t("Buscar apps…")} value={query} onChange={event => setQuery(event.target.value)} className="mb-5 min-h-10 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[16px] outline-none focus:border-[var(--focus)] md:text-[13px]" />
     {(mailFormOpen ?? requestedMail) && settings?.connectors.some(c => c.id === "company-mail" && c.connectUrl) ? <CompanyMailConnectionForm onCancel={() => setMailFormOpen(false)} onConnected={() => { setMailFormOpen(false); onChanged(); }} /> : null}
     {connected.length ? <><h4 className="mb-2 text-[12px] font-semibold">{t("Conectadas")}</h4><div className="mb-5 overflow-hidden rounded-xl border border-[var(--border)]">{connected.map(row)}</div></> : null}
     {available.length ? <><h4 className="mb-2 text-[12px] font-semibold">{query ? t("Apps disponibles") : t("Sugeridas para tu empresa")}</h4><div className="overflow-hidden rounded-xl border border-[var(--border)]">{available.map(row)}</div></> : null}
     {settings && !matches.length ? <p className="text-[12px] text-[var(--text-subtle)]">{query ? t("No hay apps autorizadas que coincidan.") : t("No hay conexiones habilitadas para tu usuario.")}</p> : null}
-    <p className="mt-4 text-[11px] leading-4 text-[var(--text-subtle)]">{t("Catálogo autorizado para tu empresa y tus grupos. Acceso limitado a las herramientas de lectura revisadas.")}</p>
+    <p className="mt-4 text-[11px] leading-4 text-[var(--text-subtle)]">{t("Solo verás las apps autorizadas para tu cuenta.")}</p>
     {error ? <p role="alert" className="mt-3 text-[11px] text-[var(--danger)]">{t(error)}</p> : null}
   </section>;
 }

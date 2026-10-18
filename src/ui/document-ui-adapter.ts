@@ -1,7 +1,7 @@
 import type { ChatAttachment } from "@/lib/chat-contract";
 import { parseLegacyExcelProvenance, parseStoredLegacyExcelReceipt, type LegacyExcelProvenance, type StoredLegacyExcelReceipt } from "@/documents/legacy-excel-policy";
 
-export type DocumentUploadKind = "docx" | "xlsx" | "xls" | "pptx" | "pdf" | "text" | "image";
+export type DocumentUploadKind = "docx" | "xlsx" | "xls" | "pptx" | "pdf" | "text" | "image" | "audio";
 
 export type StagedComposerDocument = ChatAttachment & {
   uploadId: string;
@@ -40,7 +40,7 @@ type DocumentUploadResponse = {
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const KINDS = new Set<DocumentUploadKind>(["docx", "xlsx", "xls", "pptx", "pdf", "text", "image"]);
+const KINDS = new Set<DocumentUploadKind>(["docx", "xlsx", "xls", "pptx", "pdf", "text", "image", "audio"]);
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)

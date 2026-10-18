@@ -47,6 +47,7 @@ function installationConfigInput(brand: string) {
       ],
     },
     connectors: {
+      mail: { enabled: true, provider: "nominalia" },
       gmail: { enabled: true },
       outlook: { enabled: true },
       composio: { toolkits: [{ slug: "gmail", label: "Gmail", authConfigId: "ac_test",

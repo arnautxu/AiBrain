@@ -31,6 +31,12 @@ function documentErrorResponse(error: unknown) {
     ? error.code
     : "DOCUMENT_UPLOAD_FAILED";
   operationalLogger.warn("document.upload_rejected", { code });
+  if (code === "DOCUMENT_AUDIO_UNAVAILABLE") {
+    return NextResponse.json({ error: "La transcripció d’àudio no està disponible en aquesta instal·lació.", code }, { status: 503 });
+  }
+  if (code === "DOCUMENT_AUDIO_EMPTY" || code === "DOCUMENT_AUDIO_INVALID") {
+    return NextResponse.json({ error: "No s’ha pogut llegir una nota de veu vàlida. No s’ha creat cap transcripció.", code }, { status: 400 });
+  }
   if (code === "UPLOAD_SIZE_INVALID") {
     return NextResponse.json({ error: "El document supera el límit de seguretat." }, { status: 413 });
   }

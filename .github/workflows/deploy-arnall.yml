@@ -22,6 +22,8 @@ jobs:
   deploy:
     name: Promote tested main to arnall.graphikai.com
     if: >-
+      vars.ARNALL_SOURCE_RETURN_HOLD != 'true' &&
+      github.repository == 'arnautxu/AiBrain' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository

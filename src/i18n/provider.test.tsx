@@ -6,6 +6,9 @@ import { UiLocaleProvider, useUiText } from "./provider";
 import { translate } from "./messages";
 import { LandingTasks } from "@/components/landing-tasks";
 import { scheduledPromptTemplates } from "@/lib/landing-suggestions";
+import { connectorPresentation } from "@/connectors/presentation";
+import { ThemeToggle } from "@/components/ui/primitives";
+import { ThemeProvider } from "@/components/theme-provider";
 import { InstallationLanguage } from "@/components/installation-language";
 const refresh = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
@@ -13,6 +16,21 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 function Example({ content }: { content: string }) { const t = useUiText(); return <><button>{t("Proyecto")}</button><p data-testid="customer-content">{content}</p><p>{t("Rol de {p0}", { p0: content })}</p></>; }
 function Tasks({ onSelect }: { onSelect: (text: string) => void }) { const t = useUiText(); return <LandingTasks tasks={scheduledPromptTemplates("Empresa Proyecto", t)} disabled={false} onSelect={onSelect} />; }
 describe("installation interface language", () => {
+  it("translates connector presentation text without changing the Spanish source", () => {
+    for (const id of ["shopify-themes", "shopify", "gmail", "googlecalendar", "googledrive", "outlook", "github", "slack", "notion", "googlesheets", "googledocs", "linear", "airtable", "hubspot", "jira", "youtube", "retaildemo-meta"]) {
+      const description = connectorPresentation(id).description;
+      expect(translate("en", description)).not.toBe(description);
+      expect(translate("es", description)).toBe(description);
+    }
+    expect(translate("en", "conectado")).toBe("connected");
+  });
+  it("switches the entire theme control label between English and Spanish", () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    const view = render(<UiLocaleProvider locale="en"><ThemeProvider><ThemeToggle /></ThemeProvider></UiLocaleProvider>);
+    expect(screen.getByRole("button", { name: "System theme. Switch to light theme" })).toBeInTheDocument();
+    view.rerender(<UiLocaleProvider locale="es"><ThemeProvider><ThemeToggle /></ThemeProvider></UiLocaleProvider>);
+    expect(screen.getByRole("button", { name: "Tema del sistema. Cambiar a tema claro" })).toBeInTheDocument();
+  });
   it("defaults to English and refreshes every consumer without translating customer text", () => {
     const content = "Proyecto: conserva mi texto en español.";
     const view = render(<Example content={content} />);

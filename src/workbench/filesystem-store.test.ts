@@ -1,16 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "@/lib/chat-contract";
-import { StorageCorruptionError } from "@/storage";
+import { atomicTemporaryPath, ResourceLockManager, StorageCorruptionError } from "@/storage";
 import {
   WorkbenchConflictError,
   WorkbenchNotFoundError,
   WorkbenchPersistenceError,
   WorkbenchValidationError,
 } from "@/workbench/errors";
+import { FileApprovalStore } from "@/runtime/approval-store";
 import { FileWorkbenchStore } from "@/workbench/filesystem-store";
 import {
   parseWorkbenchListQuery,
@@ -60,6 +61,102 @@ afterEach(async () => {
 });
 
 describe("FileWorkbenchStore", () => {
+  it("retains only the requested history in access snapshots while keeping the full durable workbench", async () => {
+    const { store } = await fixture();
+    const project = await store.createProject(USER_A, "Access metadata");
+    const target = await store.createThread(USER_A, project.id, "Target");
+    const unrelated = await store.createThread(USER_A, project.id, "Unrelated history");
+    const prompt = message("user", "complete");
+    const reply = { ...message("assistant", "complete"), content: "Preserved result" };
+    await store.beginThreadTurn(USER_A, unrelated.id, prompt, reply);
+    const targetPrompt = message("user", "complete");
+    const targetReply = { ...message("assistant", "complete"), content: "Target result" };
+    await store.beginThreadTurn(USER_A, target.id, targetPrompt, targetReply);
+    const access = await store.loadAccessSnapshot(USER_A, target.id, { includeTurnContext: true });
+    expect(access.threads.find(({ id }) => id === target.id)?.messages).toEqual([targetPrompt, targetReply]);
+    expect(access.threads.find(({ id }) => id === unrelated.id)?.messages).toEqual([]);
+    expect((await store.loadAccessSnapshot(USER_A)).threads.every(({ messages }) => messages.length === 0)).toBe(true);
+    expect((await store.getThread(USER_A, unrelated.id)).messages).toEqual([prompt, reply]);
+    expect(access.turnContext?.context.projectId).toBe(project.id);
+    expect(access.turnContext?.rebootstrapHistory).toContain("Target result");
+  });
+  it.each([false, true])("reads the committed workbench during a write without touching its temporary (cold=%s)", async (cold) => {
+    const { usersRoot, store } = await fixture();
+    const project = await store.createProject(USER_A, "Committed project");
+    await store.load(USER_A);
+    const stateRoot = path.join(usersRoot, USER_A, "state");
+    const statePath = path.join(stateRoot, "workbench.json");
+    const temporaryPath = atomicTemporaryPath(statePath);
+    if (cold) {
+      // A different inode invalidates the process cache and exercises the
+      // actual canonical-file read, as on a cold process or a large history.
+      await writeFile(temporaryPath, await readFile(statePath), { mode: 0o600 });
+      await rename(temporaryPath, statePath);
+    }
+    const locks = new ResourceLockManager({ rootDirectory: path.join(stateRoot, ".locks") });
+    const lease = await locks.acquire(`workbench:${INSTALLATION_ID}:${USER_A}`);
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      // The temporary belongs to an unfinished writer. A reader must use the
+      // canonical commit and must not quarantine, promote or remove this file.
+      await writeFile(temporaryPath, '{"unfinished":', { mode: 0o600 });
+      const snapshot = await Promise.race([
+        new FileWorkbenchStore({ installationId: INSTALLATION_ID, usersRoot }).load(USER_A),
+        new Promise<never>((_resolve, reject) => {
+          deadline = setTimeout(() => reject(new Error("reader waited for the writer lock")), 1_000);
+        }),
+      ]);
+      expect(snapshot.projects.find(({ id }) => id === project.id)?.name).toBe("Committed project");
+      expect(await readFile(temporaryPath, "utf8")).toBe('{"unfinished":');
+    } finally {
+      if (deadline) clearTimeout(deadline);
+      await lease.release();
+    }
+  });
+
+  it("keeps canonical recovery behind the writer lock", async () => {
+    const { usersRoot, store } = await fixture();
+    const project = await store.createProject(USER_A, "Recoverable project");
+    await store.load(USER_A);
+    const stateRoot = path.join(usersRoot, USER_A, "state");
+    const statePath = path.join(stateRoot, "workbench.json");
+    const temporaryPath = atomicTemporaryPath(statePath);
+    const committed = await readFile(statePath);
+    const locks = new ResourceLockManager({ rootDirectory: path.join(stateRoot, ".locks") });
+    const lease = await locks.acquire(`workbench:${INSTALLATION_ID}:${USER_A}`);
+    const lockAttempt = vi.spyOn(ResourceLockManager.prototype, "withLock");
+    let reading: ReturnType<FileWorkbenchStore["load"]> | undefined;
+    try {
+      await writeFile(temporaryPath, committed, { mode: 0o600 });
+      await writeFile(statePath, "{corrupt", { mode: 0o600 });
+      reading = store.load(USER_A);
+      await vi.waitFor(() => expect(lockAttempt).toHaveBeenCalled());
+      expect(await readFile(statePath, "utf8")).toBe("{corrupt");
+      expect(await readFile(temporaryPath)).toEqual(committed);
+    } finally {
+      lockAttempt.mockRestore();
+      await lease.release();
+    }
+    const recovered = await reading!;
+    expect(recovered.projects.find(({ id }) => id === project.id)?.name).toBe("Recoverable project");
+    expect(JSON.parse(await readFile(statePath, "utf8")).userId).toBe(USER_A);
+  });
+
+  it("persists staged Ogg turn metadata across restart and coalesces retries without crossing users", async () => {
+    const { usersRoot, store } = await fixture();
+    const project = await store.createProject(USER_A, "Voice notes");
+    const thread = await store.createThread(USER_A, project.id, "Read voice notes");
+    const user = message("user", "complete");
+    user.attachments = [{ id: randomUUID(), name: "original.ogg", mimeType: "audio/ogg", size: 125139 }];
+    const assistant = message("assistant", "streaming");
+    expect((await store.beginThreadTurn(USER_A, thread.id, user, assistant)).outcome).toBe("created");
+    const restarted = new FileWorkbenchStore({ installationId: INSTALLATION_ID, usersRoot });
+    expect((await restarted.getThread(USER_A, thread.id)).messages[0].attachments).toEqual(user.attachments);
+    expect((await restarted.beginThreadTurn(USER_A, thread.id, user, assistant)).outcome).toBe("existing");
+    expect((await restarted.getThread(USER_A, thread.id)).messages).toHaveLength(2);
+    await expect(restarted.getThread(USER_B, thread.id)).rejects.toBeInstanceOf(WorkbenchNotFoundError);
+  });
+
   it("reports real request metadata while usage is absent, excluding empty threads and other users", async () => {
     const { store } = await fixture();
     const project = await store.createProject(USER_A, "Activity");
@@ -242,6 +339,7 @@ describe("FileWorkbenchStore", () => {
         title: "Open page",
         detail: "Open an external page in the isolated browser.",
         permissionFingerprint: "a".repeat(64),
+        authorizationFingerprint: "b".repeat(64),
         status: "accepted",
       }],
     };
@@ -254,6 +352,18 @@ describe("FileWorkbenchStore", () => {
         messages: [userMessage, assistantMessage],
       })],
     });
+  });
+
+  it("finishes a reviewed connector edit durably and admits the next undo turn", async () => {
+    const { usersRoot, store } = await fixture(), project = await store.createProject(USER_A, "Shopify QA"), thread = await store.createThread(USER_A, project.id, "Draft edit");
+    const user = message("user", "complete"), running = message("assistant", "streaming");
+    await store.beginThreadTurn(USER_A, thread.id, user, running);
+    const completed: ChatMessage = { ...running, status: "complete", content: "Saved and verified", approvals: [{ id: "shopify-edit:call", threadId: "runtime-thread", turnId: "runtime-turn", itemId: "call", kind: "file", title: "Change Shopify draft website", detail: "Draft only", status: "accepted", connectorAuthorizationFingerprint: "a".repeat(64), fileReview: { filename: "templates/index.json", changes: [{ before: "Old heading", after: "New heading" }] } }] };
+    await store.finishThreadTurn(USER_A, thread.id, completed, "synthetic-private-resume-token");
+    const restarted = new FileWorkbenchStore({ installationId: INSTALLATION_ID, usersRoot });
+    expect((await restarted.load(USER_A)).threads[0].messages.at(-1)).toEqual(completed);
+    await expect(restarted.beginThreadTurn(USER_A, thread.id, message("user", "complete"), message("assistant", "streaming"))).resolves.toMatchObject({ outcome: "created" });
+    await expect(restarted.finishThreadTurn(USER_A, thread.id, { ...completed, approvals: [{ ...completed.approvals[0], connectorAuthorizationFingerprint: "malformed" }] }, null)).rejects.toThrow();
   });
 
   it("durably finishes image turns with dimensions while rejecting invalid or unknown fields", async () => {
@@ -578,4 +688,35 @@ describe("FileWorkbenchStore", () => {
     expect(parseWorkbenchListQuery(new URLSearchParams("q=a&q=b"))).toBeNull();
     expect(parseWorkbenchListQuery(new URLSearchParams("unknown=value"))).toBeNull();
   });
+});
+
+it("refreshes a completed RETAILDEMO card from its durable executed receipt without reopening the model turn", async () => {
+  const { usersRoot } = await fixture(), store = new FileWorkbenchStore({ installationId: "retaildemo", usersRoot });
+  const project = await store.createProject(USER_A, "Shopify review"), thread = await store.createThread(USER_A, project.id, "Draft edit");
+  const user = message("user", "complete"), running = message("assistant", "streaming");
+  await store.beginThreadTurn(USER_A, thread.id, user, running);
+  const card = { id: "shopify-edit:async", threadId: "runtime-thread", turnId: "runtime-turn", itemId: "async", connectorAuthorizationFingerprint: "a".repeat(64), kind: "file" as const, title: "Change Shopify draft website", detail: "Draft only", status: "pending" as const };
+  await store.finishThreadTurn(USER_A, thread.id, { ...running, status: "complete", approvals: [card] }, "synthetic-private-resume-token");
+  const receipts = new FileApprovalStore({ installationId: "retaildemo", userId: USER_A, usersRoot });
+  const locator = { installationId: "retaildemo", userId: USER_A, threadId: card.threadId, turnId: card.turnId, itemId: card.itemId, approvalId: card.id };
+  await receipts.prepareConnectorApproval({ locator, authorizationFingerprint: card.connectorAuthorizationFingerprint });
+  await receipts.approveConnectorApprovalByLocator(locator, card.connectorAuthorizationFingerprint);
+  await receipts.executeConnectorApprovalByLocator(locator, card.connectorAuthorizationFingerprint, { revalidate: () => true, execute: () => "verified" });
+  const refreshed = await new FileWorkbenchStore({ installationId: "retaildemo", usersRoot }).getThread(USER_A, thread.id);
+  expect(refreshed.messages.at(-1)).toMatchObject({ status: "complete", approvals: [{ status: "accepted", title: "Shopify draft saved and verified" }] });
+  await expect(store.beginThreadTurn(USER_A, thread.id, message("user", "complete"), message("assistant", "streaming"))).resolves.toMatchObject({ outcome: "created" });
+});
+
+it("atomically persists a private assistant greeting once across concurrent retries and restarts", async () => {
+  const { usersRoot, store } = await fixture();
+  const snapshot = await store.load(USER_A);
+  const project = snapshot.projects.find(p => p.slug === STANDALONE_PROJECT_SLUG)!;
+  const id = randomUUID();
+  const results = await Promise.all(Array.from({ length: 3 }, () => store.createThread(USER_A, project.id, "Benvinguda", id, "Hola, aquesta és la teva conversa privada.")));
+  expect(results.every(thread => thread.messages.length === 1 && thread.messages[0].role === "assistant")).toBe(true);
+  const restarted = new FileWorkbenchStore({ installationId: INSTALLATION_ID, usersRoot });
+  expect((await restarted.load(USER_A)).threads.filter(thread => thread.id === id)).toHaveLength(1);
+  expect((await restarted.load(USER_B)).threads.some(thread => thread.id === id)).toBe(false);
+  await expect(store.createThread(USER_B, project.id, "Benvinguda", id, "Hola")).rejects.toBeInstanceOf(WorkbenchNotFoundError);
+  await expect(store.createThread(USER_A, project.id, "Benvinguda", randomUUID(), " ")).rejects.toBeInstanceOf(WorkbenchValidationError);
 });

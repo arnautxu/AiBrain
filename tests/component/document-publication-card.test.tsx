@@ -83,4 +83,19 @@ describe("DocumentPublicationCard", () => {
     expect(onFreeze).not.toHaveBeenCalled();
     expect(onDecide).not.toHaveBeenCalled();
   });
+
+  it("offers only receipt reconciliation for an uncertain Windows save", () => {
+    const onDecide = vi.fn(async () => undefined);
+    render(<DocumentPublicationCard draft={{ ...draft, phase: "uncertain", operation: {
+      schemaVersion: 1, operationId: "0198b9f0-6631-7000-8000-000000000615", threadId: draft.threadId,
+      turnId: draft.turnId, targetRelativePath: "server-worksitea/M/WORKSITEA/PRODUCCIO/notes.md", status: "publishing",
+      candidate: { fileName: draft.fileName, size: draft.size, sha256: "a".repeat(64) },
+      original: { exists: false, size: null, sha256: null, mtimeMs: null },
+      confirmationExpiresAt: "2026-10-05T10:10:00.000Z", version: null, result: null,
+    } }} onFreeze={vi.fn()} onDecide={onDecide} />);
+    expect(screen.queryByRole("button", { name: "Publicar" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Rechazar" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Comprobar guardado" }));
+    expect(onDecide).toHaveBeenCalledWith(draft.id, "confirm");
+  });
 });

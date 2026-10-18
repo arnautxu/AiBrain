@@ -1,5 +1,5 @@
-import type { ClientRequest } from "../../contracts/codex/0.153.4/types/ClientRequest";
-import type { McpServerToolCallParams } from "../../contracts/codex/0.153.4/types/v2/McpServerToolCallParams";
+import type { ClientRequest } from "../../contracts/codex/0.162.1/types/ClientRequest";
+import type { McpServerToolCallParams } from "../../contracts/codex/0.162.1/types/v2/McpServerToolCallParams";
 import type { CatalogPrincipal, CatalogState } from "@/catalog/contracts";
 import { allowsCatalogOperation, catalogResourceForMcpTool, visibleCatalogResources } from "@/catalog/resolver";
 
@@ -32,8 +32,13 @@ function filteredSkills(response: unknown, ids: Set<string>) {
 function filteredMcpStatus(response: unknown, servers: Set<string>) {
   if (!record(response)) return { data: [] };
   for (const key of ["data", "servers"] as const) {
-    if (Array.isArray(response[key])) return { ...response, [key]: response[key].filter((item) =>
-      record(item) && typeof item.server === "string" && servers.has(item.server)) };
+    if (Array.isArray(response[key])) return { ...response, [key]: response[key].filter((item) => {
+      if (!record(item)) return false;
+      // Codex 0.162 uses name. Only fall back to the legacy server field when
+      // name is absent, so a conflicting legacy alias cannot widen discovery.
+      const name = item.name === undefined ? item.server : item.name;
+      return typeof name === "string" && servers.has(name);
+    }) };
   }
   return { data: [] };
 }
@@ -52,6 +57,10 @@ export class CatalogRuntimeEnforcer {
 
   allowsConnector(connectorId: string) {
     return visibleCatalogResources(this.state, this.principal, "connector").some((resource) => resource.connectorId === connectorId);
+  }
+
+  allowsConnectorWrite(connectorId: string) {
+    return this.principal.workspaceCanExecute && visibleCatalogResources(this.state, this.principal, "connector").some(resource => resource.connectorId === connectorId && allowsCatalogOperation(this.state, this.principal, resource.id, "write"));
   }
 
   filterApps(response: unknown, installed = false) {

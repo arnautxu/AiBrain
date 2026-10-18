@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile, stat, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +15,7 @@ import {
   turnDocumentChatAttachments,
   turnDocumentCodexInputs,
 } from "@/documents/turn-attachments";
+import { MAX_FILES_PER_MESSAGE } from "@/lib/chat-attachment-limits";
 import type { DocumentToolRunner } from "@/documents/preview-service";
 
 const THREAD_ID = "11111111-1111-4111-8111-111111111111";
@@ -75,7 +76,43 @@ function textInputResolver(stagingRoot: string) {
 }
 
 describe("turn document attachment binding", () => {
-  it.each([10, 11, 20, 33, 50])("binds %i fictional invoices from real validated staging without model calls", async (count) => {
+  it("makes an authorized scanned PDF available for detailed reading without changing its original or accepting tampered/symlink sources", async () => {
+    const { root, staging, stagingRoot } = await fixture();
+    const generated = await generateLocalDocument({ format: "pdf", title: "Fictional scanned-table regression",
+      content: "Fictional customer: EUR 47.08" });
+    const validated = validateUploadedDocument({ fileName: "commission.pdf", declaredMimeType: "application/pdf", data: generated.data });
+    const document = await staging.stage({ threadId: THREAD_ID, uploadId: "22222222-2222-4222-8222-222222222223", validated, data: generated.data });
+    const resolved = await resolveTurnDocumentAttachments({ staging, threadId: THREAD_ID, uploadIds: [document.uploadId],
+      permissions: permissions("allow"), inputResolver: { resolve: async () => [{ type: "text", text: "Scan has no embedded text", text_elements: [] }] } });
+    const projectWorkspace = path.join(root, "private-project");
+    await mkdir(projectWorkspace, { mode: 0o700 });
+    const input = { documents: resolved, projectWorkspace, stagingRoot };
+    const prepared = await prepareTurnDocumentWorkspaceInputs(input);
+    expect(await readFile(path.join(prepared.directory!, "input-1.pdf"))).toEqual(generated.data);
+    expect((await stat(prepared.directory!)).mode & 0o777).toBe(0o700);
+    expect((await stat(path.join(prepared.directory!, "input-1.pdf"))).mode & 0o777).toBe(0o600);
+    expect(prepared.codexInputs).toEqual([expect.objectContaining({ type: "text", text: expect.stringContaining("complete original-byte") })]);
+    expect(JSON.stringify(prepared.codexInputs)).not.toContain(stagingRoot);
+    expect(await readFile(resolved[0].absolutePath)).toEqual(generated.data);
+    await writeFile(resolved[0].absolutePath, "%PDF-tampered");
+    await expect(prepareTurnDocumentWorkspaceInputs(input)).rejects.toMatchObject({ code: "TURN_DOCUMENT_CONTENT_UNAVAILABLE" });
+    await rm(resolved[0].absolutePath);
+    const outside = path.join(root, "outside.pdf");
+    await writeFile(outside, generated.data);
+    await symlink(outside, resolved[0].absolutePath);
+    await expect(prepareTurnDocumentWorkspaceInputs(input)).rejects.toThrow();
+    expect(await readFile(outside)).toEqual(generated.data);
+  });
+
+  it("rejects provider file references that bypass local image byte accounting", async () => {
+    const { staging } = await fixture();
+    await expect(resolveTurnDocumentAttachments({
+      staging, threadId: THREAD_ID, uploadIds: [UPLOAD_ID], permissions: permissions("allow"),
+      inputResolver: { resolve: async () => [{ type: "image", fileId: "unowned-provider-file" }] },
+    })).rejects.toMatchObject({ code: "TURN_DOCUMENT_INPUT_INVALID" });
+  });
+
+  it.each([10, 11, 20])("binds %i fictional invoices from real validated staging without model calls", async (count) => {
     const { staging, stagingRoot } = await fixture();
     const ids: string[] = [];
     for (let index = 0; index < count; index++) {
@@ -94,12 +131,12 @@ describe("turn document attachment binding", () => {
     expect(JSON.stringify(turnDocumentCodexInputs(resolved))).not.toContain(stagingRoot);
   });
 
-  it("rejects 51 documents before staging reads or conversion", async () => {
+  it("rejects an oversized document set before staging reads or conversion", async () => {
     const { staging, stagingRoot } = await fixture();
     const read = vi.spyOn(staging, "resolveContentById");
     const resolver = textInputResolver(stagingRoot);
     const resolve = vi.spyOn(resolver, "resolve");
-    const ids = Array.from({ length: 51 }, (_, index) => `22222222-2222-4222-8222-${String(index + 1).padStart(12, "0")}`);
+    const ids = Array.from({ length: MAX_FILES_PER_MESSAGE + 1 }, (_, index) => `22222222-2222-4222-8222-${String(index + 1).padStart(12, "0")}`);
     await expect(resolveTurnDocumentAttachments({ staging, threadId: THREAD_ID, uploadIds: ids,
       permissions: permissions("allow"), inputResolver: resolver })).rejects.toMatchObject({ code: "TURN_DOCUMENT_SET_INVALID" });
     expect(read).not.toHaveBeenCalled();

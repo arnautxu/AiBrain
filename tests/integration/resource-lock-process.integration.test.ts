@@ -1,9 +1,11 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { hostname, tmpdir } from "node:os";
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Readable } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
+import { readProcessIncarnation } from "../../src/storage/process-incarnation";
 
 type WorkerEvent = { event: string; at: number; code?: string; token?: string; processId?: number };
 type LockChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -130,5 +132,50 @@ describe("resource locks across real processes", () => {
     const recovered = start(root, "hold", 0, 2_000);
     await recovered.waitFor("acquired");
     expect((await waitForExit(recovered.child)).code).toBe(0);
+  });
+
+  it("does not steal a suspended live process after its heartbeat becomes stale", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "aibrain-lock-paused-process-"));
+    roots.push(root);
+    const owner = start(root, "crash", 0, 2_000);
+    const acquired = await owner.waitFor("acquired");
+    process.kill(acquired.processId!, "SIGSTOP");
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    const contender = start(root, "hold", 0, 180);
+    expect((await contender.waitFor("failed")).code).toBe("STORAGE_LOCK_TIMEOUT");
+    expect((await waitForExit(contender.child)).code).toBe(1);
+    const hash = createHash("sha256").update("shared-resource").digest("hex");
+    const record = JSON.parse(await readFile(path.join(root, `${hash}.lock`, "owner.json"), "utf8"));
+    expect(record.token).toBe(acquired.token);
+    process.kill(acquired.processId!, "SIGKILL");
+    await waitForExit(owner.child);
+  });
+
+  it.skipIf(process.platform !== "linux")("recovers an old incarnation despite a real live reused PID", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "aibrain-lock-reused-process-"));
+    roots.push(root);
+    const actualIdentity = await readProcessIncarnation(process.pid);
+    // This test requires readable Linux procfs; fail rather than silently
+    // treating missing identity support as proof of recovery.
+    expect(actualIdentity).not.toBeNull();
+    const oldIdentity = actualIdentity!.replace(/:\d+$/, ":0");
+    expect(oldIdentity).not.toBe(actualIdentity);
+    const resourceHash = createHash("sha256").update("shared-resource").digest("hex");
+    const lockPath = path.join(root, `${resourceHash}.lock`);
+    const token = randomUUID();
+    await mkdir(lockPath);
+    await writeFile(path.join(lockPath, "owner.json"), JSON.stringify({
+      schemaVersion: 1, token, resourceHash, hostname: hostname(),
+      processId: process.pid, acquiredAt: new Date(Date.now() - 5_000).toISOString(),
+    }));
+    await writeFile(path.join(lockPath, "process.json"), JSON.stringify({
+      schemaVersion: 1, token, identity: oldIdentity,
+    }));
+    const staleTime = new Date(Date.now() - 5_000);
+    await utimes(lockPath, staleTime, staleTime);
+    const recovered = start(root, "hold", 0, 1_000);
+    expect((await recovered.waitFor("acquired")).token).not.toBe(token);
+    expect((await waitForExit(recovered.child)).code).toBe(0);
+    expect(() => process.kill(process.pid, 0)).not.toThrow();
   });
 });

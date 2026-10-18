@@ -92,11 +92,12 @@ describe("personal connected apps lifecycle (synthetic provider, not live accept
     const bindings = new FileConnectorBindingStore(config.installationId, config.paths.dataRoot);
     await expect(bindings.readPersonalForManagement({ installationId: config.installationId, userId: A, roleId: null }, "composio-github")).rejects.toMatchObject({ code: "ENOENT" });
   });
-  it("blocks forged mentions, turn identity, policy revocation and unreviewed tools", async () => {
+  it("blocks unavailable user connections, mismatched turns, policy revocation and unreviewed tools", async () => {
     const fetcher = provider(); await connect(fetcher); fetcher.mockClear();
     const context = { config, installationId: config.installationId, userId: A, runtimeThreadId: "thread", runtimeTurnId: "turn", selectedIds: [], fetcher };
     const call = { namespace: COMPOSIO_NAMESPACE, tool: "read", threadId: "thread", turnId: "turn", callId: "call", arguments: { toolkit: "github", tool: "GITHUB_TEST_READ", arguments: {} } };
-    expect((await handleComposioTool(call, context)).success).toBe(false); expect(fetcher).not.toHaveBeenCalled();
+    expect(await handleComposioTool(call, context)).toEqual({ success: false, contentItems: [{ type: "inputText", text: JSON.stringify("Composio connection is not available or verified for this user.") }] });
+    expect(fetcher).not.toHaveBeenCalled();
     expect((await handleComposioTool({ ...call, turnId: "other" }, { ...context, selectedIds: ["composio-github"] })).success).toBe(false);
     expect((await handleComposioTool(call, { ...context, selectedIds: ["composio-github"] })).success).toBe(true);
     expect(fetcher.mock.calls.some(([, init]) => init?.body && JSON.parse(String(init.body)).connected_account_id === "ca_test")).toBe(true);

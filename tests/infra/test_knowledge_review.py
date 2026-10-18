@@ -97,11 +97,17 @@ class ReviewTests(unittest.TestCase):
             server=review.Server(address,manifest,str(bindings),self.root)
             thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
             try:
-                def ask(request=None):
+                def ask(request=None,*,rejected_peer=False):
                     with socket.socket(socket.AF_UNIX) as client:
-                        client.settimeout(2);client.connect(str(address));client.sendall(json.dumps(request or self.request(),ensure_ascii=False).encode()+b'\n')
-                        try:return client.makefile('rb').readline()
-                        except ConnectionResetError:return b''
+                        client.settimeout(2);client.connect(str(address))
+                        try:
+                            client.sendall(json.dumps(request or self.request(),ensure_ascii=False).encode()+b'\n')
+                            return client.makefile('rb').readline()
+                        except (BrokenPipeError,ConnectionResetError):
+                            # A rejected peer can be closed before sendall or
+                            # while reading. Authorized requests must still fail.
+                            if not rejected_peer:raise
+                            return b''
                 self.assertEqual(json.loads(ask())['records'][0]['id'],record['id'])
                 self.assertEqual(execution.call_count,1)
                 correction=self.request('correct',{'recordId':record['id'],'revision':1,'content':'é'*5000,'reason':'Corrección Unicode de prueba.'})
@@ -113,7 +119,7 @@ class ReviewTests(unittest.TestCase):
                 self.assertEqual(saved['events'][0]['actor'],ACTOR)
                 self.assertEqual(execution.call_count,2)
                 manifest['appUid']=os.geteuid()+1
-                self.assertEqual(ask(correction),b'');self.assertEqual(execution.call_count,2)
+                self.assertEqual(ask(correction,rejected_peer=True),b'');self.assertEqual(execution.call_count,2)
                 self.assertEqual(binding_reader.call_count,2)
             finally:
                 server.shutdown();server.server_close();thread.join(timeout=2)

@@ -9,10 +9,17 @@ case "$interval" in
 esac
 [ "$interval" -ge 15 ] && [ "$interval" -le 3600 ] \
   || { echo "AIBRAIN_ALERT_INTERVAL_SECONDS must be between 15 and 3600" >&2; exit 64; }
+if [ "${AIBRAIN_ALERT_SINK:-}" = file ]; then
+  [ "${AIBRAIN_WORKSITEA_RECOVERY_DECISION:-}" = host-loss-risk-accepted-20261005 ] \
+    || { echo "Local alert collection needs the explicit WORKSITEA host-only decision" >&2; exit 78; }
+  node -e 'const fs=require("node:fs"); const c=JSON.parse(fs.readFileSync(process.env.AIBRAIN_INSTALLATION_CONFIG,"utf8")); if(c.installationId!=="worksitea-production" || c.publicUrl!=="https://worksitea.example.test")process.exit(78)'
+  echo "WORKSITEA: local operational alert collection; no external notification or host-loss coverage."
+else
 [ "${AIBRAIN_ALERT_SINK:-}" = webhook ] \
   || { echo "AIBRAIN_ALERT_SINK=webhook is required" >&2; exit 78; }
 [ -n "${AIBRAIN_ALERT_WEBHOOK_URL:-}" ] \
   || { echo "AIBRAIN_ALERT_WEBHOOK_URL is required" >&2; exit 78; }
+fi
 
 while :; do
   status=$(/usr/local/bin/aibrain-alerts \

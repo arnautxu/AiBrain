@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { assertUiContract, uiContractErrors } from "../helpers/ui-contract";
 import {
   parseDocumentUploadResponse,
   stageDocument,
@@ -18,6 +19,8 @@ import {
   isSafePublicationTarget,
   parsePublicationDecisionReceipt,
   parsePublicationFreezeReceipt,
+  recoverDocumentPublications,
+  decideDocumentPublication,
 } from "@/ui/publication-ui-adapter";
 import {
   createExplicitMemory,
@@ -270,6 +273,40 @@ describe("browser UI adapter", () => {
 });
 
 describe("publication UI adapter", () => {
+  it("recovers a WORKSITEA uncertain operation and rechecks the same id after refresh", async () => {
+    const operation = { ...publicationOperation, installationId: "worksitea-qa", status: "publishing",
+      targetRelativePath: "server-worksitea/M/WORKSITEA/PRODUCCIO/notes.md" };
+    assertUiContract("PublicationRecoveryResponse", { publications: [{ operation, confirmationToken: "c".repeat(64) }] });
+    expect(uiContractErrors("PublicationRecoveryResponse", { publications: [{ operation, confirmationToken: "invalid" }] })).not.toBeNull();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => init?.method === "POST"
+      ? Response.json({ operation, permissionFingerprint: "b".repeat(64) })
+      : Response.json({ publications: [{ operation, confirmationToken: "c".repeat(64) }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const [draft] = await recoverDocumentPublications(threadId);
+    expect(draft.phase).toBe("uncertain"); expect(draft.uploadId).toBe(uploadId);
+    expect(fetchMock.mock.calls[0]?.[1]?.cache).toBe("no-store");
+    await decideDocumentPublication(draft, "confirm");
+    await decideDocumentPublication(draft, "confirm");
+    const bodies = fetchMock.mock.calls.slice(1).map((call) => JSON.parse(String(call[1]?.body)));
+    expect(bodies[0]).toEqual(bodies[1]);
+    expect(bodies[0].clientRequestId).toBe(`confirm:${operationId}`);
+  });
+
+  it("rejects cross-thread, duplicate and malformed recovered confirmations", async () => {
+    const operation = { ...publicationOperation, installationId: "worksitea-qa",
+      targetRelativePath: "server-worksitea/M/WORKSITEA/PRODUCCIO/notes.md" };
+    const entry = { operation, confirmationToken: "c".repeat(64) };
+    for (const publications of [
+      [entry, entry], [{ ...entry, confirmationToken: "not-a-token" }],
+      [{ ...entry, operation: { ...operation, threadId: uploadId } }],
+      [{ ...entry, operation: { ...operation, targetRelativePath: "server-worksitea/C/Windows/file.txt" } }],
+      [{ ...entry, secret: "unexpected" }],
+    ]) {
+      vi.stubGlobal("fetch", vi.fn(async () => Response.json({ publications })));
+      await expect(recoverDocumentPublications(threadId)).rejects.toThrow();
+    }
+  });
+
   it("accepts the public receipt without exposing publisher paths or token hashes", () => {
     const parsed = parsePublicationFreezeReceipt({
       operation: publicationOperation,

@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "../render-spanish";
 import { useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CustomizationPanel } from "@/components/customization-panel";
+import { UiLocaleProvider } from "@/i18n/provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { initialRuntimeStatus } from "@/lib/runtime-status";
 import type { SettingsSnapshot } from "@/settings/contracts";
@@ -28,27 +29,49 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState(
 beforeEach(() => { Object.defineProperty(window, "matchMedia", { configurable: true, value: vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })) }); });
 
 describe("CustomizationPanel", () => {
-  it("connects company mail inside settings and clears the password before awaiting verification", async () => {
+  it("renders the enabled mailbox as a password form for the current employee", async () => {
     const snapshot = settings(false);
-    snapshot.connectors = [{ ...snapshot.connectors[0], id: "company-mail", label: "Correo de empresa", connectUrl: "/api/connectors/company-mail/connect" }];
-    let submitted: unknown = null;
-    let resolveConnect: (response: Response) => void = () => undefined;
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === "/api/settings") return Response.json(snapshot);
-      submitted = JSON.parse(String(init?.body));
-      return new Promise<Response>(resolve => { resolveConnect = resolve; });
-    }));
-    render(<ThemeProvider><CustomizationPanel productName="Arnall AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
-    fireEvent.click(await screen.findByRole("button", { name: "Conectar Correo de empresa" }));
-    fireEvent.change(screen.getByLabelText("Correo de empresa"), { target: { value: "factures@arnall.cat" } });
-    const password = screen.getByLabelText("Contraseña del buzón");
-    fireEvent.change(password, { target: { value: "private-password" } });
-    fireEvent.change(screen.getByLabelText("Importar desde", { exact: false }), { target: { value: "2026-10-01" } });
-    fireEvent.submit(screen.getByRole("form", { name: "Conectar correo de empresa" }));
-    expect(password).toHaveValue("");
-    expect(submitted).toEqual({ email: "factures@arnall.cat", password: "private-password", folder: "INBOX", since: "2026-10-01" });
-    resolveConnect(Response.json({ status: "connected" }));
-    await waitFor(() => expect(screen.queryByRole("form", { name: "Conectar correo de empresa" })).not.toBeInTheDocument());
+    snapshot.connectors = [{ ...snapshot.connectors[0], id: "mail", label: "Correo Nominalia", connectionMethod: "password", connectUrl: "/api/connectors/mail/connect" }];
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(snapshot)));
+    render(<ThemeProvider><CustomizationPanel productName="WORKSITEA AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
+    expect(await screen.findByLabelText("Contraseña de tu correo")).toBeInTheDocument();
+    expect(screen.getByText("arnau@example.com")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Conectar Correo Nominalia" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Conectar Correo Nominalia" })).not.toBeInTheDocument();
+  });
+  it("renders English connector descriptions and owner-authorization guidance", async () => {
+    const snapshot = settings(false);
+    snapshot.connectors = [{ ...snapshot.connectors[0], id: "shopify-themes", label: "Shopify Website · RETAILDEMO", statusDetail: "La conexión de RETAILDEMO necesita autorización del propietario." }];
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(snapshot)));
+    const view = render(<UiLocaleProvider locale="en"><ThemeProvider><CustomizationPanel productName="RETAILDEMO AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider></UiLocaleProvider>);
+    expect(await screen.findByText("The RETAILDEMO connection requires the store owner’s authorization.")).toBeInTheDocument();
+    expect(screen.getByText("Edit your website draft: content, video, images, layout and configurator options.")).toBeInTheDocument();
+    expect(screen.getByText("Shopify Website · RETAILDEMO")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect Shopify Website · RETAILDEMO" })).toBeInTheDocument();
+    view.rerender(<UiLocaleProvider locale="es"><ThemeProvider><CustomizationPanel productName="RETAILDEMO AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider></UiLocaleProvider>);
+    expect(screen.getByText("La conexión de RETAILDEMO necesita autorización del propietario.")).toBeInTheDocument();
+  });
+  it("opens the requested tab after hydration and on each new opening", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(settings(false))));
+    const props = { productName: "RETAILDEMO AI", runtimeStatus: initialRuntimeStatus, onClose: vi.fn() };
+    const { rerender } = render(<ThemeProvider><CustomizationPanel {...props} open={false} /></ThemeProvider>);
+    rerender(<ThemeProvider><CustomizationPanel {...props} open initialTab="connectors" /></ThemeProvider>);
+    expect(await screen.findByRole("searchbox", { name: "Buscar apps" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Apariencia" }));
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+    rerender(<ThemeProvider><CustomizationPanel {...props} open={false} initialTab="connectors" /></ThemeProvider>);
+    rerender(<ThemeProvider><CustomizationPanel {...props} open initialTab="connectors" /></ThemeProvider>);
+    expect(await screen.findByRole("searchbox", { name: "Buscar apps" })).toBeInTheDocument();
+  });
+  it("explains the Website connection inside the RETAILDEMO AI and separates Shopify Orders", async () => {
+    const snapshot = settings(true);
+    snapshot.connectors = [{ ...snapshot.connectors[0], id: "shopify-themes", label: "Shopify Website · RETAILDEMO", connectUrl: "/api/connectors/shopify/themes/oauth/start", statusDetail: "Owner installation required." }];
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(snapshot)));
+    render(<ThemeProvider><CustomizationPanel productName="RETAILDEMO AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
+    expect(await screen.findByText(/no en la configuración de Shopify ni en Sidekick/)).toBeInTheDocument();
+    expect(screen.getByText(/propietario de RETAILDEMO/)).toBeInTheDocument();
+    expect(screen.getByText("Owner installation required.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Conectar Shopify Website · RETAILDEMO" })).toHaveAttribute("href", "/api/connectors/shopify/themes/oauth/start");
   });
 
   it.each([false, true])("hides usage from employees and administrators (administrator=%s)", async (isAdmin) => {
@@ -68,11 +91,19 @@ describe("CustomizationPanel", () => {
     snapshot.connectors = [{ ...snapshot.connectors[0], id: "composio-gmail" }];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => Response.json(String(input) === "/api/settings" ? snapshot : usage("personal"))));
     render(<ThemeProvider><CustomizationPanel productName="Arnall AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
-    expect(await screen.findByText(/Conecta tus apps para usarlas con @/)).toBeInTheDocument();
+    expect(await screen.findByText(/Conecta tus apps y úsalas directamente en el chat/)).toBeInTheDocument();
     expect(screen.getByText(status === "failed" ? /No se completó la conexión/ : /estado verificado de tus conexiones/)).toBeInTheDocument();
     expect(screen.queryByText("Conectado")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Conectar Gmail" })).toBeInTheDocument();
   });
+  it.each(["shopify", "shopify_themes"])("shows a Shopify callback failure without claiming a connection: %s", async (connector) => {
+    window.history.replaceState(null, "", `/?settings=connectors&${connector}=failed&reason=RETAILDEMO_SHOPIFY_TOKEN_EXCHANGE_FAILED`);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(settings(false))));
+    render(<ThemeProvider><CustomizationPanel productName="RETAILDEMO AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
+    expect(await screen.findByRole("alert")).toHaveTextContent("No se completó la conexión");
+    expect(screen.queryByText("Conectado")).not.toBeInTheDocument();
+  });
+
   it("returns focus to the stable opener while its exit is inert", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/settings"
       ? new Response(JSON.stringify(settings(false)), { status: 200 })

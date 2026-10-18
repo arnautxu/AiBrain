@@ -4,6 +4,7 @@ import { hostname } from "node:os";
 import { mkdir, readFile, readlink, rename, rm, stat, utimes } from "node:fs/promises";
 import path from "node:path";
 import { atomicWriteJson, fsyncDirectory } from "@/storage/atomic-file";
+import { readProcessIncarnation } from "@/storage/process-incarnation";
 import {
   ResourceLockOwnershipLostError,
   ResourceLockTimeoutError,
@@ -43,6 +44,19 @@ async function processIdentity(processId: number) {
 async function localOwnerStillAlive(owner: ResourceLockMetadata, lockPath: string) {
   if (!processAppearsAlive(owner.processId)) return false;
   try {
+    // The boot-aware sidecar is authoritative when present. A malformed or
+    // mismatched modern record cannot fall back to a weaker legacy identity.
+    const recorded = parseJson(
+      processIncarnationSchema,
+      await readFile(path.join(lockPath, "process.json"), "utf8"),
+    );
+    if (recorded.token !== owner.token) return true;
+    const current = await readProcessIncarnation(owner.processId);
+    return current === null || current === recorded.identity;
+  } catch (error) {
+    if (!isNodeError(error, "ENOENT")) return true;
+  }
+  try {
     const identity = JSON.parse(await readFile(path.join(lockPath, "process-identity.json"), "utf8"));
     if (identity.token !== owner.token || identity.processId !== owner.processId ||
         typeof identity.startTicks !== "string" || !/^\d+$/u.test(identity.startTicks) ||
@@ -80,6 +94,29 @@ const resourceLockMetadataSchema = defineVersionedSchema<ResourceLockMetadata>({
         maxLength: 255,
       }),
       acquiredAt: expectIsoDate(record.acquiredAt, context.at("acquiredAt")),
+    };
+  },
+});
+
+// Keep owner.json v1 byte-compatible with older workers. The optional sidecar
+// is bound to the owner's random token, so another acquisition cannot supply
+// the incarnation of a different lease.
+const processIncarnationSchema = defineVersionedSchema<{
+  schemaVersion: 1;
+  token: string;
+  identity: string;
+}>({
+  name: "ResourceLockProcessIncarnation",
+  schemaVersion: 1,
+  keys: ["token", "identity"],
+  parse(record, context) {
+    return {
+      schemaVersion: 1,
+      token: expectString(record.token, context.at("token"), { minLength: 36, maxLength: 36 }),
+      identity: expectString(record.identity, context.at("identity"), {
+        maxLength: 255,
+        pattern: /^linux:[0-9a-f-]{36}:\d+:\d+:\d+$/,
+      }),
     };
   },
 });
@@ -468,6 +505,14 @@ export class ResourceLockManager {
             await atomicWriteJson(path.join(lockPath, "process-identity.json"), {
               ...identity, token, processId: process.pid,
             }, { name: "ProcessIdentity", parse: (value) => value }, { mode: 0o600 });
+          }
+          const incarnation = await readProcessIncarnation(process.pid);
+          if (incarnation) {
+            await atomicWriteJson(
+              path.join(lockPath, "process.json"),
+              { schemaVersion: 1, token, identity: incarnation },
+              processIncarnationSchema,
+            );
           }
           await fsyncDirectory(this.rootDirectory);
         } catch (error) {

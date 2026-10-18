@@ -101,6 +101,7 @@ export function nextScheduledInstant(
   timeZone: string,
   after: Date,
 ): string | null {
+  if (schedule.kind === "external") return null;
   if (schedule.kind === "interval") {
     const anchor = Date.parse(schedule.anchorAt);
     const duration = schedule.minutes * 60_000;
@@ -112,9 +113,15 @@ export function nextScheduledInstant(
   }
 
   const afterLocal = localParts(after, timeZone);
-  for (let add = 0; add <= 8; add += 1) {
+  for (let add = 0; add <= 15; add += 1) {
     const target = addLocalDays({ ...afterLocal, hour: schedule.hour, minute: schedule.minute }, add);
     if (schedule.kind === "weekly" && !schedule.weekdays.includes(weekday(target))) continue;
+    if (schedule.kind === "weekly" && schedule.intervalWeeks === 2 && schedule.anchorDate) {
+      const anchor = new Date(schedule.anchorDate + "T00:00:00Z");
+      const anchorMonday = anchor.getTime() - ((anchor.getUTCDay() + 6) % 7) * 86_400_000;
+      const targetDay = Date.UTC(target.year,target.month-1,target.day);
+      if (Math.floor((targetDay-anchorMonday)/(7*86_400_000)) % 2 !== 0) continue;
+    }
     const instant = localMinuteToInstant(target, timeZone);
     if (instant.getTime() > after.getTime()) return instant.toISOString();
   }
@@ -126,17 +133,18 @@ export function nextAfterOccurrence(
   timeZone: string,
   scheduledFor: string,
 ) {
-  if (schedule.kind === "once") return null;
+  if (schedule.kind === "external" || schedule.kind === "once") return null;
   return nextScheduledInstant(schedule, timeZone, new Date(scheduledFor));
 }
 
-export function describeSchedule(schedule: AutomationSchedule, timeZone: string) {
+export function describeSchedule(schedule: AutomationSchedule, timeZone: string, locale: "en" | "es" | "ca" = "es") {
+  if (schedule.kind === "external") return locale === "en" ? "From the authorized scheduler" : locale === "ca" ? "Des del planificador autoritzat" : "Desde el scheduler autorizado";
   if (schedule.kind === "interval") return schedule.minutes % 60 === 0 ? `Cada ${schedule.minutes / 60} horas` : `Cada ${schedule.minutes} minutos`;
   if (schedule.kind === "once") {
-    return `Una vez · ${new Intl.DateTimeFormat("es-ES", { dateStyle: "medium", timeStyle: "short", timeZone }).format(new Date(schedule.runAt))}`;
+    return `${locale === "ca" ? "Una vegada" : locale === "en" ? "Once" : "Una vez"} · ${new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone }).format(new Date(schedule.runAt))}`;
   }
   const time = `${String(schedule.hour).padStart(2, "0")}:${String(schedule.minute).padStart(2, "0")}`;
-  if (schedule.kind === "daily") return `Cada día · ${time}`;
-  const labels = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
-  return `${schedule.weekdays.map((day) => labels[day]).join(", ")} · ${time}`;
+  if (schedule.kind === "daily") return `${locale === "ca" ? "Cada dia" : locale === "en" ? "Daily" : "Cada día"} · ${time}`;
+  const labels = locale === "ca" ? ["dg.", "dl.", "dt.", "dc.", "dj.", "dv.", "ds."] : locale === "en" ? ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] : ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+  return `${schedule.intervalWeeks === 2 ? (locale === "ca" ? "Cada dues setmanes · " : locale === "en" ? "Every two weeks · " : "Cada dos semanas · ") : ""}${schedule.weekdays.map((day) => labels[day]).join(", ")} · ${time}`;
 }

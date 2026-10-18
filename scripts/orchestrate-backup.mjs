@@ -229,7 +229,19 @@ function parseBackupOutput(output, operation) {
   let value;
   // The production entrypoint runs protocol acceptance before the requested
   // command. Keep that check enabled and admit only its exact success banner.
-  const json = output.replace(/^Codex App Server container acceptance passed\.\r?\n/u, "");
+  const lines = output.split(/\r?\n/u);
+  if (lines[0]?.startsWith('{"privateFilesystemAcceptance":')) {
+    let acceptance;
+    try { acceptance = JSON.parse(lines.shift()); } catch { /* strict validation below */ }
+    const expected = ["privateFilesystemAcceptance", "syntheticFixturesOnly", "privateReadsDenied",
+      "symlinkAliasDenied", "helperReadsAllowed", "exactWorkspaceWriteAllowed"];
+    if (!acceptance || Object.keys(acceptance).length !== expected.length
+      || !expected.every((key) => acceptance[key] === true)) {
+      throw new BackupOperationError("BACKUP_OPERATION_OUTPUT_INVALID", "Filesystem acceptance output is invalid.");
+    }
+  }
+  if (lines[0] === "Codex App Server container acceptance passed.") lines.shift();
+  const json = lines.join("\n");
   try { value = JSON.parse(json); } catch (error) {
     throw new BackupOperationError("BACKUP_OPERATION_OUTPUT_INVALID", `Backup ${operation} returned invalid output.`, { cause: error });
   }
@@ -414,7 +426,11 @@ function advisoryInvocation(options, argv) {
   const lockFile = `${options.stateFile}.advisory`;
   if (existsSync(lockFile)) safeFile(lockFile, "backup advisory lock", true);
   const script = realpathSync(fileURLToPath(import.meta.url));
-  if (process.platform === "darwin") return { executable: "/usr/bin/lockf", args: ["-t", "0", lockFile, process.execPath, script, ...argv], conflict: 75 };
+  if (process.platform === "darwin") {
+    if (!existsSync("/usr/bin/lockf")) return { executable: "/usr/bin/python3",
+      args: [path.join(path.dirname(script), "release-advisory-lock.py"), lockFile, process.execPath, script, ...argv], conflict: 75 };
+    return { executable: "/usr/bin/lockf", args: ["-t", "0", lockFile, process.execPath, script, ...argv], conflict: 75 };
+  }
   if (process.platform === "linux") return { executable: "/usr/bin/flock", args: ["--exclusive", "--nonblock", "--conflict-exit-code", "73", lockFile, process.execPath, script, ...argv], conflict: 73 };
   throw new BackupOperationError("BACKUP_OPERATION_LOCK_UNAVAILABLE", "OS advisory locking is required.");
 }

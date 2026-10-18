@@ -1,11 +1,42 @@
 import JSZip from "jszip";
-import { PDFDict, PDFDocument, PDFName } from "pdf-lib";
+import { PDFDict, PDFDocument, PDFName, PDFRawStream } from "pdf-lib";
 import { describe, expect, it } from "vitest";
 import { validateUploadedDocument } from "@/documents/upload-validation";
 import { generateLocalDocument } from "@/runtime/documents/local-document-generator";
 import { generatedPngFixture } from "../../../tests/helpers/png-fixture";
 
 describe("local document generator", () => {
+  it("keeps arrow direction and conversion meaning in the actual basic PDF text stream", async () => {
+    const generated = await generateLocalDocument({ format: "pdf", title: "A → B", content: "toneladas → kg\nOrigen ← Destino\nA ↔ B\n2 × 3 = 6 €; condición confirmada" });
+    const document = await PDFDocument.load(generated.data);
+    const stream = document.getPage(0).node.lookup(PDFName.of("Contents"));
+    if (!(stream instanceof PDFRawStream)) throw new Error("Expected actual PDF content stream.");
+    const text = new TextDecoder("windows-1252").decode(stream.getContents());
+    expect(text).toContain("A -> B");
+    expect(text).toContain("toneladas -> kg");
+    expect(text).toContain("Origen <- Destino");
+    expect(text).toContain("A <-> B");
+    expect(text).toContain("2 × 3 = 6 €; condición confirmada");
+    expect(text).not.toContain("?");
+  });
+  it("normalizes accents and retains literal questions and arrows in structured PDF slides", async () => {
+    const generated = await generateLocalDocument({ format: "pdf", title: "Summary", content: "Description", slides: [
+      { title: "A → B", body: "toneladas → kg\ncondicio\u0301n\n¿Dato confirmado?" },
+    ] });
+    const document = await PDFDocument.load(generated.data);
+    const stream = document.getPage(0).node.lookup(PDFName.of("Contents"));
+    if (!(stream instanceof PDFRawStream)) throw new Error("Expected actual PDF content stream.");
+    const text = new TextDecoder("windows-1252").decode(stream.getContents());
+    expect(text).toContain("A -> B");
+    expect(text).toContain("toneladas -> kg");
+    expect(text).toContain("condición");
+    expect(text).toContain("¿Dato confirmado?");
+    expect(document.getPageCount()).toBe(1);
+  });
+  it.each(["漢", "🙂", "\u0001"])("rejects an unsupported PDF character instead of manufacturing a question mark: %s", async symbol => {
+    await expect(generateLocalDocument({ format: "pdf", title: "Report", content: `Source ${symbol} result` }))
+      .rejects.toMatchObject({ code: "LOCAL_DOCUMENT_PDF_TEXT_UNSUPPORTED" });
+  });
   it("prints schedule names and split shifts with wrapping, generous rows and repeated weekly headings", async () => {
     const generated = await generateLocalDocument({ format: "xlsx", title: "Palamós · 2026-W16", content: "Esborrany. Revisar abans de publicar.", spreadsheetLayout: "schedule", rows: [
       ["Persona", "Dl", "Dt", "Dc", "Dj", "Dv", "Ds", "Dg", "Hores"],
@@ -125,6 +156,21 @@ describe("local document generator", () => {
     expect(sheet).toContain('<c r="A5" t="inlineStr"><is><t xml:space="preserve">=SUM(A2:A3)</t>');
     expect(sheet).toContain('=WEBSERVICE(&quot;https://example.test&quot;)');
     expect(await archive.file("xl/workbook.xml")!.async("text")).toContain('fullCalcOnLoad="1"');
+  });
+
+  it("keeps literal text inside generic spreadsheet columns for whole-sheet PDF export", async () => {
+    const literal = "=SUM(A2:A3)";
+    const generated = await generateLocalDocument({ format: "xlsx", title: "Readable columns", content: "Literal text",
+      rows: [["Values", "Notes"], [literal, "x".repeat(300)], [null, 42]] });
+    const archive = await JSZip.loadAsync(generated.data);
+    const sheet = await archive.file("xl/worksheets/sheet1.xml")!.async("text");
+    const columns = [...sheet.matchAll(/<col min="(\d+)" max="\d+" width="([\d.]+)" customWidth="1"\/>/gu)];
+    expect(columns.map(column => Number(column[1]))).toEqual([1, 2]);
+    expect(Number(columns[0][2])).toBeGreaterThan(literal.length);
+    expect(Number(columns[1][2])).toBeGreaterThan(Number(columns[0][2]));
+    expect(Number(columns[1][2])).toBeLessThanOrEqual(255);
+    expect(sheet).toContain(`<c r="A2" t="inlineStr"><is><t xml:space="preserve">${literal}</t>`);
+    expect(sheet).not.toContain("<f>");
   });
 
   it.each(['WEBSERVICE("https://example.test")', '[external.xlsx]Sheet1!A1', "cmd|' /C calc'!A0", 'HYPERLINK("https://example.test")'])

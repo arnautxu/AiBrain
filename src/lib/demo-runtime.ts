@@ -1,9 +1,10 @@
 import { isTurnOptions, type ActivityItem, type ChatRequest, type PlanStep } from "@/lib/chat-contract";
+import { MAX_COMPOSER_TEXT_CHARS } from "@/lib/chat-input-limits";
 
 export function isChatRequest(value: unknown): value is ChatRequest {
   if (!value || typeof value !== "object") return false;
   if (!("message" in value) || typeof value.message !== "string") return false;
-  if ("displayMessage" in value && (typeof value.displayMessage !== "string" || value.displayMessage.length > 500)) return false;
+  if ("displayMessage" in value && (typeof value.displayMessage !== "string" || value.displayMessage.length > MAX_COMPOSER_TEXT_CHARS)) return false;
   if (!("projectId" in value) || typeof value.projectId !== "string") return false;
   if (!("threadId" in value) || typeof value.threadId !== "string") return false;
   if (!("userMessageId" in value) || typeof value.userMessageId !== "string") return false;

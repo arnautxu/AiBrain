@@ -8,11 +8,13 @@ vi.mock("@/auth/session", () => ({
 import { createHmac } from "node:crypto";
 import {
   CURRENT_THREAD_TOOLSET_REVISION,
+  currentThreadToolsetRevision,
   issueThreadToken,
   readThreadToken,
   readThreadTokenContext,
   toolsetRevisionForIssuedThreadToken,
 } from "@/runtime/thread-token";
+import { runtimeThreadIdForChatMessage } from "@/runtime/chat-thread-selection";
 
 describe("runtime thread token", () => {
   const userA = "00000000-0000-4000-8000-000000000001";

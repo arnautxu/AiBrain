@@ -20,7 +20,7 @@ import {
 import { useModalFocus } from "@/ui/use-modal-focus";
 import { KnowledgeReviewPanel } from "@/components/knowledge-review-panel";
 
-function memoryDate(value: string, locale: "en" | "es" = "es") {
+function memoryDate(value: string, locale: "en" | "es" | "ca" = "es") {
   const date = new Date(value);
   return Number.isNaN(date.valueOf()) ? "" : new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(date);
 }

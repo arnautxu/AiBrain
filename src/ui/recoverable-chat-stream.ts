@@ -32,7 +32,7 @@ export type ChatStreamRecoveryMeasurement = Readonly<{
 export type ChatStreamRecoveryState =
   | Readonly<{ state: "recovering"; attempt: number }>
   | Readonly<{ state: "stalled"; attempt: number }>
-  | Readonly<{ state: "paused" }>
+  | Readonly<{ state: "paused"; admissionUnconfirmed?: boolean }>
   | Readonly<{ state: "recovered" | "idle" }>;
 
 export class ChatStreamRecoveryError extends Error {
@@ -125,6 +125,8 @@ export async function consumeRecoverableChatStream(options: {
   onMeasurement: (measurement: ChatStreamRecoveryMeasurement) => void;
   /** Explicit retry or a browser-online event; reuses the same request identity. */
   waitForRetry?: (signal: AbortSignal) => Promise<void>;
+  /** A local Stop before admission suspends re-POSTs, never confirms server cancellation. */
+  pendingStop?: { readonly retriesPaused: boolean; readonly terminalObserved: boolean; observeTerminal?: () => void };
   scheduler?: ChatStreamRecoveryScheduler;
   startedAt?: number;
 }) {
@@ -145,6 +147,18 @@ export async function consumeRecoverableChatStream(options: {
   };
 
   while (true) {
+    if (options.pendingStop?.terminalObserved) {
+      options.onRecoveryState({ state: "idle" });
+      return measurement;
+    }
+    if (!accepted && options.pendingStop?.retriesPaused && recoveryAttempt > 0) {
+      options.onRecoveryState({ state: "paused", admissionUnconfirmed: true });
+      // No retry wakeup (including online/manual) may dispatch the stopped
+      // unconfirmed submission. Only admission/terminal evidence can resolve it.
+      if (!options.waitForRetry) throw new ChatStreamRecoveryError();
+      await options.waitForRetry(options.signal);
+      continue;
+    }
     if (options.signal.aborted) {
       update({ closedAtMs: elapsed(), closeReason: "aborted" });
       throw options.signal.reason instanceof Error ? options.signal.reason : new DOMException("La recuperación se ha cancelado.", "AbortError");
@@ -206,7 +220,10 @@ export async function consumeRecoverableChatStream(options: {
             }
           }
           if (event.type === "done" || event.type === "stopped" || event.type === "error" ||
-              (event.type === "snapshot" && event.message.status !== "streaming")) sawTerminal = true;
+              (event.type === "snapshot" && event.message.status !== "streaming")) {
+            sawTerminal = true;
+            options.pendingStop?.observeTerminal?.();
+          }
           options.onEvent(event);
         }, { signal: attemptController.signal, onActivity: () => { lastActivityAt = scheduler.now(); armDeadline(STREAM_SILENCE_TIMEOUT_MS); }, stopOnTerminal: true });
         update({ closedAtMs: elapsed(), closeReason: options.signal.aborted ? "aborted" : "stream-ended" });
@@ -227,6 +244,11 @@ export async function consumeRecoverableChatStream(options: {
       if (idleTimer !== null) scheduler.clearTimeout(idleTimer);
       if (deadline !== null) scheduler.clearTimeout(deadline);
       options.signal.removeEventListener("abort", abortAttempt);
+    }
+
+    if (!accepted && options.pendingStop?.retriesPaused) {
+      recoveryAttempt = Math.max(1, recoveryAttempt);
+      continue;
     }
 
     if (sawProgress && !attemptController.signal.aborted && lastActivityAt - connectionStartedAt >= 15_000) { recoveryAttempt = 0; recoveryWindowStarted = null; }

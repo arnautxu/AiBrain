@@ -13,8 +13,11 @@ const context = { config, installationId: "company-qa", userId: "11111111-1111-4
 describe("Outlook dynamic tool authorization", () => {
   beforeEach(() => { vi.clearAllMocks(); mocks.access.mockResolvedValue({ accessToken: "access-token-value", binding: {} }); mocks.search.mockResolvedValue({ messages: [] }); });
 
-  it("does not touch credentials unless @outlook was authorized for this exact turn", async () => {
-    await expect(handleOutlookDynamicToolCall(params, { ...context, outlookSelected: false })).resolves.toMatchObject({ success: false });
+  it("reports an unavailable user connection without touching credentials, and preserves turn checks", async () => {
+    await expect(handleOutlookDynamicToolCall(params, { ...context, outlookSelected: false })).resolves.toEqual({
+      success: false,
+      contentItems: [{ type: "inputText", text: "Outlook connection is not available or verified for this user." }],
+    });
     await expect(handleOutlookDynamicToolCall(params, { ...context, runtimeTurnId: "another-turn" })).resolves.toMatchObject({ success: false });
     expect(mocks.access).not.toHaveBeenCalled();
   });

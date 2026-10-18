@@ -36,7 +36,7 @@ export type OperationalLoggerOptions = {
 const REDACTED = "[REDACTED]";
 const PATH_REDACTED = "[PATH_REDACTED]";
 const TRUNCATED = "[TRUNCATED]";
-const SENSITIVE_KEY = /(?:authorization|body|content|cookie|credential|email|excerpt|message|password|prompt|secret|session|token|api[-_]?key)/iu;
+const SENSITIVE_KEY = /(?:authorization|body|content|cookie|credential|email|excerpt|message|password|prompt|secret|session|token|api[-_]?key|recovery[-_]?id|code[-_]?(?:verifier|challenge))/iu;
 const PATH_KEY = /(?:^|[-_])(?:file|path|root|directory|cwd)(?:$|[-_])|(?:file|path|root|directory|cwd)$/iu;
 const SAFE_EVENT = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u;
 const MAX_DEPTH = 6;
@@ -53,7 +53,7 @@ function sanitizeString(value: string) {
     .replace(/\b(https?:\/\/)[^\s/@]+:[^\s/@]+@/giu, `$1${REDACTED}@`)
     .replace(/aibrain\.auth\.[^.\s]+\.[^\s,;]+/giu, "aibrain.auth.[REDACTED]")
     .replace(/\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}(?:\.[A-Za-z0-9_-]{12,})?\b/gu, REDACTED)
-    .replace(/([?&](?:access_token|api_key|key|password|secret|token)=)[^&#\s]+/giu, `$1${REDACTED}`)
+    .replace(/([?&#](?:amp;)?(?:access_token|refresh_token|token_hash|api_key|key|password|secret|token|code|code_verifier|code_challenge)=)[^&#\s"'<>]+/giu, `$1${REDACTED}`)
     .replace(/\b(password|secret|token)=([^\s,;]+)/giu, `$1=${REDACTED}`);
 }
 

@@ -17,7 +17,7 @@ import tempfile
 import threading
 import time
 
-EXPECTED_VERSION='codex-cli 0.153.4'
+EXPECTED_VERSION='codex-cli 0.162.1'
 spec=importlib.util.spec_from_file_location('knowledge_codex_config',Path(__file__).resolve().parents[1]/'infra/hetzner/knowledge-codex-config.py')
 settings=importlib.util.module_from_spec(spec);spec.loader.exec_module(settings)
 
