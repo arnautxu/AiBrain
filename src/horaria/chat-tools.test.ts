@@ -1,4 +1,6 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { renderReviewedSchedulePdf } from "./reviewed-pdf";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +11,7 @@ import { confirmsHoraria, handleHorariaToolCall, handleHorariaToolCallSafely, HO
 import { resolveOperation } from "./operations";
 import { callHoraria, loadHorariaConfig } from "./client";
 vi.mock("server-only", () => ({}));
+vi.mock("./reviewed-pdf", () => ({ renderReviewedSchedulePdf: vi.fn() }));
 vi.mock("./client", () => ({ callHoraria: vi.fn(), loadHorariaConfig: vi.fn() }));
 const roots: string[] = [];
 afterEach(async () => { vi.resetAllMocks(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -35,7 +38,7 @@ describe("horarIA chat boundary", () => {
   it.each(["Sí", "Confirmo", "Si! Tienes que añadir al trabajador prova, que además es el encargado", "Sí, adelante con la propuesta.", "Confirmo la creación de la tienda.", "Sí! A més afegeix el treballador de prova."])("accepts explicit confirmation with extra text: %s", message => {
     expect(confirmsHoraria(message)).toBe(true);
   });
-  it.each(["Si, por que no has creado la nueva tienda?", "Sí, pero cambia el nombre", "Sí, si tiene permiso", "Si puedes crearla", "Sí, antes revisa los datos", "Sí, no la crees todavía", "Confirmo solo la primera", "El documento dice: sí", "No confirmo", "Sí, espera", "Si us plau explica què faràs"])("rejects questions, conditions and indirect consent: %s", message => {
+  it.each(["Si, por que no has creado la nueva tienda?", "Sí, pero cambia el nombre", "Sí, si tiene permiso", "Si puedes crearla", "Sí, antes revisa los datos", "Sí, no la crees todavía", "Confirmo solo la primera", "Sí, només la botiga 7 si està tot bé", "Confirmo només la botiga 7 però canvia el nom", "El documento dice: sí", "No confirmo", "Sí, espera", "Si us plau explica què faràs"])("rejects questions, conditions and indirect consent: %s", message => {
     expect(confirmsHoraria(message)).toBe(false);
   });
   it("executes only the frozen change when confirmation also requests a new employee", async () => {
@@ -45,6 +48,20 @@ describe("horarIA chat boundary", () => {
     await run("confirm", { proposalId: pending.proposalId }, { sourceTurnId: "turn-2", sourceMessage: "Si! Tienes que añadir al trabajador prova" });
     expect(callHoraria).toHaveBeenCalledOnce();
     expect(vi.mocked(callHoraria).mock.calls[0][2]).toEqual(input);
+  });
+  it.each(["7", "8"])("binds a long scoped confirmation to the frozen shop %s", async shopId => {
+    const { run } = await setup();
+    const input = { operation: "establishments.update", id: shopId, body: { activo: true, enviamentAutomatic: false } };
+    const pending = await run("run", input);
+    const confirmation = run("confirm", { proposalId: pending.proposalId }, { sourceTurnId: "turn-2", sourceMessage: "Sí, confirmo la proposta revisada per activar temporalment només la botiga 7 PRUEBA HORARIOS OCTUBRE, amb enviamentAutomatic=false i la resta de dades igual. Aplica només aquest canvi i comprova després que s’ha desat." });
+    if (shopId === "7") {
+      await expect(confirmation).resolves.toMatchObject({ saved: true });
+      expect(callHoraria).toHaveBeenCalledOnce();
+      expect(vi.mocked(callHoraria).mock.calls[0][2]).toEqual(input);
+    } else {
+      await expect(confirmation).rejects.toThrow("no coincideix");
+      expect(callHoraria).not.toHaveBeenCalled();
+    }
   });
   it("returns the actual confirmation failure as structured output without executing", async () => {
     const { context } = await setup();
@@ -117,6 +134,34 @@ describe("horarIA chat boundary", () => {
     expect(vi.mocked(callHoraria).mock.calls[0][2]).toEqual(input);
     expect(context.preview).toHaveBeenCalledWith(draft);
   });
+  it.each(["valid", "wrong-pdf", "changed-source", "retry-attachment"])("projects only the preserved reviewed PDF: %s", async (scenario) => {
+    const { run, context } = await setup();
+    const workbook = Buffer.from("synthetic authorized workbook"), pdf = Buffer.from("%PDF-1.7\nsynthetic print\n%%EOF");
+    const hash = (data: Buffer) => createHash("sha256").update(data).digest("hex");
+    await writeFile(path.join(context.projectWorkspace, "corrected.xlsx"), workbook);
+    const receipt = { artifactPurpose: "reviewed-excel", sha256: hash(workbook), deliveryBlocker: "SHOP_INACTIVE",
+      pdf: { filename: "horari-7-2026-W44-123456abcdef.pdf", pages: 1,
+        sourceSha256: scenario === "changed-source" ? "b".repeat(64) : hash(workbook),
+        sha256: scenario === "wrong-pdf" ? "a".repeat(64) : hash(pdf) } };
+    vi.mocked(callHoraria).mockResolvedValue(receipt);
+    vi.mocked(renderReviewedSchedulePdf).mockResolvedValue(pdf);
+    const input = { operation: "schedules.review-upload", uploadPath: "corrected.xlsx", body: { establecimientoId: 7, sourceId: "a".repeat(64), deliveryFormat: "pdf" } };
+    if (scenario === "wrong-pdf" || scenario === "changed-source") {
+      await expect(run("run", input)).rejects.toThrow();
+      expect(context.preview).not.toHaveBeenCalled();
+    } else {
+      if (scenario === "retry-attachment") {
+        context.preview.mockRejectedValueOnce(new Error("Artifact temporarily unavailable"));
+        await expect(run("run", input)).rejects.toThrow("Artifact temporarily unavailable");
+      }
+      const result = await run("run", input);
+      expect(result.pdfAttached).toBe(true);
+      expect(result.deliveryBlocker).toBe("SHOP_INACTIVE");
+      expect(context.preview).toHaveBeenLastCalledWith({ artifactPurpose: "reviewed-pdf", data: pdf, fileName: receipt.pdf.filename });
+      expect(callHoraria).toHaveBeenCalledOnce();
+    }
+  });
+
   it("generates and attaches a draft in the requesting turn without business-write confirmation", async () => {
     const { run, context } = await setup();
     const draft = { title: "Proves", draftOnly: true, review: { allRespected: false, conflicts: ["Cobertura insuficient"] } };

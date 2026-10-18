@@ -412,7 +412,8 @@ export class DocumentPreviewService {
           if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT") throw error;
         }
       }
-      const layoutMatches = document.kind !== "xlsx" || cachedLayout === layoutMarker || (!printLayout && cachedLayout === null);
+      const layoutMatches = document.kind !== "xlsx" || cachedLayout === layoutMarker ||
+        (cachedLayout === null && (!printLayout || this.spreadsheetLayout === "print"));
       try {
         const existing = await this.readMetadata(metadataPath);
         if (existing.sourceSha256 !== document.sha256 || existing.kind !== document.kind ||

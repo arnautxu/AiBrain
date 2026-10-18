@@ -114,6 +114,11 @@ describe("document preview service", () => {
     const service = new DocumentPreviewService({ stagingRoot, previewRoot, lockManager: locks, runner, spreadsheetLayout: "print",
       tools: { soffice: "/tools/soffice", pdfinfo: "/tools/pdfinfo", pdftoppm: "/tools/pdftoppm", qpdf: "/tools/qpdf" } });
     expect((await service.create(staged)).pages).toBe(1); expect(filters).toEqual(["pdf:calc_pdf_Export"]);
+    // Existing reviewed-PDF identities already used print layout before the
+    // automatic viewer policy; preserve their exact previously reviewed bytes.
+    await unlink(path.join(previewRoot, THREAD_ID, UPLOAD_ID, "spreadsheet-layout.txt"));
+    expect((await service.create(staged)).pages).toBe(1);
+    expect(filters).toEqual(["pdf:calc_pdf_Export"]);
     expect(await readFile(path.join(stagingRoot, staged.relativePath))).toEqual(generated.data);
   });
 

@@ -238,3 +238,16 @@ La representació en memòria cau es reconstrueix una vegada; els bytes de
 l’Excel, els fulls auxiliars i la vista de dades es conserven. Els altres
 llibres mantenen la previsualització de full complet. Això no acredita la
 revisió ni l’enviament del PDF de repartiment, que segueixen el seu circuit.
+
+### PDF revisat adjunt abans del repartiment
+
+La revisió de l’Excel retorna també el PDF real com a adjunt privat del xat.
+Es projecten només els bytes convertits pel servidor que coincideixen amb el
+hash del PDF i el hash de l’Excel del rebut. El bloqueig d’enviament d’una
+botiga inactiva continua vigent, però no impedeix veure el document revisat.
+Si falla l’adjunt es pot recuperar la revisió acabada sense repetir el càlcul,
+la revisió externa ni cap enviament. `pdfAttached` només s’informa després de
+persistir i projectar l’artefacte. El repartiment manté la confirmació posterior,
+el destinatari i la vinculació exacta de versió.
+
+Les confirmacions llargues poden restringir explícitament el canvi a «només la botiga 7» (també castellà/anglès). Aquesta restricció només autoritza una proposta immutable `establishments.update` amb el mateix identificador; una altra botiga, una condició o una confirmació parcial segueixen rebutjades.

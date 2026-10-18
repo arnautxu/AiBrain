@@ -1,3 +1,4 @@
+import { generatedDocumentArtifactId, persistGeneratedDocumentArtifact } from "@/runtime/generated-document-artifacts";
 import { productSafeRuntimeMessage } from "@/runtime/error-guidance";
 import { hostAnalysisConfig, hostAnalysisToolAllowed, type HostAnalysisPolicy } from "@/runtime/host-analysis-policy";
 import { INSTANTLY_DYNAMIC_TOOLS, INSTANTLY_NAMESPACE, handleInstantlyTool } from "@/runtime/instantly-dynamic-tools";
@@ -1937,6 +1938,22 @@ async function runWorkerCodexTurnAttempt(
               sourceMessage: chatRequest.message, runtimeThreadId: threadId, runtimeTurnId: horariaTurnId,
               projectWorkspace, background: Boolean(backgroundExecution),
               preview: async (data) => {
+                if (isRecord(data) && data.artifactPurpose === "reviewed-pdf") {
+                  if (!Buffer.isBuffer(data.data) || typeof data.fileName !== "string" ||
+                      !/^horari-[0-9]+-[0-9]{4}-W[0-9]{2}-[a-f0-9]{12}\.pdf$/.test(data.fileName)) throw new Error("PDF revisat invàlid.");
+                  const relativePath = `documents/${data.fileName}`;
+                  const artifact = await persistGeneratedDocumentArtifact({
+                    artifactId: generatedDocumentArtifactId(chatRequest.assistantMessageId, relativePath),
+                    relativePath, contents: data.data, pages: 1,
+                    context: { installation: runtime.config, projectId: chatRequest.projectId,
+                      threadId: chatRequest.threadId, messageId: chatRequest.assistantMessageId, storageOwnerId: authenticatedUserId },
+                  });
+                  if (!projectedDocumentArtifactIds.has(artifact.id)) {
+                    await emit({ type: "artifact", item: artifact }, { envelope, key: `artifact:horaria-pdf:${artifact.id}` });
+                    projectedDocumentArtifactIds.add(artifact.id);
+                  }
+                  return;
+                }
                 if (isRecord(data) && data.artifactPurpose === "reviewed-excel") return; // Preserve the attached corrected original.
                 if (!isRecord(data) || !Array.isArray(data.rows) || typeof data.title !== "string" || typeof data.previewHash !== "string") throw new Error("Previsualització d’horaris invàlida.");
                 const collection = data.artifactPurpose === "collection";
