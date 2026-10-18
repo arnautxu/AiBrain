@@ -1,3 +1,4 @@
+import JSZip from "jszip";
 import { mkdtemp, readFile, readdir, rm, symlink, truncate, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -64,6 +65,36 @@ describe("document preview service", () => {
 
   afterEach(async () => {
     await rm(root, { recursive: true, force: true });
+  });
+
+  it("rebuilds an existing whole-sheet schedule preview using its print area without changing the workbook", async () => {
+    const generated = await generateLocalDocument({ format: "xlsx", title: "Schedule", content: "Synthetic fixture", rows: [["Person", "08:00–14:00"]] });
+    const zip = await JSZip.loadAsync(generated.data);
+    zip.file("xl/workbook.xml", '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheets><sheet name="HORARI"/><sheet name="TRACTES"/><sheet name="VACANCES"/><sheet name="PESONAL"/></sheets><definedNames><definedName name="_xlnm.Print_Area" localSheetId="0">HORARI!$B$1:$X$97</definedName></definedNames></workbook>');
+    const data = await zip.generateAsync({ type: "nodebuffer" });
+    const staged = await new FileDocumentStagingStore(stagingRoot, locks).stage({ threadId: THREAD_ID, uploadId: UPLOAD_ID, data,
+      validated: validateUploadedDocument({ fileName: "corrected.xlsx", declaredMimeType: generated.mimeType, data }) });
+    const filters: string[] = [];
+    const runner: DocumentToolRunner = { async run(command, args, options) {
+      if (command.endsWith("soffice")) {
+        filters.push(args[args.indexOf("--convert-to") + 1]);
+        expect(await readFile(args.at(-1)!)).toEqual(data);
+        await writeFile(path.join(options.cwd, "input.pdf"), "%PDF-1.7\nschedule fixture\n%%EOF");
+      }
+      if (command.endsWith("pdftoppm")) await writeFile(`${args.at(-1)}.png`, generatedPngFixture(16, 9));
+      return { stdout: `Pages: ${filters.length === 1 ? 4 : 1}\nEncrypted: no\n`, stderr: "" };
+    } };
+    const options = { stagingRoot, previewRoot, lockManager: locks, runner,
+      tools: { soffice: "/tools/soffice", pdfinfo: "/tools/pdfinfo", pdftoppm: "/tools/pdftoppm", qpdf: "/tools/qpdf" } };
+    expect((await new DocumentPreviewService({ ...options, spreadsheetLayout: "whole-sheet" }).create(staged)).pages).toBe(4);
+    // Simulate previews persisted before layout markers existed.
+    await unlink(path.join(previewRoot, THREAD_ID, UPLOAD_ID, "spreadsheet-layout.txt"));
+    const service = new DocumentPreviewService(options);
+    expect((await service.create(staged)).pages).toBe(1);
+    expect((await service.create(staged)).pages).toBe(1);
+    expect(filters).toEqual(['pdf:calc_pdf_Export:{"SinglePageSheets":{"type":"boolean","value":"true"}}', "pdf:calc_pdf_Export"]);
+    expect(await readFile(path.join(stagingRoot, staged.relativePath))).toEqual(data);
+    await expect(service.renderPage(THREAD_ID, UPLOAD_ID, 2)).rejects.toMatchObject({ code: "DOCUMENT_PREVIEW_PAGE_INVALID" });
   });
 
   it("prints the reviewed workbook using its own print area and never whole-sheet export", async () => {

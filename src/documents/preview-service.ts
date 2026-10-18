@@ -1,3 +1,4 @@
+import { usesSchedulePrintArea } from "./spreadsheet-print-layout";
 import { transcribeAudio } from "./audio-transcription";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -299,7 +300,7 @@ export class DocumentPreviewService {
     audioGate?: DocumentConversionAdmission;
     audioTranscribe?: (document: StagedDocument, source: Buffer, signal?: AbortSignal) => Promise<string>;
     requireQpdf?: boolean;
-    spreadsheetLayout?: "whole-sheet" | "print";
+    spreadsheetLayout?: "auto" | "whole-sheet" | "print";
     now?: () => number;
   }) {
     if (!path.isAbsolute(options.stagingRoot) || !path.isAbsolute(options.previewRoot)) {
@@ -319,7 +320,7 @@ export class DocumentPreviewService {
       );
     }
     this.now = options.now ?? Date.now;
-    this.spreadsheetLayout = options.spreadsheetLayout ?? "whole-sheet";
+    this.spreadsheetLayout = options.spreadsheetLayout ?? "auto";
     this.tools = {
       ffprobe: validateToolPath("ffprobe", options.tools.ffprobe, false),
       audioTranscriber: validateToolPath("audioTranscriber", options.tools.audioTranscriber, false),
@@ -337,7 +338,7 @@ export class DocumentPreviewService {
   private readonly audioTranscribe: ((document: StagedDocument, source: Buffer, signal?: AbortSignal) => Promise<string>) | undefined;
   private readonly audioGate: DocumentConversionAdmission | null;
   private readonly now: () => number;
-  private readonly spreadsheetLayout: "whole-sheet" | "print";
+  private readonly spreadsheetLayout: "auto" | "whole-sheet" | "print";
 
   private previewLocations(threadId: string, uploadId: string) {
     if (!UUID.test(threadId) || !UUID.test(uploadId)) {
@@ -395,13 +396,30 @@ export class DocumentPreviewService {
     }
     const { directory, metadataPath } = this.previewLocations(document.threadId, document.uploadId);
     return this.lockManager.withLock(`document-preview:${metadataPath}`, async () => {
+      const source = await readRegularFileWithin(this.stagingRoot, document.relativePath, 50 * 1024 * 1024);
+      if (source.length !== document.size || createHash("sha256").update(source).digest("hex") !== document.sha256) {
+        throw new StorageError("DOCUMENT_PREVIEW_SOURCE_CHANGED", "Staged source no longer matches its immutable identity.");
+      }
+      const printLayout = document.kind === "xlsx" && (this.spreadsheetLayout === "print" ||
+        (this.spreadsheetLayout === "auto" && await usesSchedulePrintArea(source)));
+      // A separate private cache marker avoids changing document/API metadata.
+      // Existing whole-sheet previews are rebuilt once for schedule print areas.
+      const layoutMarker = `${document.sha256}:${printLayout ? "print-v1" : "whole-sheet"}`;
+      let cachedLayout: string | null = null;
+      if (document.kind === "xlsx") {
+        try { cachedLayout = (await readRegularFileWithin(directory, "spreadsheet-layout.txt", 100)).toString("utf8"); }
+        catch (error) {
+          if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT") throw error;
+        }
+      }
+      const layoutMatches = document.kind !== "xlsx" || cachedLayout === layoutMarker || (!printLayout && cachedLayout === null);
       try {
         const existing = await this.readMetadata(metadataPath);
         if (existing.sourceSha256 !== document.sha256 || existing.kind !== document.kind ||
             existing.threadId !== document.threadId || existing.uploadId !== document.uploadId) {
           throw new StorageError("DOCUMENT_PREVIEW_CONFLICT", "Preview id already belongs to different source content.");
         }
-        if (existing.schemaVersion === 2) {
+        if (existing.schemaVersion === 2 && layoutMatches) {
           try {
             await this.verifyArtifacts(existing, directory);
             return existing;
@@ -416,10 +434,6 @@ export class DocumentPreviewService {
       await ensurePrivateDirectoryTree(this.previewRoot, [document.threadId, document.uploadId]);
       const work = await mkdtemp(path.join(directory, ".work-"));
       try {
-        const source = await readRegularFileWithin(this.stagingRoot, document.relativePath, 50 * 1024 * 1024);
-        if (source.length !== document.size || createHash("sha256").update(source).digest("hex") !== document.sha256) {
-          throw new StorageError("DOCUMENT_PREVIEW_SOURCE_CHANGED", "Staged source no longer matches its immutable identity.");
-        }
         if (options.signal?.aborted) {
           throw new StorageError("DOCUMENT_OPERATION_ABORTED", "Document preview was aborted.");
         }
@@ -465,7 +479,7 @@ export class DocumentPreviewService {
             // strips. Whole-sheet export keeps cell styles, merges, drawings
             // and charts together on one vector PDF page per sheet.
             const pdfFilter = document.kind === "xlsx"
-              ? this.spreadsheetLayout === "print" ? "pdf:calc_pdf_Export" : 'pdf:calc_pdf_Export:{"SinglePageSheets":{"type":"boolean","value":"true"}}'
+              ? printLayout ? "pdf:calc_pdf_Export" : 'pdf:calc_pdf_Export:{"SinglePageSheets":{"type":"boolean","value":"true"}}'
               : "pdf";
             const conversionStarted = performance.now();
             const convert = (filter: string) => this.runner.run(this.tools.soffice, [
@@ -480,7 +494,7 @@ export class DocumentPreviewService {
               // Calc can crash drawing SinglePageSheets for an otherwise valid
               // workbook. Retry once using its original print layout, retaining
               // the same sandbox, source bytes and total conversion deadline.
-              if (document.kind !== "xlsx" || this.spreadsheetLayout === "print" || !(error instanceof DocumentToolProcessError) ||
+              if (document.kind !== "xlsx" || printLayout || !(error instanceof DocumentToolProcessError) ||
                   error.spawnCode !== null || ![134, 139].includes(error.exitCode ?? 0) ||
                   options.signal?.aborted || performance.now() - conversionStarted >= 60_000) throw error;
               await rm(path.join(work, "input.pdf"), { force: true });
@@ -549,6 +563,7 @@ export class DocumentPreviewService {
           createdAt: new Date(this.now()).toISOString(),
         };
         await atomicWriteJson(metadataPath, preview, previewSchema);
+        if (document.kind === "xlsx") await atomicWriteFile(path.join(directory, "spreadsheet-layout.txt"), layoutMarker, { mode: 0o600 });
         return preview;
       } finally {
         await rm(work, { recursive: true, force: true });

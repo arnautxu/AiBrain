@@ -226,3 +226,15 @@ l'Excel malgrat haver-lo generat i adjuntat. Els fulls de recollida, els
 registres fallits i les respostes sense plantilla continuen rebutjats.
 La regressió del worker cobreix aquests casos; el nou candidat encara ha de
 superar CI, publicació, desplegament i una conversa autenticada completa.
+
+### Llegibilitat de la vista prèvia
+
+Els llibres amb els quatre fulls originals i l’àrea d’impressió
+`HORARI!$B$1:$X$97` es previsualitzen amb la impressió definida al llibre.
+L’exportació d’una pàgina gegant per full incloïa columnes auxiliars i files
+buides i feia il·legible l’horari. La detecció depèn de l’estructura del llibre,
+no del nom del fitxer, i funciona també després d’una correcció puntual.
+La representació en memòria cau es reconstrueix una vegada; els bytes de
+l’Excel, els fulls auxiliars i la vista de dades es conserven. Els altres
+llibres mantenen la previsualització de full complet. Això no acredita la
+revisió ni l’enviament del PDF de repartiment, que segueixen el seu circuit.
