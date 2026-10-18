@@ -57,13 +57,24 @@ describe("installation catalog baseline", () => {
   });
 });
 
-it('lists WORKSITEA email and Sage setup entries idempotently', async () => {
- const root=await mkdtemp(path.join(tmpdir(),'worksitea-catalog-'));roots.push(root);
- const fixture=JSON.parse(await readFile(path.join(process.cwd(),'config/installations/arnall.qa.example.json'),'utf8'));
- fixture.installationId='worksitea-qa';delete fixture.connectors;fixture.paths.dataRoot=path.join(root,'data');for(const key of ['companyContextRoot','usersRoot','backupsRoot'])fixture.paths[key]=path.join(root,'data',key);
- const installation=parseInstallationConfig(fixture);const store=new FileCatalogStore(installation.installationId,installation.paths.dataRoot);
- const state=await ensureInstallationCatalog(store,installation);
- expect(state.resources.map(r=>r.id)).toEqual(expect.arrayContaining(['gmail','outlook','worksitea-sage']));
- expect(state.resources.find(r=>r.id==='worksitea-sage')?.mcp).toBeNull();
- const again=await ensureInstallationCatalog(store,installation);expect(again.revision).toBe(state.revision);
+it("adds company-qa optional mailboxes only when configured and does so idempotently", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "company-qa-catalog-"));
+  roots.push(root);
+  const fixture = JSON.parse(await readFile(path.join(process.cwd(), "config/installations/arnall.qa.example.json"), "utf8"));
+  fixture.installationId = "company-qa";
+  delete fixture.connectors;
+  fixture.paths = {
+    dataRoot: path.join(root, "data"), companyContextRoot: path.join(root, "data/company-context"),
+    usersRoot: path.join(root, "data/users"), backupsRoot: path.join(root, "data/backups"),
+    sourceReadRoot: path.join(root, "source-ro"), publishWriteRoot: path.join(root, "publish-rw"),
+  };
+  const installation = parseInstallationConfig(fixture);
+  const store = new FileCatalogStore(installation.installationId, installation.paths.dataRoot);
+  const state = await ensureInstallationCatalog(store, installation);
+  expect(state.resources.filter(resource => resource.kind === "connector")).toEqual([]);
+  expect((await ensureInstallationCatalog(store, installation)).revision).toBe(state.revision);
+  const configured = parseInstallationConfig({ ...fixture, connectors: { gmail: { enabled: true }, outlook: { enabled: true } } });
+  const enabled = await ensureInstallationCatalog(store, configured);
+  expect(enabled.resources.filter(resource => resource.kind === "connector").map(resource => resource.id).sort()).toEqual(["gmail", "outlook"]);
+  expect((await ensureInstallationCatalog(store, configured)).revision).toBe(enabled.revision);
 });

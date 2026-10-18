@@ -588,21 +588,21 @@ describe("chat workspace simplificado", () => {
   });
 
   it.each([
-    ["¿Qué campañas tenemos en marcha?", "¿Qué campañas tenemos en marcha?"],
-    ["Preparar más leads cualificados", "Prepara 1000 leads cualificados más con la distribución de ICP acordada."],
-    ["¿Qué necesita mi atención?", "¿Qué necesita mi atención en outreach hoy?"],
-  ])("fills the Transportexample suggestion %s as an editable draft without submitting", (label, expectedContent) => {
+    { label: "Prepárame una presentación", expectedContent: "Prepárame una presentación sobre…", menuItem: null },
+    { label: "Trabajemos con estos Excels", expectedContent: "Trabajemos con estos Excels. Quiero…", menuItem: null },
+    { label: "Trabajemos en los horarios del equipo de Arnall", expectedContent: "Dame los horarios preparados del equipo de Arnall para…", menuItem: "Dame los horarios preparados" },
+  ])("fills the company-qa suggestion $label as an editable draft without submitting", ({ label, expectedContent, menuItem }) => {
     const onSend = vi.fn();
     const onAttachmentsChange = vi.fn();
     const onDestinationChange = vi.fn();
-    renderWorkspace(null, project, { installationId: "transportexample-demo", companyName: "Transportexample", prompt: "Mi borrador anterior", onSend, onAttachmentsChange, onDestinationChange });
-    expect(screen.queryByRole("button", { name: /Trabajemos en los horarios/ })).not.toBeInTheDocument();
+    renderWorkspace(null, project, { installationId: "company-qa", companyName: "Arnall", prompt: "Mi borrador anterior", onSend, onAttachmentsChange, onDestinationChange });
     fireEvent.click(screen.getByRole("button", { name: label }));
+    if (menuItem) fireEvent.click(screen.getByRole("menuitem", { name: menuItem }));
     const composer = screen.getByRole("textbox", { name: "Mensaje" });
-    expect((composer as HTMLTextAreaElement).value).toContain(expectedContent);
+    expect(composer).toHaveValue(expectedContent);
     expect(composer).not.toHaveValue("Mi borrador anterior");
-    fireEvent.change(composer, { target: { value: "Mi solicitud revisada para Transportexample" } });
-    expect(composer).toHaveValue("Mi solicitud revisada para Transportexample");
+    fireEvent.change(composer, { target: { value: "Mi solicitud revisada para Arnall" } });
+    expect(composer).toHaveValue("Mi solicitud revisada para Arnall");
     expect(onSend).not.toHaveBeenCalled();
     expect(onAttachmentsChange).not.toHaveBeenCalled();
     expect(onDestinationChange).not.toHaveBeenCalled();
@@ -920,14 +920,15 @@ it("removes server controls for Officeexample and Transportexample while preserv
   expect(screen.getByRole("button", { name: "Archivos del servidor" })).toBeInTheDocument();
 });
 
-it("keeps internal WORKSITEA apps out of Tools while preserving the production connector", () => {
-  renderWorkspace(null, null, { installationId: "worksitea-production", connectorCatalogStatus: "ready", connectorMentions: [
-    { id: "worksitea-production", label: "Full de producció", kind: "connector", status: "connected", statusCode: null, canRead: true, requiresApprovalForWrites: false },
-    { id: "worksitea-app-test", label: "Equips i calibracions", kind: "connector", status: "connected", statusCode: null, canRead: true, requiresApprovalForWrites: false },
+it("shows company-qa authorized connectors while keeping an unavailable connection disabled", () => {
+  renderWorkspace(null, null, { installationId: "company-qa", connectorCatalogStatus: "ready", connectorMentions: [
+    { id: "company-mail", label: "Correo de empresa", kind: "connector", status: "connected", statusCode: null, canRead: true, requiresApprovalForWrites: false },
+    { id: "gmail", label: "Gmail", kind: "connector", status: "admin_setup_required", statusCode: "GMAIL_NOT_CONFIGURED", canRead: false, requiresApprovalForWrites: false },
   ] });
   fireEvent.click(screen.getByRole("button", { name: "Conexiones" }));
-  expect(screen.getByRole("option", { name: /Full de producció/ })).toBeInTheDocument();
-  expect(screen.queryByRole("option", { name: /Equips i calibracions/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("option", { name: /Correo de empresa/ })).toBeEnabled();
+  expect(screen.getByRole("option", { name: /Gmail/ })).toBeDisabled();
+  expect(screen.queryByRole("option", { name: /Foreign connector/ })).not.toBeInTheDocument();
 });
 it("offers neutral tasks without implying department access to a WORKSITEA employee", () => {
   const send = vi.fn();

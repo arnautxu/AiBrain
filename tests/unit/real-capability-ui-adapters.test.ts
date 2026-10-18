@@ -273,9 +273,9 @@ describe("browser UI adapter", () => {
 });
 
 describe("publication UI adapter", () => {
-  it("recovers a WORKSITEA uncertain operation and rechecks the same id after refresh", async () => {
-    const operation = { ...publicationOperation, installationId: "worksitea-qa", status: "publishing",
-      targetRelativePath: "server-worksitea/M/WORKSITEA/PRODUCCIO/notes.md" };
+  it("recovers a company-qa uncertain operation without dispatching and preserves its confirmation binding", async () => {
+    const operation = { ...publicationOperation, installationId: "company-qa", status: "publishing",
+      targetRelativePath: "Reports/notes.md" };
     assertUiContract("PublicationRecoveryResponse", { publications: [{ operation, confirmationToken: "c".repeat(64) }] });
     expect(uiContractErrors("PublicationRecoveryResponse", { publications: [{ operation, confirmationToken: "invalid" }] })).not.toBeNull();
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => init?.method === "POST"
@@ -288,18 +288,25 @@ describe("publication UI adapter", () => {
     await decideDocumentPublication(draft, "confirm");
     await decideDocumentPublication(draft, "confirm");
     const bodies = fetchMock.mock.calls.slice(1).map((call) => JSON.parse(String(call[1]?.body)));
-    expect(bodies[0]).toEqual(bodies[1]);
-    expect(bodies[0].clientRequestId).toBe(`confirm:${operationId}`);
+    for (const body of bodies) {
+      expect(body).toMatchObject({ action: "confirm", turnId, confirmationToken: "c".repeat(64) });
+      expect(body.clientRequestId).toMatch(/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u);
+    }
+    expect(bodies[0].clientRequestId).not.toBe(bodies[1].clientRequestId);
+    expect(fetchMock.mock.calls.slice(1).map(call => String(call[0]))).toEqual([
+      `/api/threads/${threadId}/publications/${operationId}`,
+      `/api/threads/${threadId}/publications/${operationId}`,
+    ]);
   });
 
   it("rejects cross-thread, duplicate and malformed recovered confirmations", async () => {
-    const operation = { ...publicationOperation, installationId: "worksitea-qa",
-      targetRelativePath: "server-worksitea/M/WORKSITEA/PRODUCCIO/notes.md" };
+    const operation = { ...publicationOperation, installationId: "company-qa",
+      targetRelativePath: "Reports/notes.md" };
     const entry = { operation, confirmationToken: "c".repeat(64) };
     for (const publications of [
       [entry, entry], [{ ...entry, confirmationToken: "not-a-token" }],
       [{ ...entry, operation: { ...operation, threadId: uploadId } }],
-      [{ ...entry, operation: { ...operation, targetRelativePath: "server-worksitea/C/Windows/file.txt" } }],
+      [{ ...entry, operation: { ...operation, targetRelativePath: "../outside-allowed-root.txt" } }],
       [{ ...entry, secret: "unexpected" }],
     ]) {
       vi.stubGlobal("fetch", vi.fn(async () => Response.json({ publications })));

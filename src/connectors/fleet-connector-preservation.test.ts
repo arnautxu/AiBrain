@@ -3,8 +3,7 @@ import type { AuthSession } from "@/auth/types";
 import type { CatalogResource, CatalogState } from "@/catalog/contracts";
 
 const mocked = vi.hoisted(() => ({
-  installationId: "transportexample-demo", resources: [] as CatalogResource[],
-  internal: [] as CatalogResource[],
+  installationId: "company-qa", resources: [] as CatalogResource[],
   instantlyFails: false,
 }));
 vi.mock("server-only", () => ({}));
@@ -23,14 +22,9 @@ vi.mock("@/catalog/baseline", () => ({ ensureInstallationCatalog: async () => ({
     subjectId: null, effect: "allow", operations: ["read"],
   })),
 }) satisfies CatalogState }));
-vi.mock("@/worksitea-products/connectors", () => ({ internalConnectorsForIdentity: async () => mocked.internal }));
 vi.mock("@/connectors/server-service", () => ({ codexManagedAppCapabilities: async () => [] }));
-vi.mock("@/connectors/retaildemo-reporting", () => ({ RETAILDEMO_REPORTING_RESOURCES: [], retaildemoReportingCapabilities: async () => [] }));
 vi.mock("@/connectors/composio-service", () => ({ composioCapabilitiesForSession: async () => [], composioCapability: async () => null }));
 vi.mock("@/connectors/native-connection-health", () => ({ nativeConnectionHealthForIdentity: async () => new Map() }));
-vi.mock("@/connectors/officeexample-capabilities", () => ({ officeexampleConnectorHealth: async () => new Map([
-  ["officeexample-erp", { status: "connected", statusCode: null }],
-]) }));
 vi.mock("@/connectors/company-mail-server-service", () => ({
   companyMailCapabilityForSession: async () => ({ connectorId: "company-mail", status: "connected", statusCode: null }),
   companyMailAccessForIdentity: async () => ({}),
@@ -61,9 +55,8 @@ const session = (): AuthSession => ({
   user: { id: USER, name: "Actor", email: "actor@example.test" }, expiresAt: "2099-01-01T00:00:00.000Z",
 });
 beforeEach(() => {
-  mocked.installationId = "transportexample-demo";
+  mocked.installationId = "company-qa";
   mocked.resources = [resource("company-mail"), resource("instantly")];
-  mocked.internal = [];
   mocked.instantlyFails = false;
 });
 
@@ -80,27 +73,27 @@ it.each([true, false])("keeps company mail callable when Instantly health fails 
   expect(result.map(row => row.resource.id)).toEqual(["company-mail"]);
 });
 
-it("preserves Officeexample scoped broker discovery without enabling Sage", async () => {
-  mocked.installationId = "officeexample-production";
-  mocked.resources = [resource("officeexample-erp", "shared-resource"), resource("worksitea-sage", "none")];
+it("retains company-qa mail while omitting an unconfigured personal mailbox", async () => {
+  mocked.resources = [resource("company-mail"), resource("gmail", "personal-oauth")];
   const result = await resolveAvailableConnectorsForTurn(mocked.installationId, USER, [], session());
-  expect(result.map(row => row.resource.id)).toEqual(["officeexample-erp"]);
-  expect(connectorMentionDeveloperInstructions(result)).toContain('"toolNamespace":"officeexample_business"');
-});
-
-it("retains per-identity WORKSITEA production and department dispatch metadata", async () => {
-  mocked.installationId = "worksitea-production";
-  mocked.resources = [resource("worksitea-sage", "none")];
-  mocked.internal = [resource("worksitea-production", "none"), resource("worksitea-app-planning", "none")];
-  const result = await resolveAvailableConnectorsForTurn(mocked.installationId, USER, [], session());
-  expect(result.map(row => row.resource.id)).toEqual(["worksitea-app-planning", "worksitea-production"]);
+  expect(result.map(row => row.resource.id)).toEqual(["company-mail"]);
   const instructions = connectorMentionDeveloperInstructions(result);
-  expect(instructions).toContain('"toolNamespace":"aibrain_worksitea_production"');
-  expect(instructions).toContain('"readArguments":{"id":"planning","published":true}');
+  expect(instructions).toContain('"toolNamespace":"aibrain_company_mail"');
+  expect(instructions).not.toContain('"id":"gmail"');
 });
 
-it("never presents the unprovisioned WORKSITEA Sage tile as usable without health metadata", () => {
-  expect(projectConnectorMention(resource("worksitea-sage", "none"), new Map())).toMatchObject({
-    canRead: false, status: "admin_setup_required", statusCode: "WORKSITEA_SAGE_API_PENDING",
+it("rejects a foreign session before resolving the company-qa catalog", async () => {
+  const foreignSession = { ...session(), tenant: { id: "foreign-company", name: "Other installation" } };
+  await expect(resolveAvailableConnectorsForTurn(mocked.installationId, USER, [], foreignSession))
+    .rejects.toMatchObject({ code: "CONNECTOR_MENTION_IDENTITY_MISMATCH" });
+});
+
+it("keeps unconfigured personal credentials unavailable until a real provider connection exists", () => {
+  const mailbox = resource("gmail", "personal-oauth");
+  expect(projectConnectorMention(mailbox, new Map())).toMatchObject({
+    canRead: false, status: "requires_login", statusCode: "CONNECTOR_LOGIN_REQUIRED",
+  });
+  expect(projectConnectorMention(mailbox, new Map([["gmail", { status: "not_configured", statusCode: "GMAIL_NOT_CONFIGURED" }]]))).toMatchObject({
+    canRead: false, status: "admin_setup_required", statusCode: "GMAIL_NOT_CONFIGURED",
   });
 });

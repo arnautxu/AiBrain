@@ -1,5 +1,6 @@
-import workspaceLayout from "@/components/workspace-layout.module.css";
 "use client";
+
+import workspaceLayout from "@/components/workspace-layout.module.css";
 import { MAX_FILES_PER_MESSAGE } from "@/lib/chat-attachment-limits";
 import { continuingDocumentUploads } from "@/lib/continuing-document-uploads";
 

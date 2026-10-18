@@ -102,17 +102,16 @@ describe("internal agent product context", () => {
     expect(context).not.toMatch(/\bCodex\b|\bApp Server\b|\bgpt-[a-z0-9.-]+\b|\bChatGPT\b|\bOpenAI\b/iu);
   });
 
-  it("loads RETAILDEMO capability truth and refuses unauthenticated Shopify browser editing", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "retaildemo-context-"));
+  it("retains company-qa attachment guidance without inventing direct server or connector access", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "company-qa-context-"));
     roots.push(root);
-    const installation = { ...config(root), installationId: "retaildemo", companyName: "RETAILDEMO Creations", companySlug: "retaildemo",
-      branding: { ...config(root).branding, productName: "RETAILDEMO AI" } };
+    const installation = { ...config(root), installationId: "company-qa" };
     const context = await loadInternalAgentProductContext(installation, path.join(process.cwd(), "config", "internal-agent-context"));
-    expect(context).toContain("no uses el navegador como sustituto del conector");
-    expect(context).toContain("no pidas al usuario que resuelva su CAPTCHA");
-    expect(context).toContain("Shopify Orders es de lectura");
-    expect(context).toContain("Video heading");
-    expect(context).not.toContain("Arnall");
+    expect(context).toContain("No afirmes que tienes acceso directo al servidor de Arnall");
+    expect(context).toContain("arrastrar y soltar (drag and drop)");
+    expect(context).toContain("Puedes trabajar con los adjuntos recibidos y el conocimiento empresarial ya publicado");
+    expect(context).toContain("No afirmes acciones, acceso o capacidades sin evidencia del turno");
+    expect(context).not.toMatch(/RETAILDEMO|Shopify Orders|Video heading/u);
   });
 
   it("adds the same retrieval guidance for a new company without an installation-specific instruction file", async () => {

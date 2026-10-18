@@ -39,17 +39,18 @@ describe("CustomizationPanel", () => {
     expect(screen.getByRole("button", { name: "Conectar Correo Nominalia" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Conectar Correo Nominalia" })).not.toBeInTheDocument();
   });
-  it("renders English connector descriptions and owner-authorization guidance", async () => {
+  it("renders English connector descriptions and setup guidance for the current company", async () => {
     const snapshot = settings(false);
-    snapshot.connectors = [{ ...snapshot.connectors[0], id: "shopify-themes", label: "Shopify Website · RETAILDEMO", statusDetail: "La conexión de RETAILDEMO necesita autorización del propietario." }];
+    snapshot.company.installationId = "company-qa";
+    snapshot.connectors = [{ ...snapshot.connectors[0], statusDetail: "La conexión de correo todavía no está preparada." }];
     vi.stubGlobal("fetch", vi.fn(async () => Response.json(snapshot)));
-    const view = render(<UiLocaleProvider locale="en"><ThemeProvider><CustomizationPanel productName="RETAILDEMO AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider></UiLocaleProvider>);
-    expect(await screen.findByText("The RETAILDEMO connection requires the store owner’s authorization.")).toBeInTheDocument();
-    expect(screen.getByText("Edit your website draft: content, video, images, layout and configurator options.")).toBeInTheDocument();
-    expect(screen.getByText("Shopify Website · RETAILDEMO")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect Shopify Website · RETAILDEMO" })).toBeInTheDocument();
-    view.rerender(<UiLocaleProvider locale="es"><ThemeProvider><CustomizationPanel productName="RETAILDEMO AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider></UiLocaleProvider>);
-    expect(screen.getByText("La conexión de RETAILDEMO necesita autorización del propietario.")).toBeInTheDocument();
+    const view = render(<UiLocaleProvider locale="en"><ThemeProvider><CustomizationPanel productName="Arnall AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider></UiLocaleProvider>);
+    expect(await screen.findByText("The email connection is not ready yet.")).toBeInTheDocument();
+    expect(screen.getByText("Search and read your emails.")).toBeInTheDocument();
+    expect(screen.getByText("Gmail")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect Gmail" })).toHaveAttribute("href", "/api/connectors/gmail/oauth/start");
+    view.rerender(<UiLocaleProvider locale="es"><ThemeProvider><CustomizationPanel productName="Arnall AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider></UiLocaleProvider>);
+    expect(screen.getByText("La conexión de correo todavía no está preparada.")).toBeInTheDocument();
   });
   it("opens the requested tab after hydration and on each new opening", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json(settings(false))));
@@ -63,15 +64,14 @@ describe("CustomizationPanel", () => {
     rerender(<ThemeProvider><CustomizationPanel {...props} open initialTab="connectors" /></ThemeProvider>);
     expect(await screen.findByRole("searchbox", { name: "Buscar apps" })).toBeInTheDocument();
   });
-  it("explains the Website connection inside the RETAILDEMO AI and separates Shopify Orders", async () => {
+  it("keeps each company-qa mailbox attached to its own supported OAuth connection", async () => {
     const snapshot = settings(true);
-    snapshot.connectors = [{ ...snapshot.connectors[0], id: "shopify-themes", label: "Shopify Website · RETAILDEMO", connectUrl: "/api/connectors/shopify/themes/oauth/start", statusDetail: "Owner installation required." }];
+    snapshot.company.installationId = "company-qa";
     vi.stubGlobal("fetch", vi.fn(async () => Response.json(snapshot)));
-    render(<ThemeProvider><CustomizationPanel productName="RETAILDEMO AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
-    expect(await screen.findByText(/no en la configuración de Shopify ni en Sidekick/)).toBeInTheDocument();
-    expect(screen.getByText(/propietario de RETAILDEMO/)).toBeInTheDocument();
-    expect(screen.getByText("Owner installation required.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Conectar Shopify Website · RETAILDEMO" })).toHaveAttribute("href", "/api/connectors/shopify/themes/oauth/start");
+    render(<ThemeProvider><CustomizationPanel productName="Arnall AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
+    expect(await screen.findByRole("link", { name: "Conectar Gmail" })).toHaveAttribute("href", "/api/connectors/gmail/oauth/start");
+    expect(screen.getByRole("link", { name: "Conectar Outlook" })).toHaveAttribute("href", "/api/connectors/outlook/oauth/start");
+    expect(screen.queryByText(/Shopify/)).not.toBeInTheDocument();
   });
 
   it.each([false, true])("hides usage from employees and administrators (administrator=%s)", async (isAdmin) => {
