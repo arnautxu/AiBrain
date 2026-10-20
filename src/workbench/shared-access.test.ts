@@ -11,6 +11,7 @@ import { FileSharedAccessIndex } from "@/workbench/shared-access-index";
 import { loadSharedWorkbench, resolveProjectAccess, resolveThreadAccess } from "@/workbench/shared-access";
 import { createProject, createThread, getThreadRuntimeContext, prepareThreadTurn, updateProject, updateThread } from "@/workbench/store";
 import type { ResolvedPermissions } from "@/permissions";
+import { STANDALONE_PROJECT_SLUG } from "@/workbench/types";
 import { saveProjectPreferences } from "@/workbench/project-preferences";
 import { handleLocalDocumentDynamicToolCall } from "@/runtime/documents/dynamic-tools";
 
@@ -180,7 +181,17 @@ describe("shared project visibility", () => {
   }, 15_000);
 });
 
-it("persists preferences through a prepared owner turn while retaining foreign-owner and policy denials", async () => {
+function toolPermissions(installationId: string, userId: string, projectId: string): ResolvedPermissions {
+  return {
+    schemaVersion: 1, installationId, userId, projectId, roleId: null, turnId: randomUUID(),
+    resolvedAt: "2026-01-01T00:00:00.000Z", fingerprint: "a".repeat(64), sources: [],
+    rules: [{ ruleId: "tools.execute", action: "execute", effect: "allow", instruction: "Synthetic local tools",
+      sourceScope: "installation", sourcePolicyVersion: 1, precedence: 100 }],
+    developerInstructions: "Synthetic local tools policy",
+  };
+}
+
+it.each(["project", "standalone"])("persists preferences through a prepared own %s turn without weakening ownership or CAS", async kind => {
   const installation = await loadInstallationConfig();
   const provisioner = new UserProvisioner(installation);
   const session = (id: string, email: string): AuthSession => ({
@@ -191,47 +202,74 @@ it("persists preferences through a prepared owner turn while retaining foreign-o
   const owner = session(ownerId, "owner@example.com"), editor = session(editorId, "editor@example.com");
   await provisioner.provision({ userId: ownerId, email: owner.user.email, displayName: owner.user.name });
   await provisioner.provision({ userId: editorId, email: editor.user.email, displayName: editor.user.name });
-  const project = await createProject(owner, "Synthetic preferences");
+  const store = FileWorkbenchStore.fromInstallation(installation);
+  const project = kind === "standalone"
+    ? (await store.load(ownerId)).projects.find(item => item.slug === STANDALONE_PROJECT_SLUG)!
+    : await createProject(owner, "Synthetic preferences");
   const thread = await createThread(owner, project.id, "Preference request");
   const prepared = await prepareThreadTurn(owner, thread.id);
   const notes = "Prefer compact tables with a source column.";
-  const remember = async (actor: AuthSession, turn: typeof prepared, patch: Partial<ResolvedPermissions> = {}) => {
-    const permissions = { installationId: installation.installationId, userId: actor.user.id,
-      projectId: project.id, rules: [{ ruleId: "tools.execute", action: "execute", effect: "allow" }],
-      ...patch } as ResolvedPermissions;
+  const remember = async (actor: AuthSession, turn: typeof prepared, patch: Partial<ResolvedPermissions> = {}, value = notes) => {
+    const permissions: ResolvedPermissions = { ...toolPermissions(installation.installationId, actor.user.id, project.id), ...patch };
     const runtimeTurnId = randomUUID();
+    const message = value === "" ? "Actualiza los criterios y déjalos vacíos para futuras consultas." : "exacte, guarda aixo per futures consultes";
     return handleLocalDocumentDynamicToolCall({ threadId: thread.id, turnId: runtimeTurnId,
-      callId: randomUUID(), namespace: "aibrain_documents", tool: "remember_preferences", arguments: { notes } }, {
+      callId: randomUUID(), namespace: "aibrain_documents", tool: "remember_preferences", arguments: { notes: value } }, {
       installation, installationId: installation.installationId, userId: actor.user.id,
       projectId: project.id, projectWorkspace: root, receiptRoot: path.join(root, "receipts"),
       runtimeThreadId: thread.id, runtimeTurnId, sourceThreadId: thread.id, sourceTurnId: runtimeTurnId, permissions,
       rememberProjectPreferences: value => saveProjectPreferences({ config: installation,
         userId: actor.user.id, ownerUserId: turn.context.projectSourceOwnerId,
-        projectId: project.id, threadId: thread.id, message: "exacte, guarda aixo per futures consultes",
+        projectId: project.id, threadId: thread.id, message,
         notes: value, expectedNotes: turn.context.projectMemory, permissions }),
     });
   };
   // The real prepared-turn path must carry server-derived ownership into the
   // same document tool callback that the foreground chat invokes.
-  expect((await remember(owner, prepared)).response.success).toBe(true);
+  const saved = await remember(owner, prepared);
+  expect(saved.response.success).toBe(true);
+  const savedReceipt = saved.response.contentItems.find(item => item.type === "inputText");
+  if (savedReceipt?.type !== "inputText") throw Error("Missing preference save receipt");
+  const expectedScope = kind === "standalone" ? "this user's private standalone conversations" : "all conversations in this project";
+  expect(JSON.parse(savedReceipt.text).availableIn).toBe(expectedScope);
   const next = await createThread(owner, project.id, "Independent readback");
   expect((await prepareThreadTurn(owner, next.id)).context.projectMemory).toBe(notes);
   await expect(prepareThreadTurn(editor, thread.id)).rejects.toThrow("Fil no trobat");
 
-  await updateProject(owner, project.id, { sharing: { visibility: "shared", members: [{
-    id: randomUUID(), email: editor.user.email, name: editor.user.name, role: "editor", status: "active",
-    addedAt: "2026-01-01T00:00:00.000Z",
-  }] } });
-  const shared = await prepareThreadTurn(editor, thread.id);
-  expect(shared.context.projectSourceOwnerId).toBe(ownerId);
-  const foreign = await remember(editor, shared);
-  expect(foreign.response.success).toBe(false);
-  expect(JSON.stringify(foreign.response)).toContain("PROJECT_PREFERENCES_NOT_SAVED");
+  if (kind === "project") {
+    await updateProject(owner, project.id, { sharing: { visibility: "shared", members: [{
+      id: randomUUID(), email: editor.user.email, name: editor.user.name, role: "editor", status: "active",
+      addedAt: "2026-01-01T00:00:00.000Z",
+    }] } });
+    const shared = await prepareThreadTurn(editor, thread.id);
+    expect(shared.context.projectSourceOwnerId).toBe(ownerId);
+    const foreign = await remember(editor, shared);
+    expect(foreign.response.success).toBe(false);
+    expect(JSON.stringify(foreign.response)).toContain("PROJECT_PREFERENCES_NOT_SAVED");
+  } else {
+    expect((await remember(editor, prepared)).response.success).toBe(false);
+    await expect(updateProject(owner, project.id, { memory: { enabled: true, notes: "General PATCH stays blocked", updatedAt: null } }))
+      .rejects.toThrow("no es pot modificar");
+  }
   const freshOwner = await prepareThreadTurn(owner, thread.id);
   expect((await remember(owner, freshOwner, { projectId: randomUUID() })).response.success).toBe(false);
-  expect((await remember(owner, freshOwner, { rules: [
-    { ruleId: "tools.execute", action: "execute", effect: "allow" },
-    { ruleId: "tools.execute", action: "execute", effect: "deny" },
-  ] as ResolvedPermissions["rules"] })).response.success).toBe(false);
+  const allow = toolPermissions(installation.installationId, ownerId, project.id).rules[0]!;
+  expect((await remember(owner, freshOwner, { rules: [allow, { ...allow, effect: "deny" }] })).response.success).toBe(false);
   expect((await prepareThreadTurn(owner, next.id)).context.projectMemory).toBe(notes);
+
+  // Another conversation wins an edit; an old context must not clear it.
+  const latest = "Latest criteria from another conversation.";
+  expect((await remember(owner, freshOwner, {}, latest)).response.success).toBe(true);
+  const staleClear = await remember(owner, freshOwner, {}, "");
+  expect(staleClear.response.success).toBe(false);
+  expect((await prepareThreadTurn(owner, next.id)).context.projectMemory).toBe(latest);
+  const freshLatest = await prepareThreadTurn(owner, thread.id);
+  const cleared = await remember(owner, freshLatest, {}, "");
+  expect(cleared.response.success).toBe(true);
+  const receipt = cleared.response.contentItems.find(item => item.type === "inputText");
+  if (receipt?.type !== "inputText") throw Error("Missing preference save receipt");
+  expect(JSON.parse(receipt.text)).toMatchObject({ notes: "", availableIn: expectedScope });
+  const independent = await createThread(owner, project.id, "Read restored empty criteria");
+  expect((await prepareThreadTurn(owner, independent.id)).context.projectMemory).toBe("");
+
 });

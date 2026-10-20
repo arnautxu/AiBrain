@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { InstallationConfig } from "@/config/installation-schema";
 import type { ResolvedPermissions } from "@/permissions";
 import { FileWorkbenchStore } from "./filesystem-store";
+import { isStandaloneProject } from "./types";
 
 export function requestsProjectPreferences(message: string) {
   // Only the authenticated user's own message is supplied here. Tool results,
@@ -34,12 +35,12 @@ export async function saveProjectPreferences(input: {
       !rules.some(rule => rule.effect === "allow") || rules.some(rule => rule.effect === "deny") || input.ownerUserId !== input.userId) {
     throw new Error("No se pueden autorizar los criterios de este proyecto.");
   }
-  if (typeof input.notes !== "string" || !input.notes.trim() || input.notes.length > 16000 || /\p{C}/u.test(input.notes.replace(/[\t\r\n]/g, ""))) throw new Error("Los criterios no son válidos.");
+  if (typeof input.notes !== "string" || input.notes.length > 16000 || /\p{C}/u.test(input.notes.replace(/[\t\r\n]/g, ""))) throw new Error("Los criterios no son válidos.");
   const store = FileWorkbenchStore.fromInstallation(input.config);
   const thread = await store.getThread(input.userId, input.threadId);
   if (thread.projectId !== input.projectId) throw new Error("La conversación no pertenece a este proyecto.");
   const project = await store.updateProjectPreferences(input.userId, input.projectId, input.expectedNotes, input.notes.trim());
   return { status: "saved", projectId: project.id, updatedAt: project.memory.updatedAt,
     sha256: createHash("sha256").update(project.memory.notes).digest("hex"), notes: project.memory.notes,
-    availableIn: "all conversations in this project" };
+    availableIn: isStandaloneProject(project) ? "this user's private standalone conversations" : "all conversations in this project" };
 }
