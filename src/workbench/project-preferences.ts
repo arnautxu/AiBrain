@@ -4,10 +4,21 @@ import type { ResolvedPermissions } from "@/permissions";
 import { FileWorkbenchStore } from "./filesystem-store";
 
 export function requestsProjectPreferences(message: string) {
-  const text = message.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
-  return /\b(?:proyecto|projecte|project|futuros?\s+chats?|futuras?\s+conversaciones|futures?\s+converses)\b/u.test(text)
-    && /\b(?:actuali[zc]\w*|actualitz\w*|guard\w*|des[ai]\w*|record\w*|recuerd\w*|save|remember|ten\w*\s+en\s+cuenta|tingu\w*\s+en\s+compte)\b/u.test(text)
-    && !/\b(?:no|not|don't|do not)\s+(?:\w+\s+){0,2}(?:actuali[zc]\w*|actualitz\w*|guard\w*|des[ai]\w*|record\w*|recuerd\w*|save|remember|ten\w*|tingu\w*)\b/u.test(text);
+  // Only the authenticated user's own message is supplied here. Tool results,
+  // attachment contents and assistant-generated notes are never intent evidence.
+  const text = message
+    .replace(/```[\s\S]*?```|<untrusted[^>]*>[\s\S]*?<\/untrusted[^>]*>/giu, "")
+    .replace(/^\s*>.*$/gmu, "")
+    .normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+  // Remembering future behaviour does not require saying the word "project".
+  // The server, rather than the model, fixes the destination to this project.
+  const describesCriteria = /\b(?:criteri\w*|preferenc\w*|reglas?|rules?|instruccion\w*|instructions?|pautas?|normas?)\b/u.test(text);
+  const onlyArtifactSave = !describesCriteria
+    && /\b(?:borrador\w*|draft\w*|correos?|emails?|pdfs?|archiv\w*|files?|document\w*|informes?|reports?|excels?|factur\w*)\b/u.test(text)
+    && !/\b(?:(?:record\w*|recuerd\w*)\s+que|remember\s+that|ten\w*\s+en\s+cuenta\s+que|tingu\w*\s+en\s+compte\s+que)\b/u.test(text);
+  return !onlyArtifactSave && /\b(?:actuali[zc]\w*|actualitz\w*|guard\w*|des[ai]\w*|record\w*|recuerd\w*|save|remember|keep|ten\w*\s+en\s+cuenta|tingu\w*\s+en\s+compte)\b/u.test(text)
+    && !/\b(?:no|not|don't|do not)\s+(?:\w+\s+){0,3}(?:actuali[zc]\w*|actualitz\w*|guard\w*|des[ai]\w*|record\w*|recuerd\w*|save|remember|keep|ten\w*|tingu\w*)\b/u.test(text)
+    && !/\b(?:otro\s+proyecto|altre\s+projecte|another\s+project|other\s+project)\b/u.test(text);
 }
 
 /** Current user request and current owned project only; never model-selected IDs. */
