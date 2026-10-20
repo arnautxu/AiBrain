@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,7 +9,10 @@ import { UserProvisioner } from "@/users/provisioner";
 import { FileWorkbenchStore } from "@/workbench/filesystem-store";
 import { FileSharedAccessIndex } from "@/workbench/shared-access-index";
 import { loadSharedWorkbench, resolveProjectAccess, resolveThreadAccess } from "@/workbench/shared-access";
-import { createProject, createThread, getThreadRuntimeContext, updateProject, updateThread } from "@/workbench/store";
+import { createProject, createThread, getThreadRuntimeContext, prepareThreadTurn, updateProject, updateThread } from "@/workbench/store";
+import type { ResolvedPermissions } from "@/permissions";
+import { saveProjectPreferences } from "@/workbench/project-preferences";
+import { handleLocalDocumentDynamicToolCall } from "@/runtime/documents/dynamic-tools";
 
 vi.mock("server-only", () => ({}));
 
@@ -174,4 +178,60 @@ describe("shared project visibility", () => {
     expect(audit.some((entry) => entry.payload.action === "resolve" && entry.payload.outcome === "allowed" && entry.payload.actorUserId === memberId && entry.payload.grantFingerprint)).toBe(true);
     metadataReadSpy.mockRestore(); readSpy.mockRestore();
   }, 15_000);
+});
+
+it("persists preferences through a prepared owner turn while retaining foreign-owner and policy denials", async () => {
+  const installation = await loadInstallationConfig();
+  const provisioner = new UserProvisioner(installation);
+  const session = (id: string, email: string): AuthSession => ({
+    provider: "local", user: { id, name: "Synthetic user", email },
+    tenant: { id: installation.installationId, name: installation.companyName },
+    expiresAt: "2099-01-01T00:00:00.000Z",
+  });
+  const owner = session(ownerId, "owner@example.com"), editor = session(editorId, "editor@example.com");
+  await provisioner.provision({ userId: ownerId, email: owner.user.email, displayName: owner.user.name });
+  await provisioner.provision({ userId: editorId, email: editor.user.email, displayName: editor.user.name });
+  const project = await createProject(owner, "Synthetic preferences");
+  const thread = await createThread(owner, project.id, "Preference request");
+  const prepared = await prepareThreadTurn(owner, thread.id);
+  const notes = "Prefer compact tables with a source column.";
+  const remember = async (actor: AuthSession, turn: typeof prepared, patch: Partial<ResolvedPermissions> = {}) => {
+    const permissions = { installationId: installation.installationId, userId: actor.user.id,
+      projectId: project.id, rules: [{ ruleId: "tools.execute", action: "execute", effect: "allow" }],
+      ...patch } as ResolvedPermissions;
+    const runtimeTurnId = randomUUID();
+    return handleLocalDocumentDynamicToolCall({ threadId: thread.id, turnId: runtimeTurnId,
+      callId: randomUUID(), namespace: "aibrain_documents", tool: "remember_preferences", arguments: { notes } }, {
+      installation, installationId: installation.installationId, userId: actor.user.id,
+      projectId: project.id, projectWorkspace: root, receiptRoot: path.join(root, "receipts"),
+      runtimeThreadId: thread.id, runtimeTurnId, sourceThreadId: thread.id, sourceTurnId: runtimeTurnId, permissions,
+      rememberProjectPreferences: value => saveProjectPreferences({ config: installation,
+        userId: actor.user.id, ownerUserId: turn.context.projectSourceOwnerId,
+        projectId: project.id, threadId: thread.id, message: "exacte, guarda aixo per futures consultes",
+        notes: value, expectedNotes: turn.context.projectMemory, permissions }),
+    });
+  };
+  // The real prepared-turn path must carry server-derived ownership into the
+  // same document tool callback that the foreground chat invokes.
+  expect((await remember(owner, prepared)).response.success).toBe(true);
+  const next = await createThread(owner, project.id, "Independent readback");
+  expect((await prepareThreadTurn(owner, next.id)).context.projectMemory).toBe(notes);
+  await expect(prepareThreadTurn(editor, thread.id)).rejects.toThrow("Fil no trobat");
+
+  await updateProject(owner, project.id, { sharing: { visibility: "shared", members: [{
+    id: randomUUID(), email: editor.user.email, name: editor.user.name, role: "editor", status: "active",
+    addedAt: "2026-01-01T00:00:00.000Z",
+  }] } });
+  const shared = await prepareThreadTurn(editor, thread.id);
+  expect(shared.context.projectSourceOwnerId).toBe(ownerId);
+  const foreign = await remember(editor, shared);
+  expect(foreign.response.success).toBe(false);
+  expect(JSON.stringify(foreign.response)).toContain("PROJECT_PREFERENCES_NOT_SAVED");
+  const freshOwner = await prepareThreadTurn(owner, thread.id);
+  expect((await remember(owner, freshOwner, { projectId: randomUUID() })).response.success).toBe(false);
+  expect((await remember(owner, freshOwner, { rules: [
+    { ruleId: "tools.execute", action: "execute", effect: "allow" },
+    { ruleId: "tools.execute", action: "execute", effect: "deny" },
+  ] as ResolvedPermissions["rules"] })).response.success).toBe(false);
+  expect((await prepareThreadTurn(owner, next.id)).context.projectMemory).toBe(notes);
 });

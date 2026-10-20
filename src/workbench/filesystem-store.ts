@@ -1196,6 +1196,7 @@ export class FileWorkbenchStore {
     return {
       context: {
         ...this.runtimeContext(state, thread.projectId),
+        projectSourceOwnerId: state.userId,
         runtimeThreadToken: thread.runtimeThreadToken,
         branchHistory: branchHistory(thread),
       },
