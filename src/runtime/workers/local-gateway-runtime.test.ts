@@ -966,10 +966,23 @@ describe("private per-user worker gateway", () => {
       '    write({ method: "item/commandExecution/requestApproval", id: "approval-1", params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", startedAtMs: 1, environmentId: null, command: "pwd" } });',
       '    return;',
       '  }',
-      '  process.exit(42);',
+      // Regress a child exit beyond vi.waitFor's default 1s deadline.
+      '  setTimeout(() => process.exit(42), 1_250);',
       '});',
     ].join("\n"), { mode: 0o600 });
-    const firstWorker = gateway();
+    let firstChildExited!: Promise<unknown[]>;
+    const firstWorker = new PrivateWorkerGateway({
+      context,
+      processFactory: () => {
+        const child = spawn(process.execPath, [fakeServer], {
+          cwd: context.workspace,
+          env: { NODE_ENV: "test", ...context.environment },
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        firstChildExited = once(child, "exit");
+        return child;
+      },
+    });
     await stage("first worker start", firstWorker.start());
     const firstClient = transport(firstWorker);
     try {
@@ -988,7 +1001,10 @@ describe("private per-user worker gateway", () => {
         () => null,
         (error: unknown) => error,
       );
-      await vi.waitFor(async () => expect((await firstWorker.health()).state).toBe("failed"));
+      // Exit and the gateway's synchronous exit listener precede this assertion;
+      // a slow child must not be mistaken for a failed recovery after 1s polling.
+      await stage("first child exits", firstChildExited);
+      expect((await firstWorker.health()).state).toBe("failed");
       await firstClient.close();
       expect(await stage("uncertain send settles after close", uncertain)).toBeInstanceOf(Error);
 

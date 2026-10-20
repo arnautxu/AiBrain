@@ -191,6 +191,8 @@ function toolPermissions(installationId: string, userId: string, projectId: stri
   };
 }
 
+// Both variants provision users and exercise durable writes, turn preparation,
+// ownership denials, stale CAS and exact empty restoration, like the 15s case above.
 it.each(["project", "standalone"])("persists preferences through a prepared own %s turn without weakening ownership or CAS", async kind => {
   const installation = await loadInstallationConfig();
   const provisioner = new UserProvisioner(installation);
@@ -272,4 +274,4 @@ it.each(["project", "standalone"])("persists preferences through a prepared own 
   const independent = await createThread(owner, project.id, "Read restored empty criteria");
   expect((await prepareThreadTurn(owner, independent.id)).context.projectMemory).toBe("");
 
-});
+}, 15_000);
