@@ -64,18 +64,32 @@ async function bindingForUser(config: Readonly<InstallationConfig>, principal: C
   return new FileConnectorBindingStore(config.installationId, config.paths.dataRoot).resolve(principal, OUTLOOK_CONNECTOR_ID, { allowShared: false });
 }
 
-export async function outlookAccessForIdentity(config: Readonly<InstallationConfig>, userId: string, fetcher: Fetcher = fetch) {
+export async function outlookAccessForIdentity(config: Readonly<InstallationConfig>, userId: string, fetcher: Fetcher = fetch, rejectedAccessToken?: string) {
   const oauth = oauthConfiguration(config);
   const principal: ConnectorPrincipal = { installationId: config.installationId, userId, roleId: null };
   const binding = await bindingForUser(config, principal);
   if (binding.userId !== userId || binding.status !== "active") throw new OutlookConnectorError("OUTLOOK_REAUTH_REQUIRED", "Outlook requires authentication.", 401);
   const tokens = new FileOutlookTokenStore(config, oauth.encryptionKey);
   let current = (await tokens.read(userId, binding.credentialRef)).token;
-  if (Date.parse(current.expiresAt) <= Date.now() + 60_000) {
+  if (Date.parse(current.expiresAt) <= Date.now() + 60_000 || current.accessToken === rejectedAccessToken) {
     current = await refreshOutlookToken(fetcher, { tenantId: oauth.tenantId, clientId: oauth.clientId, clientSecret: oauth.clientSecret, token: current });
     await tokens.put(userId, current, binding.credentialRef);
   }
   return { accessToken: current.accessToken, tenantId: oauth.tenantId, binding };
+}
+
+/** Retry only authenticated reads once after a provider rejects the access token.
+ * Resolving again preserves personal binding/revocation checks and reuses a token
+ * already renewed by another request instead of refreshing the rejected token.
+ */
+export async function withOutlookReadAccess<T>(config: Readonly<InstallationConfig>, userId: string, read: (accessToken: string) => Promise<T>, fetcher: Fetcher = fetch): Promise<T> {
+  const access = await outlookAccessForIdentity(config, userId, fetcher);
+  try { return await read(access.accessToken); }
+  catch (error) {
+    if (code(error) !== "OUTLOOK_REAUTH_REQUIRED" || !error || typeof error !== "object" || !("status" in error) || error.status !== 401) throw error;
+    const renewed = await outlookAccessForIdentity(config, userId, fetcher, access.accessToken);
+    return read(renewed.accessToken);
+  }
 }
 
 export async function startOutlookOAuth(session: AuthSession) {
@@ -103,8 +117,9 @@ export async function completeOutlookOAuth(session: AuthSession, input: { state:
 
 async function connectedReadback(config: Readonly<InstallationConfig>, principal: ConnectorPrincipal, fetcher: Fetcher): Promise<{ binding: CredentialBinding; profile: OutlookProfile }> {
   const binding = await bindingForUser(config, principal);
-  const { accessToken, tenantId } = await outlookAccessForIdentity(config, principal.userId, fetcher);
-  return { binding, profile: await readOutlookProfile(fetcher, accessToken, tenantId) };
+  const tenantId = oauthConfiguration(config).tenantId;
+  const profile = await withOutlookReadAccess(config, principal.userId, (token) => readOutlookProfile(fetcher, token, tenantId), fetcher);
+  return { binding, profile };
 }
 
 export async function outlookCapabilityForSession(session: AuthSession, fetcher: Fetcher = fetch): Promise<OutlookConnectionSnapshot> {

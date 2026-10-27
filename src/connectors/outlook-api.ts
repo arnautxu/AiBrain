@@ -18,7 +18,7 @@ function authority(tenantId: string) { return `https://login.microsoftonline.com
 async function json(response: Response) {
   const value: unknown = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new OutlookApiError(response.status === 401 ? "OUTLOOK_REAUTH_REQUIRED" : "OUTLOOK_PROVIDER_ERROR", "Microsoft Graph request failed.", response.status);
+    throw new OutlookApiError(response.status === 401 || record(value) && ["invalid_grant", "interaction_required", "consent_required"].includes(String(value.error)) ? "OUTLOOK_REAUTH_REQUIRED" : "OUTLOOK_PROVIDER_ERROR", "Microsoft Graph request failed.", response.status);
   }
   return value;
 }

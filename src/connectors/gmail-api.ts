@@ -7,7 +7,7 @@ export class GmailApiError extends Error {
 
 type Fetcher = typeof fetch;
 function oauthBody(value: Record<string, string>) { return new URLSearchParams(value).toString(); }
-async function json(response: Response) { const value: unknown = await response.json().catch(() => null); if (!response.ok) throw new GmailApiError(response.status === 401 ? "GMAIL_REAUTH_REQUIRED" : "GMAIL_PROVIDER_ERROR", "Gmail provider request failed.", response.status); return value; }
+async function json(response: Response) { const value: unknown = await response.json().catch(() => null); if (!response.ok) throw new GmailApiError(response.status === 401 || record(value) && ["invalid_grant", "interaction_required", "consent_required"].includes(String(value.error)) ? "GMAIL_REAUTH_REQUIRED" : "GMAIL_PROVIDER_ERROR", "Gmail provider request failed.", response.status); return value; }
 function record(value: unknown): value is Record<string, unknown> { return Boolean(value && typeof value === "object" && !Array.isArray(value)); }
 function scopes(value: unknown, fallback: readonly string[]) { const result = typeof value === "string" ? value.split(/\s+/u).filter(Boolean) : [...fallback]; if (!GMAIL_MINIMUM_SCOPES.every((scope) => result.includes(scope)) || result.some((scope) => !GMAIL_MINIMUM_SCOPES.includes(scope))) throw new GmailApiError("GMAIL_SCOPE_MISMATCH", "Google granted scopes outside the configured minimum.", 403); return [...new Set(result)].sort(); }
 function tokenSet(value: unknown, refreshToken: string | null, fallbackScopes: readonly string[], now: number): GmailTokenSet {

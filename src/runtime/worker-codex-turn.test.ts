@@ -37,7 +37,7 @@ const mocked = vi.hoisted(() => ({
 vi.mock("node:timers/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:timers/promises")>();
   return { ...actual, setTimeout: async (...args: Parameters<typeof actual.setTimeout>) => {
-    if (mocked.capacityWaits && (args[0] === 5_000 || args[0] === 15_000)) {
+    if (mocked.capacityWaits && args[0] === 10_000) {
       mocked.capacityWaits.push(args[0]);
       mocked.capacityAbort?.();
       if (args[2]?.signal?.aborted) throw new Error("Aborted wait");
@@ -367,7 +367,14 @@ describe("worker Codex turn", () => {
         expect(events.some(e => e.type === "error")).toBe(false);
         expect(events).toContainEqual({ type: "runtimeTurn", turnId: "capacity-turn-2", rejectedTurnId: "capacity-turn-1" });
       }
-      if (outcome === "exhaust") expect(mocked.capacityWaits).toEqual([5_000, 15_000]);
+      if (outcome === "exhaust" || outcome === "fallback-exhaust") expect(mocked.capacityWaits).toEqual([10_000, 10_000]);
+      if (succeeds || outcome.endsWith("exhaust") || outcome === "cancel") {
+        const notices = events.filter(e => e.type === "activity" && (e.item as { id?: string; status?: string }).id === "runtime-capacity-retry" &&
+          (e.item as { status?: string }).status === "waiting");
+        expect(notices).toHaveLength(outcome.endsWith("exhaust") ? 2 : 1);
+        expect(mocked.capacityWaits).toEqual(outcome.endsWith("exhaust") ? [10_000, 10_000] : [10_000]);
+        for (const notice of notices) expect(notice).toMatchObject({ item: { detail: expect.stringContaining("10 segundos") } });
+      }
       if (["cancel", "queue-cancel"].includes(outcome)) expect(events).toContainEqual({ type: "stopped" });
       if (["exhaust", "partial", "wrong-code", "read-partial"].includes(outcome)) {
         expect(events.filter(e => e.type === "error")).toHaveLength(1);

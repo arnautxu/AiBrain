@@ -2,7 +2,7 @@ import type { RuntimeModelOption, RuntimeReasoningEffort } from "@/lib/runtime-s
 
 /** Only a confirmed, empty provider admission failure can authorize another
  * model submission. Transport failures and partial work never qualify. */
-export const MODEL_CAPACITY_RETRY_DELAYS_MS = [5_000, 15_000] as const;
+export const MODEL_CAPACITY_RETRY_DELAYS_MS = [10_000, 10_000] as const;
 export const MODEL_CAPACITY_MESSAGE = "El servicio de IA está temporalmente saturado. La conversación y los adjuntos se conservan. Vuelve a intentarlo en unos minutos.";
 
 export type CapacityModel = { model: string; effort: RuntimeReasoningEffort | null };

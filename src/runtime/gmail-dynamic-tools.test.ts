@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   read: vi.fn(),
 }));
 
-vi.mock("@/connectors/gmail-server-service", () => ({ gmailAccessForIdentity: mocks.access }));
+vi.mock("@/connectors/gmail-server-service", () => ({ withGmailReadAccess: mocks.access }));
 vi.mock("@/connectors/gmail-api", () => ({ searchGmail: mocks.search, readGmailMessage: mocks.read }));
 
 import { handleGmailDynamicToolCall } from "@/runtime/gmail-dynamic-tools";
@@ -33,7 +33,7 @@ const context = {
 describe("Gmail dynamic tool authorization", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.access.mockResolvedValue({ accessToken: "access-token-value", binding: {} });
+    mocks.access.mockImplementation(async (_config, _user, read) => read("access-token-value"));
     mocks.search.mockResolvedValue({ messages: [], resultSizeEstimate: 0 });
   });
 
@@ -46,9 +46,17 @@ describe("Gmail dynamic tool authorization", () => {
     expect(mocks.access).not.toHaveBeenCalled();
   });
 
+  it("returns the exact personal reconnect route when silent renewal cannot recover", async () => {
+    mocks.access.mockRejectedValueOnce(Object.assign(new Error("expired"), { code: "GMAIL_REAUTH_REQUIRED" }));
+    const response = await handleGmailDynamicToolCall(params, context);
+    expect(response).toMatchObject({ success: false });
+    expect(JSON.stringify(response)).toContain("/api/connectors/gmail/oauth/start");
+    expect(mocks.search).not.toHaveBeenCalled();
+  });
+
   it("resolves only the authenticated employee token after identity checks", async () => {
     await expect(handleGmailDynamicToolCall(params, context)).resolves.toMatchObject({ success: true });
-    expect(mocks.access).toHaveBeenCalledWith(config, context.userId, undefined);
+    expect(mocks.access).toHaveBeenCalledWith(config, context.userId, expect.any(Function), undefined);
     expect(mocks.search).toHaveBeenCalledWith(fetch, "access-token-value", "from:person@example.com", 5);
   });
 });
