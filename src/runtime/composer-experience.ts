@@ -8,8 +8,8 @@ export type ResolvedComposerExperience = {
 };
 
 const SERVER_COMPOSER_EXPERIENCES: Record<ComposerExperience, ResolvedComposerExperience> = {
-  smart: { model: "gpt-6.1-sol", effort: "low" },
-  expert: { model: "gpt-6.1-sol", effort: "high" },
+  smart: { model: "gpt-6.1-terra", effort: "medium" },
+  expert: { model: "gpt-6.1-sol", effort: "medium" },
 };
 
 export function resolveServerComposerExperience(

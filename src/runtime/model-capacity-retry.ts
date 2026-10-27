@@ -7,6 +7,7 @@ export const MODEL_CAPACITY_MESSAGE = "El servicio de IA está temporalmente sat
 
 export type CapacityModel = { model: string; effort: RuntimeReasoningEffort | null };
 const ALTERNATIVES: Record<string, readonly string[]> = {
+  "gpt-6.1-terra": ["gpt-6.1-sol"],
   "gpt-6-astra": ["gpt-5.6-sol", "gpt-5.6-terra"],
   "gpt-5.6-sol": ["gpt-6-astra", "gpt-5.6-terra"],
   "gpt-5.6-terra": ["gpt-5.6-sol", "gpt-6-astra"],

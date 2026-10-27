@@ -6,6 +6,19 @@ const rejection = { id: "turn-1", status: "failed", error: { codexErrorInfo: "se
   items: [{ type: "userMessage", clientId: "user-1" }] };
 
 describe("empty model admission rejection", () => {
+  it("retains medium reasoning when Terra falls back to an available Sol", () => {
+    const sol: RuntimeModelOption = {
+      id: "gpt-6.1-sol", label: "Sol", description: "", isDefault: false,
+      inputModalities: ["text", "image"], supportedReasoningEfforts: ["medium"],
+      defaultReasoningEffort: "medium", supportsPersonality: false,
+    };
+    const input = { originalModel: "gpt-6.1-terra", currentModel: "gpt-6.1-terra",
+      effort: "medium" as const, models: [sol], requiresImages: true, imageGeneration: false };
+    expect(capacityFallback(input)).toEqual({ model: "gpt-6.1-sol", effort: "medium" });
+    expect(capacityFallback({ ...input, models: [] })).toBeNull();
+    expect(capacityFallback({ ...input, currentModel: "gpt-6.1-sol" })).toBeNull();
+    expect(capacityFallback({ ...input, imageGeneration: true })).toBeNull();
+  });
   it("selects only available compatible alternatives, retaining effort or their supported default", () => {
     const models: RuntimeModelOption[] = ["gpt-5.6-sol", "gpt-6-astra", "gpt-5.6-terra"].map(id => ({
       id, label: id, description: "", isDefault: false, inputModalities: ["text", "image"],

@@ -28,10 +28,10 @@ describe("server composer experiences", () => {
   it("continues legacy fast requests as Inteligente", () => {
     const experience = normalizeComposerExperience("fast");
     expect(experience).toBe("smart");
-    expect(resolveServerComposerExperience(experience!)).toEqual({ model: "gpt-6.1-sol", effort: "low" });
+    expect(resolveServerComposerExperience(experience!)).toEqual({ model: "gpt-6.1-terra", effort: "medium" });
   });
   it("maps product choices to private provider settings on the server", () => {
-    expect(resolveServerComposerExperience("smart")).toEqual({ model: "gpt-6.1-sol", effort: "low" });
-    expect(resolveServerComposerExperience("expert")).toEqual({ model: "gpt-6.1-sol", effort: "high" });
+    expect(resolveServerComposerExperience("smart")).toEqual({ model: "gpt-6.1-terra", effort: "medium" });
+    expect(resolveServerComposerExperience("expert")).toEqual({ model: "gpt-6.1-sol", effort: "medium" });
   });
 });
